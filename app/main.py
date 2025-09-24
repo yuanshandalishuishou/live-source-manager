@@ -187,6 +187,7 @@ class Config:
             'min_speed': '0',
             'resolution_filter_mode': 'range'  # range: 范围筛选, min_only: 仅最低要求, max_only: 仅最高限制
         }
+        # 已移除AllInOne配置部分
         self.config['UserAgents'] = {
             'ua_position': 'url',  # UA位置配置: extinf (作为EXTINF属性) 或 url (作为URL参数)
             'ua_enabled': 'True',  # 是否启用UA功能
@@ -293,6 +294,8 @@ class Config:
             'min_speed': self.config.getint('Filter', 'min_speed', fallback=0),
             'resolution_filter_mode': self.config.get('Filter', 'resolution_filter_mode', fallback='range')
         }
+    
+    # 已移除get_allinone_config方法
     
     def get_user_agents(self) -> Dict[str, str]:
         """获取UA配置"""
@@ -964,6 +967,8 @@ class ChannelDB:
             for conn in self.connection_pool:
                 conn.close()
             self.connection_pool.clear()
+
+# 已移除AllInOneRunner类
 
 class SourceManager:
     """源管理类 - 增强版"""
@@ -2135,6 +2140,10 @@ class M3UGenerator:
         max_sources_per_channel = self.output_params['max_sources_per_channel']
         grouped = {}
         
+        # 如果关闭筛选，则每个频道最大源数量增加到1000，并且不进行分辨率过滤
+        if not self.output_params['enable_filter']:
+            max_sources_per_channel = 4
+        
         # 第一步：按频道名称分组
         channels = {}
         for source in sources:
@@ -2424,6 +2433,8 @@ def main():
         
         # 初始化频道规则
         channel_rules = ChannelRules()
+        
+        # 已移除运行肥羊allinone程序的部分
         
         # 初始化数据库
         db_config = config.get_database_config()
