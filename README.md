@@ -87,7 +87,7 @@ Live Source Manager 是一个智能的直播源管理系统，它能够：
 
 1. **克隆项目**
 ```bash
-git clone <repository-url>
+git clone https://github.com/yuanshandalishuishou/live-source-manager
 cd live-source-manager
 ```
 
