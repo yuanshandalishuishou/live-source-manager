@@ -1,0 +1,101 @@
+# /config/channel_rules.yml
+
+# 分类规则：根据关键词将频道分到不同类别
+# priority: 优先级，数字越小，优先级越高。程序会使用第一个匹配到的高优先级分类。
+categories:
+  - name: "央视频道"
+    priority: 1
+    keywords: ["CCTV", "央视", "中央"]
+  - name: "卫视频道"
+    priority: 5
+    keywords: ["卫视"]
+  - name: "影视频道"
+    priority: 10
+    keywords: ["电影", "影院", "剧场", "影视", "经典", "动作", "科幻", "爱情", "喜剧"]
+  - name: "体育频道"
+    priority: 10
+    keywords: ["体育", "赛事", "奥运", "足球", "篮球", "网球", "F1", "sports"]
+  - name: "少儿频道"
+    priority: 10
+    keywords: ["少儿", "卡通", "动画", "动漫", "kids"]
+  - name: "新闻频道"
+    priority: 10
+    keywords: ["新闻", "资讯", "news"]
+  - name: "纪实频道"
+    priority: 10
+    keywords: ["纪实", "纪录", "探索", "发现", "国家地理", "discovery"]
+  - name: "音乐频道"
+    priority: 10
+    keywords: ["音乐", "music"]
+  - name: "地方频道"
+    priority: 15
+    keywords: ["本地", "公共", "都市", "生活", "经济", "综合"]
+  - name: "港澳台"
+    priority: 20
+    keywords: ["TVB", "翡翠", "凤凰", "中天", "东森", "TVBS", "台视", "华视", "民视", "澳亚"]
+  - name: "国际频道"
+    priority: 25
+    keywords: ["HBO", "CNN", "BBC", "FOX", "ABC", "NBC", "CBS", "KBS", "MBC", "SBS", "NHK"]
+
+# 频道类型规则：用于更细致地识别频道属性
+channel_types:
+  卫视: ["卫视"]
+  电影: ["电影", "影院", "剧场"]
+  体育: ["体育", "赛事"]
+  新闻: ["新闻", "资讯"]
+  综艺: ["综艺", "娱乐"]
+  纪实: ["纪实", "纪录"]
+
+# 地理位置规则：用于识别频道所属的国家、省份等
+geography:
+  continents:
+    - name: "Asia"
+      countries:
+        - name: "中国大陆"
+          code: "CN"
+          keywords: [] # 中国大陆频道太多，主要靠省份识别
+          provinces:
+            - name: "北京"
+              keywords: ["北京", "BTV", "京"]
+            - name: "上海"
+              keywords: ["上海", "东方", "SMG", "沪"]
+            - name: "广东"
+              keywords: ["广东", "大湾区", "珠江", "南方", "TVS", "粤"]
+            - name: "湖南"
+              keywords: ["湖南", "金鹰", "芒果", "湘"]
+            - name: "浙江"
+              keywords: ["浙江", "ZTV", "浙"]
+            - name: "江苏"
+              keywords: ["江苏", "JSBC", "苏"]
+            - name: "四川"
+              keywords: ["四川", "SCTV", "川", "蜀"]
+            - name: "重庆"
+              keywords: ["重庆", "CQTV", "渝"]
+            # ... 可在此处添加更多省份
+          municipalities: [] # 直辖市已包含在省份中以便于处理
+          regions:
+            - name: "香港"
+              code: "HK"
+              keywords: ["香港", "TVB", "翡翠", "凤凰", "ViuTV", "HK"]
+            - name: "澳门"
+              code: "MO"
+              keywords: ["澳门", "澳亚", "澳广视", "MO"]
+            - name: "台湾"
+              code: "TW"
+              keywords: ["台湾", "臺灣", "中天", "东森", "TVBS", "台视", "华视", "民视", "TW"]
+        - name: "日本"
+          code: "JP"
+          keywords: ["日本", "NHK", "富士", "TBS", "NTV", "JP"]
+        - name: "韩国"
+          code: "KR"
+          keywords: ["韩国", "KBS", "MBC", "SBS", "KR"]
+    - name: "North America"
+      countries:
+        - name: "美国"
+          code: "US"
+          keywords: ["美国", "CNN", "HBO", "FOX", "ABC", "NBC", "CBS", "USA", "US"]
+    - name: "Europe"
+      countries:
+        - name: "英国"
+          code: "UK"
+          keywords: ["英国", "BBC", "ITV", "SKY", "UK"]
