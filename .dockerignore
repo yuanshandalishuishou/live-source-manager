@@ -1,0 +1,72 @@
+# 忽略虚拟环境目录
+venv/
+env/
+.venv/
+ENV/
+
+# 忽略Python缓存文件
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# 忽略IDE和编辑器文件
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 忽略日志文件
+*.log
+logs/
+
+# 忽略Git相关文件
+.git/
+.gitignore
+.gitattributes
+
+# 忽略Docker相关文件（除了Dockerfile和.dockerignore）
+docker-compose.yml
+docker-compose.*.yml
+.docker/
+
+# 忽略测试和覆盖率文件
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+
+# 忽略安装包和分发文件
+dist/
+build/
+*.egg-info/
+*.egg
+
+# 忽略环境变量文件
+.env
+.env.local
+.env.production
+
+# 忽略缓存目录
+.cache/
+
+# 忽略操作系统生成的文件
+.DS_Store
+Thumbs.db
+
+# 忽略文档文件
+README.rst
+docs/
+
+# 忽略大型数据文件（如果有）
+data/
+*.zip
+*.tar
+*.gz
+
+# 忽略不必要的配置文件
+#config.ini  # 注意：如果你的Dockerfile中需要复制config.ini，不要忽略它
+# 但如果你在Dockerfile中已经明确复制了config.ini，可以在这里忽略它
+# 因为Dockerfile中已经明确复制了config.ini到特定位置

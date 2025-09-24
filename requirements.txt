@@ -1,0 +1,9 @@
+aiohttp>=3.8.0
+aiohttp_socks>=0.8.0
+aiofiles>=0.8.0
+tqdm>=4.60.0
+python-dateutil>=2.8.0
+PyYAML>=6.0
+requests>=2.25.0
+flask>=2.0.0
+flask-httpauth>=4.0.0
