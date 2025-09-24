@@ -325,19 +325,6 @@ docker logs livesourcemanager
 tail -f logs/app.log
 ```
 
-## 🤝 贡献指南
-
-我们欢迎社区贡献！请遵循以下步骤：
-
-1. Fork 本仓库
-2. 创建功能分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 开启Pull Request
-
-## 📄 许可证
-
-本项目采用 MIT 许可证 - 查看 [LICENSE](LICENSE) 文件了解详情。
 
 ## 🙏 致谢
 
@@ -349,4 +336,4 @@ tail -f logs/app.log
 
 ---
 
-**注意**：请确保遵守相关法律法规，仅将本工具用于合法用途。使用者应对其行为负全部责任。
+**注意**：请确保遵守相关法律法规，仅将本工具用于学习及合法用途。使用者应对其行为负全部责任。
