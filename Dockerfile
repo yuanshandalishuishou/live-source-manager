@@ -1,7 +1,5 @@
 # 使用Python 3.9作为基础镜像
-#FROM docker.1ms.run/python:3.9-bookworm
 FROM docker.1ms.run/python:3.9-slim-bookworm
-
 
 # 设置时区和语言环境
 ENV TZ=Asia/Shanghai \
@@ -9,7 +7,12 @@ ENV TZ=Asia/Shanghai \
     LC_ALL=C.UTF-8 \
     PYTHONIOENCODING=utf-8 \
     PYTHONUNBUFFERED=1 \
+	PYTHONPATH=/app \
     DEBIAN_FRONTEND=noninteractive
+# 设置元数据
+LABEL maintainer="Live Source Manager <admin@example.com>"
+LABEL description="Live Source Manager with Nginx"
+LABEL version="2.0"
 
 
 # 配置 APT 使用清华大学 Debian 源并安装基础包
@@ -21,28 +24,34 @@ RUN echo "deb https://mirrors.tuna.tsinghua.edu.cn/debian/ bookworm main contrib
     apt-get update && \
     apt-get install -y --no-install-recommends \
         tzdata \
-        nginx \
         cron \
+		nginx \
         ffmpeg \
         curl \
+		wget \
+		nano \
         dos2unix \
         sudo \
         procps \
         libssl-dev \
         ca-certificates \
         libpq5 \
+		net-tools \
+		iputils-ping \
         libpq-dev \
         iproute2 && \
     ln -snf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
     echo "Asia/Shanghai" > /etc/timezone && \
     dpkg-reconfigure -f noninteractive tzdata && \
     update-ca-certificates && \
-    groupadd -r nginx && useradd -r -g nginx nginx && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# 创建必要的目录
-RUN rm -rf /data &&mkdir -p /config /log /www/output /app /data
+
+
+# 创建必要的目录结构
+RUN mkdir -p /app /config /log /www/output /data /var/log/nginx /tmp/livesourcemanager \
+    && chown -R www-data:www-data /www/output /var/log/nginx
 
 # 设置工作目录
 WORKDIR /
@@ -55,19 +64,37 @@ RUN pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple && 
 # 复制 requirements.txt 并安装 Python 依赖
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt && \
-    pip install --no-cache-dir aiohttp_socks && \
     rm -rf ~/.cache/pip  # 清理 pip 缓存
-	
 
-# 复制应用文件
-COPY . .
+# 复制应用文件 - 修复文件结构
+COPY . . 
 
+# 修复：确保Nginx配置正确复制到系统位置
+RUN cp ./nginx.conf /etc/nginx/nginx.conf
 
+# 设置文件权限
+RUN chmod +x /start.sh /dockrun.sh && \
+    chmod 644 /app/*.py /config/* /nginx.conf && \
+    find /app -name "*.py" -exec chmod 644 {} \; && \
+    chown -R www-data:www-data /www/output /var/log/nginx && \
+    # 创建日志文件并设置权限
+    touch /log/cron.log /log/app.log && \
+    chmod 666 /log/cron.log /log/app.log
 
-# 设置 cron 日志文件并设置权限
-RUN touch /log/cron.log /log/app.log && chmod 666 /log/cron.log /log/app.log
+# 创建符号链接（确保Nginx可以访问日志）
+RUN ln -sf /dev/stdout /var/log/nginx/access.log && \
+    ln -sf /dev/stderr /var/log/nginx/error.log
 
-# 暴露端口
+# 创建健康检查文件
+RUN echo "healthy" > /www/output/health && \
+    chmod 644 /www/output/health && \
+    chown www-data:www-data /www/output/health
+
+# 健康检查 - 修复端口和检查逻辑
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:12345/health || exit 1
+
+# 暴露Nginx服务端口
 EXPOSE 12345
 
 # 启动应用
