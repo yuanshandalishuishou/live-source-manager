@@ -40,7 +40,7 @@
 ### 一键部署
 ```bash
 # 克隆项目
-git clone https://github.com/your-username/live-source-manager.git
+git clone https://github.com/yuanshandalishuishou/live-source-manager.git
 cd live-source-manager
 
 # 运行部署脚本（自动构建镜像并启动服务）
@@ -62,7 +62,7 @@ docker run -d \
   -v $(pwd)/output:/www/output \
   livesourcemanager-nginx
 ```
-
+### 特别提醒！特别提醒！在部署项目之前，请一定修改config.ini中视频来源，屏蔽一些在线视频源或者本地视频源文件，切记不要选太多，否则系统运行以小时计。
 ### 环境变量配置
 ```bash
 # 代理设置
