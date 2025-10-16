@@ -165,6 +165,7 @@ max_resolution = 4k       # 最高分辨率
 **智能电视/手机APP:**
 - 支持M3U格式的任何IPTV播放器
 - 直接输入播放列表URL即可
+- 强烈建议使用https://github.com/yaoxieyoulei/mytv-android下的app
 
 ---
 
@@ -276,13 +277,3 @@ docker exec livesourcemanager ls -la /www/output/
 - [aiohttp](https://github.com/aio-libs/aiohttp) - 高性能异步HTTP客户端
 - [Nginx](https://nginx.org/) - 高性能Web服务器
 
----
-
-
-
-**星星✨这个项目如果你觉得它有用！**
-
----
-
-*最后更新: 2024年1月 | 版本: v2.3*  
-*快乐观影！🎬*
