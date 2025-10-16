@@ -23,9 +23,9 @@ docker rm livesourcemanager 2>/dev/null || true
 
 # 清理所有未使用的资源
 echo "清理Docker资源..."
-docker system prune -a -f --volumes
-docker builder prune -a -f
-docker image prune -a -f
+#docker system prune -a -f --volumes
+#docker builder prune -a -f
+#docker image prune -a -f
 
 # 清理 Docker 缓存
 sudo rm -rf /var/lib/docker/tmp/* 2>/dev/null || true
