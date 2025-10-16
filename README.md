@@ -165,7 +165,7 @@ max_resolution = 4k       # 最高分辨率
 **智能电视/手机APP:**
 - 支持M3U格式的任何IPTV播放器
 - 直接输入播放列表URL即可
-- 强烈建议使用https://github.com/yaoxieyoulei/mytv-android 这个软件仓库最新的安卓app（需要一定设置，选择经典界面，导入在线地址，如http://81.68.248.64:12345/live.m3u）
+- 强烈建议使用https://github.com/yaoxieyoulei/mytv-android 这个软件仓库最新的安卓app
 
 ---
 
