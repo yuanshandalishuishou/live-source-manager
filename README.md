@@ -167,6 +167,8 @@ max_resolution = 4k       # 最高分辨率
 - 支持M3U格式的任何IPTV播放器
 - 直接输入播放列表URL即可
 - 强烈建议使用https://github.com/yaoxieyoulei/mytv-android 这个软件仓库最新的安卓app
+- 我这个节目源分类是根据关键字分类的，因此可能频道在归类汇总时可能会出错（解决这个问题可以在yaml配置文件中直接输入完整频道名字，但是数据量太大，因此目前以关键字搜索方式）。
+- 如果不想用本项目并配合相关app。想直接在安卓系统上看电视，推荐https://github.com/horsemail/yourtv 这个项目自带节目源，经测试效果不错。
 
 ---
 
