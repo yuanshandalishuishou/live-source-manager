@@ -2,8 +2,9 @@ name: Build and Push Docker Image
 
 on:
   push:
-    branches: [ "main" ] # 当代码推送到 main 分支时触发
-  # 你也可以手动触发工作流
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
   workflow_dispatch:
 
 jobs:
@@ -22,11 +23,21 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push Docker image
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          tags: yongjielidalishuishou/livesourcemanager:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Push to Docker Hub
+        if: github.event_name == 'push'
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
           tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/my-cool-app:latest
-            ${{ secrets.DOCKERHUB_USERNAME }}/my-cool-app:${{ github.sha }} # 同时打上git commit哈希作为标签
+            yongjielidalishuishou/livesourcemanager:latest
+            yongjielidalishuishou/livesourcemanager:${{ github.sha }}
