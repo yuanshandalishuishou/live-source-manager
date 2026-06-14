@@ -1,0 +1,137 @@
+# =============================================================
+# Dockerfile — 多阶段构建 · 宿主无关 · 网络自适应
+# =============================================================
+# 只要宿主有 Docker，一条命令即可构建出 460MB 镜像：
+#   docker build -t lsm:latest .
+# 无需预装任何软件 / 无需任何缓存 / 与宿主机 OS 版本无关
+#
+# 网络适配：
+#   默认使用 Docker Hub（全球），国内用户可加 build arg：
+#   docker build --build-arg BASE_IMAGE=docker.1ms.run/python:3.9-slim-bookworm -t lsm:latest .
+# =============================================================
+
+ARG BASE_IMAGE=python:3.9-slim-bookworm
+
+# ===== Stage 1: 构建环境 =====
+FROM ${BASE_IMAGE} AS builder
+
+# 安装构建工具（Debian bookworm 容器内，与宿主机 OS 无关）
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        curl \
+        ca-certificates \
+        xz-utils \
+        && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# 配置 pip 使用清华镜像（国内加速，不影响构建结果）
+RUN pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple && \
+    pip config set global.trusted-host pypi.tuna.tsinghua.edu.cn
+
+# 复制并安装 Python 依赖
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir --target=/opt/pylib -r /tmp/requirements.txt && \
+    rm -rf /tmp/requirements.txt ~/.cache/pip
+
+# 下载静态编译的 ffprobe/ffmpeg
+# 多源容错：主源 johnvansickle → 备用 GitHub → 最后降级打印警告
+# 静态二进制约 76MB，避免 apt 安装 ffmpeg 带来的 500MB+ 编解码依赖链
+RUN curl -fSL --retry 3 --retry-delay 5 \
+        "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz" \
+        -o /tmp/ffmpeg-static.tar.xz 2>/dev/null || \
+    curl -fSL --retry 3 --retry-delay 5 \
+        "https://github.com/eugeneware/ffmpeg-static/releases/download/v5.1.1/ffmpeg-linux-x64" \
+        -o /tmp/ffprobe-linux-x64 2>/dev/null; \
+    if [ -f /tmp/ffmpeg-static.tar.xz ] && [ -s /tmp/ffmpeg-static.tar.xz ]; then \
+        mkdir -p /opt/ffmpeg && \
+        tar -xJf /tmp/ffmpeg-static.tar.xz -C /opt/ffmpeg --strip-components=1 && \
+        rm /tmp/ffmpeg-static.tar.xz && \
+        echo "✅ ffprobe 静态包下载成功 (johnvansickle)"; \
+    elif [ -f /tmp/ffprobe-linux-x64 ] && [ -s /tmp/ffprobe-linux-x64 ]; then \
+        mkdir -p /opt/ffmpeg && \
+        mv /tmp/ffprobe-linux-x64 /opt/ffmpeg/ffprobe && \
+        chmod +x /opt/ffmpeg/ffprobe && \
+        echo "✅ ffprobe 静态包下载成功 (GitHub备用)"; \
+    else \
+        echo "⚠️ ffprobe 静态包下载失败，运行阶段 start.sh 会尝试 apt-get install ffmpeg"; \
+    fi
+
+
+# ===== Stage 2: 运行环境 =====
+FROM ${BASE_IMAGE}
+
+ENV TZ=Asia/Shanghai \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    PYTHONIOENCODING=utf-8 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app \
+    DEBIAN_FRONTEND=noninteractive \
+    NGINX_PORT=12345 \
+    TEST_TIMEOUT=30 \
+    CONCURRENT_THREADS=10 \
+    OUTPUT_FILENAME=live.m3u \
+    UPDATE_CRON="0 6,12,18,22 * * *"
+
+LABEL maintainer="Live Source Manager <admin@example.com>" \
+      description="Live Source Manager with Nginx" \
+      version="3.0"
+
+# 运行时 apt：只装绝对必需的包，使用官方 Debian 源确保全球可拉
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        tzdata \
+        cron \
+        nginx \
+        curl \
+        ca-certificates \
+        procps \
+        dos2unix \
+        && \
+    ln -snf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
+    echo "Asia/Shanghai" > /etc/timezone && \
+    dpkg-reconfigure -f noninteractive tzdata && \
+    update-ca-certificates && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* && \
+    mkdir -p /app /config /log /www/output /data /var/log/nginx /tmp/livesourcemanager && \
+    chown -R www-data:www-data /www/output /var/log/nginx
+
+WORKDIR /
+
+# 从 builder 阶段复制静态 ffprobe/ffmpeg（若下载失败则不拷贝）
+COPY --from=builder /opt/ffmpeg/ffprobe /usr/local/bin/ffprobe
+COPY --from=builder /opt/ffmpeg/ffmpeg /usr/local/bin/ffmpeg
+RUN if [ -f /usr/local/bin/ffprobe ]; then chmod +x /usr/local/bin/ffprobe; fi && \
+    if [ -f /usr/local/bin/ffmpeg ]; then chmod +x /usr/local/bin/ffmpeg; fi
+
+# 从 builder 阶段复制 Python 依赖
+COPY --from=builder /opt/pylib /usr/local/lib/python3.9/site-packages/
+
+# 复制应用文件
+COPY app/ /app/
+COPY config/config.ini /config/config.ini
+COPY config/channel_rules.yml /config/channel_rules.yml
+COPY start.sh /start.sh
+COPY nginx.conf /etc/nginx/nginx.conf
+COPY healthcheck.sh /healthcheck.sh
+
+# 权限 & 初始化（单 RUN 层）
+RUN chmod +x /start.sh /healthcheck.sh && \
+    find /app -name "*.py" -exec chmod 644 {} \; && \
+    chmod 644 /app/*.py /config/* && \
+    chown -R www-data:www-data /www/output /var/log/nginx && \
+    touch /log/cron.log /log/app.log && \
+    chmod 666 /log/cron.log /log/app.log && \
+    echo "healthy" > /www/output/health && \
+    chmod 644 /www/output/health && \
+    chown www-data:www-data /www/output/health && \
+    ln -sf /dev/stdout /var/log/nginx/access.log && \
+    ln -sf /dev/stderr /var/log/nginx/error.log
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD /healthcheck.sh
+
+EXPOSE ${NGINX_PORT}
+
+CMD ["/start.sh"]

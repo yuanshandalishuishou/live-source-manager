@@ -1,0 +1,12 @@
+# 核心HTTP/异步框架
+aiohttp>=3.8,<3.10
+aiohttp_socks>=0.8.0
+aiofiles>=0.8.0
+
+# 配置解析
+PyYAML>=6.0
+
+# 工具库
+tqdm>=4.60.0
+python-dateutil>=2.8.0
+requests>=2.25.0
