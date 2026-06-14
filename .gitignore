@@ -92,3 +92,4 @@ cython_debug/
 
 # 第三方评审文件（保留一份参考即可）
 review_*.md
+web/data/

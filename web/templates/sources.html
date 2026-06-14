@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}源管理 - 直播源管理器{% endblock %}
+{% block page_title %}源管理{% endblock %}
+
+{% block content %}
+<div class="sources-page">
+    <!-- 工具栏 -->
+    <div class="toolbar">
+        <div class="toolbar-left">
+            <select id="source-type-filter" class="form-select form-select-sm"
+                    onchange="filterSources()">
+                <option value="all">全部类型</option>
+                <option value="online">在线源</option>
+                <option value="local">本地源</option>
+            </select>
+            <input type="text" id="source-search" class="form-input form-input-sm"
+                   placeholder="搜索源名称..." oninput="filterSources()">
+        </div>
+        <div class="toolbar-right">
+            {% if user and user.role == 'admin' %}
+            <a href="/sources/add" class="btn btn-primary btn-sm">+ 添加源</a>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- 源列表 -->
+    <div class="card">
+        <div class="card-body" id="sources-list" hx-get="/api/sources?page=1&size=50" hx-trigger="load" hx-swap="innerHTML">
+            <div class="loading">加载中...</div>
+        </div>
+    </div>
+
+    <!-- 分页 -->
+    <div class="pagination" id="sources-pagination"></div>
+</div>
+{% endblock %}
+
+{% block head %}
+<script>
+function filterSources() {
+    const type = document.getElementById('source-type-filter').value;
+    const search = document.getElementById('source-search').value;
+    const url = `/api/sources?type=${type}&page=1&size=50&search=${encodeURIComponent(search)}`;
+    htmx.ajax('GET', url, {target: '#sources-list', swap: 'innerHTML'});
+}
+</script>
+{% endblock %}

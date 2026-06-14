@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}日志查看 - 直播源管理器{% endblock %}
+{% block page_title %}日志查看{% endblock %}
+
+{% block content %}
+<div class="logs-page">
+    <div class="toolbar">
+        <div class="toolbar-left">
+            <select id="log-level" class="form-select form-select-sm" onchange="refreshLogs()">
+                <option value="ALL">ALL</option>
+                <option value="DEBUG">DEBUG</option>
+                <option value="INFO" selected>INFO</option>
+                <option value="WARNING">WARNING</option>
+                <option value="ERROR">ERROR</option>
+            </select>
+            <input type="number" id="log-tail" class="form-input form-input-sm" value="100"
+                   style="width:80px" onchange="refreshLogs()" placeholder="行数" min="10" max="1000">
+            <span style="font-size:13px;color:var(--text-light)" id="log-count"></span>
+        </div>
+        <div class="toolbar-right">
+            <label style="font-size:13px;display:flex;align-items:center;gap:4px;cursor:pointer">
+                <input type="checkbox" id="auto-refresh" checked onchange="toggleAutoRefresh()">
+                自动刷新
+            </label>
+            <button class="btn btn-outline btn-sm" onclick="refreshLogs()">🔄 刷新</button>
+            {% if user and user.role == 'admin' %}
+            <a href="/api/logs/download" class="btn btn-outline btn-sm" onclick="downloadLogs();return false">⬇ 下载</a>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-body" id="logs-content"
+             hx-get="/api/logs?level=INFO&tail=100"
+             hx-trigger="load once" hx-swap="innerHTML">
+            <div class="loading">加载中...</div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block head %}
+<script>
+let autoRefreshTimer = null;
+
+function refreshLogs() {
+    const level = document.getElementById('log-level').value;
+    const tail = document.getElementById('log-tail').value;
+    const levelParam = level === 'ALL' ? 'INFO' : level;
+    const url = '/api/logs?level=' + levelParam + '&tail=' + tail;
+    htmx.ajax('GET', url, {target: '#logs-content', swap: 'innerHTML'});
+}
+
+function toggleAutoRefresh() {
+    if (autoRefreshTimer) {
+        clearInterval(autoRefreshTimer);
+        autoRefreshTimer = null;
+    }
+    if (document.getElementById('auto-refresh').checked) {
+        autoRefreshTimer = setInterval(refreshLogs, 5000);
+    }
+}
+
+function downloadLogs() {
+    fetch('/api/logs/download')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.path) {
+                // Use fetch to download and convert to blob
+                fetch('/api/logs?level=ALL&tail=99999')
+                    .then(function(r) { return r.json(); })
+                    .then(function(logData) {
+                        var blob = new Blob([(logData.logs || []).join('\n')], {type: 'text/plain;charset=utf-8'});
+                        var a = document.createElement('a');
+                        a.href = URL.createObjectURL(blob);
+                        a.download = data.filename || 'app.log';
+                        a.click();
+                        URL.revokeObjectURL(a.href);
+                    });
+            }
+        })
+        .catch(function(e) { alert('下载失败: ' + e); });
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    toggleAutoRefresh();
+});
+</script>
+{% endblock %}

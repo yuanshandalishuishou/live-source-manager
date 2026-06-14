@@ -1,0 +1,226 @@
+{% extends "base.html" %}
+{% block title %}用户管理 - 直播源管理器{% endblock %}
+{% block page_title %}用户管理{% endblock %}
+
+{% block content %}
+<div class="users-page">
+    <div class="toolbar">
+        <div class="toolbar-left">
+            <button class="btn btn-primary btn-sm" onclick="showAddUserForm()">+ 添加用户</button>
+        </div>
+    </div>
+
+    <!-- 用户列表 -->
+    <div class="card">
+        <div class="card-header"><h3>用户列表</h3></div>
+        <div class="card-body" id="users-list"
+             hx-get="/api/users" hx-trigger="load" hx-swap="innerHTML"
+             hx-target="this">
+            <div class="loading">加载中...</div>
+        </div>
+    </div>
+
+    <!-- 添加用户弹窗 -->
+    <div id="add-user-modal" class="modal" style="display:none">
+        <div class="modal-backdrop" onclick="hideAddUserForm()"></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>添加用户</h3>
+                <button class="btn btn-icon" onclick="hideAddUserForm()">×</button>
+            </div>
+            <form id="add-user-form" class="form">
+                <div class="form-group">
+                    <label for="new-username">用户名</label>
+                    <input type="text" id="new-username" class="form-input" required minlength="2">
+                </div>
+                <div class="form-group">
+                    <label for="new-password">密码</label>
+                    <input type="password" id="new-password" class="form-input" required minlength="6">
+                </div>
+                <div class="form-group">
+                    <label for="new-display-name">显示名称</label>
+                    <input type="text" id="new-display-name" class="form-input">
+                </div>
+                <div class="form-group">
+                    <label for="new-role">角色</label>
+                    <select id="new-role" class="form-select">
+                        <option value="viewer">查看者</option>
+                        <option value="admin">管理员</option>
+                    </select>
+                </div>
+                <div id="add-user-result"></div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-outline" onclick="hideAddUserForm()">取消</button>
+                    <button type="submit" class="btn btn-primary">创建用户</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 编辑用户弹窗 -->
+    <div id="edit-user-modal" class="modal" style="display:none">
+        <div class="modal-backdrop" onclick="hideEditUserForm()"></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>编辑用户</h3>
+                <button class="btn btn-icon" onclick="hideEditUserForm()">×</button>
+            </div>
+            <form id="edit-user-form" class="form">
+                <input type="hidden" id="edit-user-id">
+                <div class="form-group">
+                    <label>用户名</label>
+                    <input type="text" id="edit-username" class="form-input" disabled style="background:#f1f5f9">
+                </div>
+                <div class="form-group">
+                    <label for="edit-display-name">显示名称</label>
+                    <input type="text" id="edit-display-name" class="form-input">
+                </div>
+                <div class="form-group">
+                    <label for="edit-role">角色</label>
+                    <select id="edit-role" class="form-select">
+                        <option value="viewer">查看者</option>
+                        <option value="admin">管理员</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="edit-password">新密码（留空不修改）</label>
+                    <input type="password" id="edit-password" class="form-input" minlength="6">
+                </div>
+                <div id="edit-user-result"></div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-outline" onclick="hideEditUserForm()">取消</button>
+                    <button type="submit" class="btn btn-primary">保存</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block head %}
+<script>
+// ── 添加用户 ──────────────────────────────────────
+document.addEventListener('DOMContentLoaded', function() {
+    document.getElementById('add-user-form')?.addEventListener('submit', async function(evt) {
+        evt.preventDefault();
+        const result = document.getElementById('add-user-result');
+        const data = {
+            username: document.getElementById('new-username').value.trim(),
+            password: document.getElementById('new-password').value,
+            display_name: document.getElementById('new-display-name').value.trim(),
+            role: document.getElementById('new-role').value,
+        };
+        try {
+            const resp = await fetch('/api/users', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(data)
+            });
+            const respData = await resp.json();
+            if (resp.ok) {
+                result.innerHTML = '<div class="alert alert-success">用户创建成功</div>';
+                hideAddUserForm();
+                reloadUsers();
+            } else {
+                result.innerHTML = '<div class="alert alert-error">' + (respData.detail || '创建失败') + '</div>';
+            }
+        } catch(e) {
+            result.innerHTML = '<div class="alert alert-error">' + e + '</div>';
+        }
+    });
+
+    // ── 编辑用户 ──────────────────────────────────
+    document.getElementById('edit-user-form')?.addEventListener('submit', async function(evt) {
+        evt.preventDefault();
+        const result = document.getElementById('edit-user-result');
+        const userId = document.getElementById('edit-user-id').value;
+        const data = {};
+        const displayName = document.getElementById('edit-display-name').value.trim();
+        const role = document.getElementById('edit-role').value;
+        const password = document.getElementById('edit-password').value;
+        if (displayName) data.display_name = displayName;
+        data.role = role;
+        if (password) data.password = password;
+        try {
+            const resp = await fetch('/api/users/' + userId, {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(data)
+            });
+            const respData = await resp.json();
+            if (resp.ok) {
+                result.innerHTML = '<div class="alert alert-success">用户已更新</div>';
+                hideEditUserForm();
+                reloadUsers();
+            } else {
+                result.innerHTML = '<div class="alert alert-error">' + (respData.detail || '更新失败') + '</div>';
+            }
+        } catch(e) {
+            result.innerHTML = '<div class="alert alert-error">' + e + '</div>';
+        }
+    });
+});
+
+function showAddUserForm() {
+    document.getElementById('add-user-modal').style.display = 'flex';
+    document.getElementById('new-username').value = '';
+    document.getElementById('new-password').value = '';
+    document.getElementById('new-display-name').value = '';
+    document.getElementById('new-role').value = 'viewer';
+    document.getElementById('add-user-result').innerHTML = '';
+}
+
+function hideAddUserForm() {
+    document.getElementById('add-user-modal').style.display = 'none';
+    document.getElementById('add-user-result').innerHTML = '';
+}
+
+function showEditUserForm(id, username, displayName, role) {
+    document.getElementById('edit-user-modal').style.display = 'flex';
+    document.getElementById('edit-user-id').value = id;
+    document.getElementById('edit-username').value = username;
+    document.getElementById('edit-display-name').value = displayName || '';
+    document.getElementById('edit-role').value = role;
+    document.getElementById('edit-password').value = '';
+    document.getElementById('edit-user-result').innerHTML = '';
+}
+
+function hideEditUserForm() {
+    document.getElementById('edit-user-modal').style.display = 'none';
+    document.getElementById('edit-user-result').innerHTML = '';
+}
+
+function deleteUser(userId, username) {
+    if (!confirm('确定删除用户 "' + username + '" 吗？')) return;
+    fetch('/api/users/' + userId, {method: 'DELETE'})
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.status === 'deleted') {
+                reloadUsers();
+            } else {
+                alert('删除失败');
+            }
+        })
+        .catch(function(e) { alert('删除失败: ' + e); });
+}
+
+function toggleUser(userId, username, currentStatus) {
+    var action = currentStatus ? '禁用' : '启用';
+    if (!confirm('确定' + action + '用户 "' + username + '" 吗？')) return;
+    fetch('/api/users/' + userId + '/toggle', {method: 'PATCH'})
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.status === 'toggled') {
+                reloadUsers();
+            } else {
+                alert('操作失败');
+            }
+        })
+        .catch(function(e) { alert('操作失败: ' + e); });
+}
+
+function reloadUsers() {
+    htmx.ajax('GET', '/api/users', {target: '#users-list', swap: 'innerHTML'});
+}
+</script>
+{% endblock %}

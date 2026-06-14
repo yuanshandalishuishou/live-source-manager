@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+{% block title %}配置中心 - 直播源管理器{% endblock %}
+{% block page_title %}配置中心{% endblock %}
+
+{% block content %}
+<div class="config-page">
+    {% if user and user.role == 'admin' %}
+    <div class="toolbar">
+        <div class="toolbar-right">
+            <button class="btn btn-outline btn-sm" onclick="saveConfig()">💾 保存所有配置</button>
+            <button class="btn btn-outline btn-sm" onclick="reloadConfig()">🔄 重新加载</button>
+        </div>
+    </div>
+    {% endif %}
+
+    <div id="config-loading" class="loading">加载配置中...</div>
+    <div id="config-content" style="display:none">
+        <!-- 由 JS 动态渲染 -->
+    </div>
+    <div id="config-result"></div>
+</div>
+{% endblock %}
+
+{% block head %}
+<script>
+let configData = {};
+let fieldMeta = {};
+
+async function loadConfig() {
+    try {
+        const [cfgResp, metaResp] = await Promise.all([
+            fetch('/api/config'),
+            fetch('/api/config/fields')
+        ]);
+        configData = await cfgResp.json();
+        fieldMeta = await metaResp.json();
+        renderConfig();
+    } catch(e) {
+        document.getElementById('config-loading').textContent = '加载配置失败: ' + e;
+    }
+}
+
+function renderConfig() {
+    const container = document.getElementById('config-content');
+    container.style.display = 'block';
+    document.getElementById('config-loading').style.display = 'none';
+    let html = '';
+
+    for (const [section, fields] of Object.entries(configData)) {
+        if (section === 'DEFAULT') continue;
+        html += '<div class="card config-section">';
+        html += '<div class="card-header"><h3>' + section + '</h3></div>';
+        html += '<div class="card-body">';
+
+        const sectionMeta = fieldMeta[section] || {};
+        for (const [key, value] of Object.entries(fields)) {
+            const meta = sectionMeta[key];
+            const ftype = meta ? meta[0] : 'str';
+            const label = meta ? (meta[2] || key) : key;
+            const helpText = meta ? (meta[3] || '') : '';
+
+            html += '<div class="form-group">';
+            html += '<label for="cfg-' + section + '-' + key + '">' + label + '</label>';
+
+            if (ftype === 'bool') {
+                const checked = value === 'True' || value === 'true' || value === '1';
+                html += '<div class="checkbox-wrapper">';
+                html += '<input type="checkbox" id="cfg-' + section + '-' + key + '" ';
+                html += 'data-section="' + section + '" data-key="' + key + '" ';
+                html += (checked ? 'checked' : '') + ' onchange="updateConfigField(this)">';
+                html += '<label for="cfg-' + section + '-' + key + '">' + (checked ? '已启用' : '已禁用') + '</label>';
+                html += '</div>';
+            } else if (ftype === 'textarea') {
+                const lines = (value || '').split('\\n').join('\\n');
+                html += '<textarea id="cfg-' + section + '-' + key + '" ';
+                html += 'data-section="' + section + '" data-key="' + key + '" ';
+                html += 'class="form-input form-textarea" rows="4" ';
+                html += 'onchange="updateConfigField(this)">' + (value || '') + '</textarea>';
+            } else {
+                const inputType = ftype === 'int' ? 'number' : 'text';
+                html += '<input type="' + inputType + '" id="cfg-' + section + '-' + key + '" ';
+                html += 'data-section="' + section + '" data-key="' + key + '" ';
+                html += 'class="form-input" value="' + (value || '') + '" ';
+                html += 'onchange="updateConfigField(this)">';
+            }
+
+            if (helpText) {
+                html += '<small class="form-help">' + helpText + '</small>';
+            }
+            html += '</div>';
+        }
+
+        html += '</div></div>';
+    }
+
+    container.innerHTML = html;
+}
+
+function updateConfigField(el) {
+    const section = el.dataset.section;
+    const key = el.dataset.key;
+    let value;
+    if (el.type === 'checkbox') {
+        value = el.checked ? 'True' : 'False';
+    } else {
+        value = el.value;
+    }
+    if (!configData[section]) configData[section] = {};
+    configData[section][key] = value;
+}
+
+async function saveConfig() {
+    const result = document.getElementById('config-result');
+    result.innerHTML = '<div class="alert alert-info">保存中...</div>';
+    try {
+        const resp = await fetch('/api/config', {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(configData)
+        });
+        const data = await resp.json();
+        if (resp.ok) {
+            result.innerHTML = '<div class="alert alert-success">' + (data.message || '配置已保存') + '</div>';
+        } else {
+            result.innerHTML = '<div class="alert alert-error">' + (data.detail || '保存失败') + '</div>';
+        }
+    } catch(e) {
+        result.innerHTML = '<div class="alert alert-error">保存失败: ' + e + '</div>';
+    }
+    setTimeout(() => { result.innerHTML = ''; }, 5000);
+}
+
+async function reloadConfig() {
+    const result = document.getElementById('config-result');
+    result.innerHTML = '<div class="alert alert-info">重新加载中...</div>';
+    try {
+        const resp = await fetch('/api/config/reload', {method: 'POST'});
+        if (resp.ok) {
+            result.innerHTML = '<div class="alert alert-success">配置已重新加载</div>';
+            loadConfig();
+        }
+    } catch(e) {
+        result.innerHTML = '<div class="alert alert-error">失败: ' + e + '</div>';
+    }
+    setTimeout(() => { result.innerHTML = ''; }, 3000);
+}
+
+document.addEventListener('DOMContentLoaded', loadConfig);
+</script>
+{% endblock %}

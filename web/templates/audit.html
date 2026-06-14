@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}审计日志 - 直播源管理器{% endblock %}
+{% block page_title %}审计日志{% endblock %}
+
+{% block content %}
+<div class="audit-page">
+    <div class="toolbar">
+        <div class="toolbar-left">
+            <label style="font-size:14px;display:flex;align-items:center;gap:6px">
+                操作类型:
+                <select id="audit-action-filter" class="form-select form-select-sm" onchange="loadAuditLogs(1)">
+                    <option value="">全部</option>
+                </select>
+            </label>
+            <span style="font-size:13px;color:var(--text-light)" id="audit-total"></span>
+        </div>
+        <div class="toolbar-right">
+            <button class="btn btn-outline btn-sm" onclick="loadAuditLogs(currentPage)">🔄 刷新</button>
+        </div>
+    </div>
+
+    <!-- 审计日志列表 -->
+    <div class="card">
+        <div class="card-body" id="audit-list">
+            <div class="loading">加载中...</div>
+        </div>
+    </div>
+
+    <!-- 分页 -->
+    <div class="pagination" id="audit-pagination"></div>
+</div>
+{% endblock %}
+
+{% block head %}
+<script>
+var currentPage = 1;
+var pageSize = 50;
+
+// ── 加载操作类型列表 ──────────────────────────
+function loadActionTypes() {
+    fetch('/api/audit/actions')
+        .then(function(r) { return r.json(); })
+        .then(function(actions) {
+            var sel = document.getElementById('audit-action-filter');
+            (actions || []).forEach(function(a) {
+                var opt = document.createElement('option');
+                opt.value = a;
+                opt.textContent = a;
+                sel.appendChild(opt);
+            });
+        })
+        .catch(function() {});
+}
+
+// ── 加载审计日志 ──────────────────────────────
+function loadAuditLogs(page) {
+    page = page || 1;
+    currentPage = page;
+    var action = document.getElementById('audit-action-filter').value;
+    var url = '/api/audit?page=' + page + '&size=' + pageSize;
+    if (action) url += '&action=' + encodeURIComponent(action);
+
+    fetch(url)
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            renderAuditLogs(data);
+        })
+        .catch(function(e) {
+            document.getElementById('audit-list').innerHTML = '<div class="alert alert-error">加载失败: ' + e + '</div>';
+        });
+}
+
+function renderAuditLogs(data) {
+    var container = document.getElementById('audit-list');
+    var totalEl = document.getElementById('audit-total');
+    var paginationEl = document.getElementById('audit-pagination');
+
+    totalEl.textContent = data.total ? '共 ' + data.total + ' 条' : '';
+
+    if (!data.logs || data.logs.length === 0) {
+        container.innerHTML = '<div class="empty-state" style="text-align:center;padding:40px;color:var(--text-light)">暂无审计日志</div>';
+        paginationEl.innerHTML = '';
+        return;
+    }
+
+    // Action label mapping
+    var actionLabels = {
+        'login': '登录',
+        'logout': '退出',
+        'config_update': '配置更新',
+        'config_reload': '配置重载',
+        'source_add': '添加源',
+        'source_update': '更新源',
+        'source_delete': '删除源',
+        'user_create': '创建用户',
+        'user_update': '更新用户',
+        'user_delete': '删除用户',
+        'user_enable': '启用用户',
+        'user_disable': '禁用用户',
+        'test_trigger': '测试触发'
+    };
+
+    var html = '<table><thead><tr><th>时间</th><th>用户</th><th>操作类型</th><th>操作对象</th><th>详情</th><th>IP</th></tr></thead><tbody>';
+    data.logs.forEach(function(l) {
+        var actionLabel = actionLabels[l.action] || l.action;
+        var detail = l.detail || '';
+        if (detail.length > 80) detail = detail.substring(0, 80) + '…';
+        var time = l.created_at || '-';
+        html += '<tr>';
+        html += '<td style="font-size:12px;white-space:nowrap">' + time + '</td>';
+        html += '<td>' + escapeHtml(l.username) + '</td>';
+        html += '<td><span class="status-badge status-audit-' + l.action + '">' + actionLabel + '</span></td>';
+        html += '<td>' + escapeHtml(l.target || '-') + '</td>';
+        html += '<td style="font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + escapeHtml(detail) + '">' + escapeHtml(detail) + '</td>';
+        html += '<td style="font-size:12px;color:var(--text-light)">' + (l.ip_address || '-') + '</td>';
+        html += '</tr>';
+    });
+    html += '</tbody></table>';
+    container.innerHTML = html;
+
+    // Pagination
+    var totalPages = Math.ceil(data.total / pageSize);
+    if (totalPages > 1) {
+        var phtml = '';
+        if (currentPage > 1) {
+            phtml += '<button onclick="loadAuditLogs(' + (currentPage - 1) + ')">上一页</button>';
+        }
+        for (var i = 1; i <= totalPages && i <= 10; i++) {
+            phtml += '<button class="' + (i === currentPage ? 'active' : '') + '" onclick="loadAuditLogs(' + i + ')">' + i + '</button>';
+        }
+        if (currentPage < totalPages) {
+            phtml += '<button onclick="loadAuditLogs(' + (currentPage + 1) + ')">下一页</button>';
+        }
+        paginationEl.innerHTML = phtml;
+    } else {
+        paginationEl.innerHTML = '';
+    }
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    loadActionTypes();
+    loadAuditLogs(1);
+});
+</script>
+{% endblock %}

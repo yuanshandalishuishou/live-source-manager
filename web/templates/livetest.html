@@ -1,0 +1,252 @@
+{% extends "base.html" %}
+{% block title %}实时测试 - 直播源管理器{% endblock %}
+{% block page_title %}实时测试{% endblock %}
+
+{% block content %}
+<div class="test-page">
+    <!-- 统计数据 -->
+    <div class="card-grid" id="test-stats" style="margin-bottom:16px;">
+        <div class="card">
+            <div class="card-body" style="text-align:center">
+                <div style="font-size:24px;font-weight:700" id="stat-total">0</div>
+                <div style="color:var(--text-light);font-size:13px">总数</div>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-body" style="text-align:center">
+                <div style="font-size:24px;font-weight:700" id="stat-completed">0</div>
+                <div style="color:var(--text-light);font-size:13px">已完成</div>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-body" style="text-align:center;color:var(--success)">
+                <div style="font-size:24px;font-weight:700" id="stat-passed">0</div>
+                <div style="color:var(--text-light);font-size:13px">通过</div>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-body" style="text-align:center;color:var(--error)">
+                <div style="font-size:24px;font-weight:700" id="stat-failed">0</div>
+                <div style="color:var(--text-light);font-size:13px">失败</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 工具栏 -->
+    <div class="toolbar">
+        <div class="toolbar-left">
+            <select id="test-category-filter" class="form-select form-select-sm"
+                    onchange="applyTestFilter()">
+                <option value="all">全部类型</option>
+                <option value="央视">央视</option>
+                <option value="卫视">卫视</option>
+                <option value="其他">其他</option>
+            </select>
+            <span class="test-details" id="test-status-badge" style="font-size:13px">空闲</span>
+        </div>
+        <div class="toolbar-right">
+            {% if user and user.role == 'admin' %}
+            <button class="btn btn-primary btn-sm"
+                    onclick="triggerTest()">
+                ▶ 开始测试
+            </button>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- 进度条 -->
+    <div class="card">
+        <div class="card-header"><h3>测试进度</h3></div>
+        <div class="card-body">
+            <div class="progress-bar">
+                <div class="progress-fill" id="progress-fill" style="width:0%"></div>
+            </div>
+            <div id="test-status-text" class="test-status">暂无测试数据</div>
+            <div id="test-details" class="test-details"></div>
+        </div>
+    </div>
+
+    <!-- 测试结果列表 -->
+    <div class="card">
+        <div class="card-header"><h3>测试结果 <span id="result-count" style="font-weight:400;color:var(--text-light)">(0)</span></h3></div>
+        <div class="card-body" id="test-results">
+            <div class="empty-state" style="text-align:center;padding:40px;color:var(--text-light)">
+                暂无测试数据
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block head %}
+<script>
+let testWS = null;
+let testData = null;
+
+function connectTestWS() {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = protocol + '//' + window.location.host + '/ws/test';
+    testWS = new WebSocket(wsUrl);
+
+    testWS.onopen = function() {
+        console.log('测试 WebSocket 已连接');
+    };
+
+    testWS.onmessage = function(evt) {
+        try {
+            const data = JSON.parse(evt.data);
+            // HTTP push from server - merge into testData
+            if (data.type === 'pong') return;
+            testData = data;
+            renderTestUI();
+        } catch(e) {
+            console.log('WS 消息:', evt.data);
+        }
+    };
+
+    testWS.onclose = function() {
+        console.log('测试 WebSocket 断开');
+        setTimeout(connectTestWS, 3000);
+    };
+
+    testWS.onerror = function(e) {
+        console.error('测试 WS 错误:', e);
+    };
+}
+
+function updateStats(total, completed, passed, failed) {
+    document.getElementById('stat-total').textContent = total || 0;
+    document.getElementById('stat-completed').textContent = completed || 0;
+    document.getElementById('stat-passed').textContent = passed || 0;
+    document.getElementById('stat-failed').textContent = failed || 0;
+}
+
+function renderTestUI() {
+    if (!testData) return;
+
+    const fill = document.getElementById('progress-fill');
+    const statusText = document.getElementById('test-status-text');
+    const statusBadge = document.getElementById('test-status-badge');
+
+    const total = testData.total || 0;
+    const completed = testData.completed || 0;
+    const passed = testData.passed || 0;
+    const failed = testData.failed || 0;
+
+    // Progress
+    const pct = total > 0 ? Math.round(completed / total * 100) : 0;
+    fill.style.width = pct + '%';
+
+    // Status
+    const status = testData.status || 'idle';
+    const statusMap = {
+        'running': '⏳ 测试进行中...',
+        'completed': '✅ 测试已完成',
+        'idle': '等待测试...'
+    };
+    statusText.textContent = statusMap[status] || status;
+    statusBadge.textContent = status;
+
+    // Update stats
+    updateStats(total, completed, passed, failed);
+
+    // Results list
+    renderResults();
+}
+
+function renderResults() {
+    const container = document.getElementById('test-results');
+    const results = (testData && testData.results) || [];
+    const filter = document.getElementById('test-category-filter').value;
+
+    document.getElementById('result-count').textContent = '(' + results.length + ')';
+
+    if (results.length === 0) {
+        container.innerHTML = '<div class="empty-state" style="text-align:center;padding:40px;color:var(--text-light)">暂无测试数据</div>';
+        return;
+    }
+
+    // Filter
+    let filtered = results;
+    if (filter !== 'all') {
+        filtered = results.filter(function(r) {
+            var name = r.name || '';
+            return name.indexOf(filter) !== -1;
+        });
+    }
+
+    // Sort: testing first, then failed, then passed
+    var order = {'testing': 0, 'failed': 1, 'passed': 2, 'waiting': 3};
+    filtered.sort(function(a, b) {
+        return (order[a.status] || 99) - (order[b.status] || 99);
+    });
+
+    let html = '<table><thead><tr><th>频道</th><th>状态</th><th>详情</th></tr></thead><tbody>';
+    filtered.forEach(function(r) {
+        var statusClass = r.status;
+        var statusLabel = r.status === 'passed' ? '通过' :
+                          r.status === 'failed' ? '失败' :
+                          r.status === 'testing' ? '测试中' : '等待';
+        var detail = '';
+        if (r.retry_info) {
+            detail += '<div class="retry-info">重试: ' + r.retry_info + '</div>';
+        }
+        if (r.reason) {
+            detail += '<div class="failure-reason">原因: ' + r.reason + '</div>';
+        }
+        if (r.response_time !== undefined) {
+            detail += '<span class="test-meta">响应: ' + r.response_time + 's</span>';
+        }
+        if (r.resolution) {
+            detail += '<span class="test-meta"> | 分辨率: ' + r.resolution + '</span>';
+        }
+        html += '<tr>';
+        html += '<td><strong>' + escapeHtml(r.name || '未知') + '</strong></td>';
+        html += '<td><span class="status-badge status-' + statusClass + '">' + statusLabel + '</span></td>';
+        html += '<td>' + detail + '</td>';
+        html += '</tr>';
+    });
+    html += '</tbody></table>';
+    container.innerHTML = html;
+}
+
+function applyTestFilter() {
+    renderResults();
+}
+
+function triggerTest() {
+    // Show immediate feedback
+    document.getElementById('test-status-text').textContent = '⏳ 正在触发测试...';
+    document.getElementById('progress-fill').style.width = '0%';
+
+    fetch('/api/test/trigger', {method: 'POST'})
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.status === 'triggered') {
+                document.getElementById('test-status-text').textContent = '✅ 测试已触发，等待采集进程上报...';
+            }
+        })
+        .catch(function(err) {
+            document.getElementById('test-status-text').textContent = '❌ 触发失败: ' + err;
+        });
+
+    // Also load status after a short delay
+    setTimeout(loadTestStatus, 1000);
+}
+
+function loadTestStatus() {
+    fetch('/api/test/status')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            testData = data;
+            renderTestUI();
+        })
+        .catch(function() {});
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    loadTestStatus();
+    connectTestWS();
+});
+</script>
+{% endblock %}

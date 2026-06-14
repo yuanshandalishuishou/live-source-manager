@@ -16,7 +16,10 @@ ARG BASE_IMAGE=python:3.9-slim-bookworm
 FROM ${BASE_IMAGE} AS builder
 
 # 安装构建工具（Debian bookworm 容器内，与宿主机 OS 无关）
-RUN apt-get update && \
+# 优先使用清华镜像源加速国内构建，失败则回退官方源
+RUN sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
+    sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list && \
+    apt-get update && \
     apt-get install -y --no-install-recommends \
         curl \
         ca-certificates \
@@ -34,9 +37,12 @@ RUN pip install --no-cache-dir --target=/opt/pylib -r /tmp/requirements.txt && \
     rm -rf /tmp/requirements.txt ~/.cache/pip
 
 # 下载静态编译的 ffprobe/ffmpeg
-# 多源容错：主源 johnvansickle → 备用 GitHub → 最后降级打印警告
+# 多源容错：清华镜像（国内优先）→ johnvansickle（海外主源）→ GitHub（最后备用）
 # 静态二进制约 76MB，避免 apt 安装 ffmpeg 带来的 500MB+ 编解码依赖链
 RUN curl -fSL --retry 3 --retry-delay 5 \
+        "https://mirrors.tuna.tsinghua.edu.cn/ffmpeg/ffmpeg-release-amd64-static.tar.xz" \
+        -o /tmp/ffmpeg-static.tar.xz 2>/dev/null || \
+    curl -fSL --retry 3 --retry-delay 5 \
         "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz" \
         -o /tmp/ffmpeg-static.tar.xz 2>/dev/null || \
     curl -fSL --retry 3 --retry-delay 5 \
@@ -46,7 +52,7 @@ RUN curl -fSL --retry 3 --retry-delay 5 \
         mkdir -p /opt/ffmpeg && \
         tar -xJf /tmp/ffmpeg-static.tar.xz -C /opt/ffmpeg --strip-components=1 && \
         rm /tmp/ffmpeg-static.tar.xz && \
-        echo "✅ ffprobe 静态包下载成功 (johnvansickle)"; \
+        echo "✅ ffprobe 静态包下载成功"; \
     elif [ -f /tmp/ffprobe-linux-x64 ] && [ -s /tmp/ffprobe-linux-x64 ]; then \
         mkdir -p /opt/ffmpeg && \
         mv /tmp/ffprobe-linux-x64 /opt/ffmpeg/ffprobe && \
@@ -77,8 +83,10 @@ LABEL maintainer="Live Source Manager <admin@example.com>" \
       description="Live Source Manager with Nginx" \
       version="3.0"
 
-# 运行时 apt：只装绝对必需的包，使用官方 Debian 源确保全球可拉
-RUN apt-get update && \
+# 运行时 apt：只装绝对必需的包，优先使用清华镜像源加速国内构建
+RUN sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
+    sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list && \
+    apt-get update && \
     apt-get install -y --no-install-recommends \
         tzdata \
         cron \

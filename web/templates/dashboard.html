@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}仪表盘 - 直播源管理器{% endblock %}
+{% block page_title %}仪表盘{% endblock %}
+
+{% block content %}
+<div class="dashboard">
+    <!-- 统计卡片 -->
+    <div class="card-grid" hx-get="/api/dashboard/stats" hx-trigger="load" hx-swap="innerHTML">
+        <div class="card loading">加载中...</div>
+    </div>
+
+    <!-- 最后测试时间 -->
+    <div class="card" style="margin-top:20px;">
+        <div class="card-header"><h3>最后测试状态</h3></div>
+        <div class="card-body" id="last-test-status" hx-get="/api/dashboard/test-info" hx-trigger="load"
+             hx-swap="innerHTML">
+            <div class="loading">加载中...</div>
+        </div>
+    </div>
+
+    <!-- 系统信息（仅管理员可见） -->
+    {% if user and user.role == 'admin' %}
+    <div class="card" style="margin-top: 20px;">
+        <div class="card-header">
+            <h3>系统状态</h3>
+        </div>
+        <div class="card-body" hx-get="/api/dashboard/system" hx-trigger="load" hx-swap="innerHTML">
+            <div class="loading">加载中...</div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- 快速操作 -->
+    <div class="card" style="margin-top: 20px;">
+        <div class="card-header">
+            <h3>快速操作</h3>
+        </div>
+        <div class="card-body quick-actions">
+            <a href="/sources" class="btn btn-outline">📡 查看源列表</a>
+            <a href="/config" class="btn btn-outline">⚙️ 修改配置</a>
+            <a href="/test" class="btn btn-outline">🧪 测试源</a>
+        </div>
+    </div>
+</div>
+{% endblock %}
