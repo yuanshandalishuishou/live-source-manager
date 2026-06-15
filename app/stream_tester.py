@@ -110,10 +110,7 @@ class StreamTester:
     
     def _get_config_timeout(self, key: str, default: int) -> int:
         """从配置获取细化超时值"""
-        config = self.config.config
-        if config.has_section('Testing'):
-            return config.getint('Testing', key, fallback=default)
-        return default
+        return self.config.getint('Testing', key, default)
     
     def test_all_sources(self, sources: List[Dict]) -> List[Dict]:
         """批量测试所有流媒体源

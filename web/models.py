@@ -12,6 +12,8 @@ from typing import Optional, List, Dict
 
 logger = logging.getLogger('web.models')
 
+# 加密工具模块（延迟导入避免循环引用）
+
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'web', 'data')
 DB_PATH = os.path.join(DATA_DIR, 'web.db')
 
@@ -28,6 +30,13 @@ def get_conn() -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys=ON")
     conn.execute("PRAGMA busy_timeout=30000")
     return conn
+
+
+def _ensure_pragma_configured(conn: sqlite3.Connection):
+    """确保连接配置了必要的 pragma"""
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute("PRAGMA busy_timeout=30000")
 
 
 def _execute(sql: str, params=()):
@@ -89,6 +98,12 @@ def init_db(admin_password: str, viewer_password: str):
         CREATE INDEX IF NOT EXISTS idx_audit_created_at ON audit_logs(created_at);
         CREATE INDEX IF NOT EXISTS idx_audit_username ON audit_logs(username);
 
+        CREATE TABLE IF NOT EXISTS app_config (
+            key         TEXT PRIMARY KEY,
+            value       TEXT NOT NULL,
+            updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
         CREATE TABLE IF NOT EXISTS sessions (
             id TEXT PRIMARY KEY,
             user_id INTEGER NOT NULL,
@@ -117,6 +132,86 @@ def init_db(admin_password: str, viewer_password: str):
         conn.commit()
         logger.info(f"默认用户已创建: admin(管理员) / viewer(查看者)")
 
+
+# ── 应用配置操作 ────────────────────────────────────
+
+def get_app_config(key: str) -> Optional[str]:
+    """读取单个配置值（敏感字段自动解密）"""
+    from web.crypto_utils import is_sensitive_key, decrypt_value
+    conn = get_conn()
+    row = conn.execute("SELECT value FROM app_config WHERE key = ?", (key,)).fetchone()
+    if row:
+        val = row['value']
+        if is_sensitive_key(key):
+            return decrypt_value(val)
+        return val
+    return None
+
+
+def set_app_config(key: str, value: str):
+    """INSERT OR REPLACE 写入单个配置值（敏感字段自动加密）"""
+    from web.crypto_utils import is_sensitive_key, encrypt_value, is_encrypted
+    if is_sensitive_key(key) and not is_encrypted(value):
+        value = encrypt_value(value)
+    _execute(
+        "INSERT OR REPLACE INTO app_config (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
+        (key, value)
+    )
+
+
+def get_all_config() -> Dict[str, Dict[str, str]]:
+    """返回 {section: {key: value}} 格式的全量配置（敏感字段自动解密）"""
+    from web.crypto_utils import is_sensitive_key, decrypt_value
+    conn = get_conn()
+    rows = conn.execute("SELECT key, value FROM app_config ORDER BY key").fetchall()
+    result: Dict[str, Dict[str, str]] = {}
+    for row in rows:
+        key = row['key']
+        value = row['value']
+        if is_sensitive_key(key):
+            value = decrypt_value(value)
+        if '.' in key:
+            section, field = key.split('.', 1)
+        else:
+            section = '__default__'
+            field = key
+        if section not in result:
+            result[section] = {}
+        result[section][field] = value
+    return result
+
+
+def import_from_ini_file(path: str) -> int:
+    """读取标准 configparser ini，逐条写入 app_config"""
+    import configparser
+    cp = configparser.ConfigParser()
+    if not os.path.exists(path):
+        logger.warning(f"INI文件不存在，跳过导入: {path}")
+        return 0
+    cp.read(path, encoding='utf-8')
+    count = 0
+    for section in cp.sections():
+        for key, value in cp.items(section):
+            config_key = f"{section}.{key}"
+            set_app_config(config_key, value)
+            count += 1
+    logger.info(f"从 {path} 导入了 {count} 条配置到 app_config")
+    return count
+
+
+def has_app_config_data() -> bool:
+    """检查 app_config 表是否有数据"""
+    conn = get_conn()
+    row = conn.execute("SELECT COUNT(*) as cnt FROM app_config").fetchone()
+    return row['cnt'] > 0
+
+
+def delete_app_config_by_section(section: str):
+    """删除指定 section 的所有配置项"""
+    _execute("DELETE FROM app_config WHERE key LIKE ?", (f"{section}.%",))
+
+
+# ── 审计日志清理 ────────────────────────────────────
 
 def cleanup_audit_logs(max_days: int = 90):
     """清理旧审计日志（启动时调用一次，不频繁操作）"""

@@ -51,7 +51,7 @@ class SourceManager:
         
         # ---- 纪码增强：GitHub API Token注入 ----
         self.api_token = (
-            config.config.get('GitHub', 'api_token', fallback='')
+            config.get('GitHub', 'api_token', '')
             or os.environ.get('GITHUB_TOKEN', '')
         )
         if self.api_token:

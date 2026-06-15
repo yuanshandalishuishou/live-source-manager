@@ -10,9 +10,6 @@ Web 管理服务 — 合并模块 (方案B)
 # ── 第三方/标准库 import ──────────────────────
 import os
 import configparser
-import shutil
-import fcntl
-import tempfile
 import logging
 import threading
 from typing import Dict, Any, Tuple
@@ -126,14 +123,32 @@ def _read_raw() -> configparser.ConfigParser:
         cp.read(CONFIG_PATH, encoding='utf-8')
     return cp
 def read_config() -> Dict[str, Dict[str, str]]:
-    """读取全量配置，返回 {section: {key: value}}"""
+    """读取全量配置，返回 {section: {key: value}}
+    优先使用 SQLite app_config，无数据时回退到 INI 文件"""
+    # 优先使用 SQLite 数据
+    try:
+        sqlite_config = models.get_all_config()
+        if sqlite_config:
+            return sqlite_config
+    except Exception:
+        pass
+    # 回退到 INI 文件
     cp = _read_raw()
     result = {}
     for section in cp.sections():
         result[section] = dict(cp.items(section))
     return result
 def read_section(section: str) -> Dict[str, str]:
-    """读取指定段配置"""
+    """读取指定段配置
+    优先使用 SQLite app_config，回退到 INI 文件"""
+    # 优先使用 SQLite 数据
+    try:
+        sqlite_config = models.get_all_config()
+        if sqlite_config and section in sqlite_config:
+            return sqlite_config[section]
+    except Exception:
+        pass
+    # 回退到 INI 文件
     cp = _read_raw()
     if section in cp:
         return dict(cp.items(section))
@@ -167,65 +182,36 @@ def validate_and_coerce(section: str, key: str, value: str, field_def: tuple) ->
     return str(value), ''
 def write_config(data: Dict[str, Dict[str, str]]) -> Tuple[bool, str]:
     """
-    写入 config.ini（带文件锁保护 + 原子写入 + 回读验证）
-    锁的是 CONFIG_PATH + '.lock' 文件，保护对真实配置文件的并发访问
+    写入配置 — SQLite 为主，同时同步写入 config.ini 作为可读备份
     """
     config_dir = os.path.dirname(CONFIG_PATH)
     os.makedirs(config_dir, exist_ok=True)
 
-    lock_path = CONFIG_PATH + '.lock'
-
     with _write_lock:
         try:
-            # 1. 获取文件锁（锁定 .lock 文件，保护 CONFIG_PATH 的写入）
-            with open(lock_path, 'w') as lock_f:
-                fcntl.flock(lock_f, fcntl.LOCK_EX)
+            # 1. 写入 SQLite（主存储）
+            for section, fields in data.items():
+                for key, value in fields.items():
+                    schema = SECTION_SCHEMA.get(section, {})
+                    if key in schema:
+                        _, err = validate_and_coerce(section, key, value, schema[key])
+                        if err:
+                            return False, f"[{section}] {key}: {err}"
+                    config_key = f"{section}.{key}"
+                    models.set_app_config(config_key, str(value))
 
-                # 2. 读取当前配置
-                cp = _read_raw()
+            # 2. 同步写入 INI（可读备份）
+            cp = _read_raw()
+            for section, fields in data.items():
+                if not cp.has_section(section):
+                    cp.add_section(section)
+                for key, value in fields.items():
+                    cp.set(section, key, str(value))
 
-                # 3. 合并并校验
-                for section, fields in data.items():
-                    if section not in cp and not cp.has_section(section):
-                        cp.add_section(section)
-                    for key, value in fields.items():
-                        schema = SECTION_SCHEMA.get(section, {})
-                        if key in schema:
-                            _, err = validate_and_coerce(section, key, value, schema[key])
-                            if err:
-                                return False, f"[{section}] {key}: {err}"
-                        cp.set(section, key, str(value))
+            with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
+                cp.write(f)
 
-                # 4. 备份
-                bak_path = CONFIG_PATH + '.bak'
-                if os.path.exists(CONFIG_PATH):
-                    shutil.copy2(CONFIG_PATH, bak_path)
-
-                # 5. 临时文件 + 原子写入
-                fd, tmp_path = tempfile.mkstemp(dir=config_dir, prefix='config_', suffix='.tmp')
-                try:
-                    with os.fdopen(fd, 'w', encoding='utf-8') as tmpf:
-                        cp.write(tmpf)
-                        tmpf.flush()
-                        os.fsync(fd)
-                    os.rename(tmp_path, CONFIG_PATH)
-                except Exception:
-                    if os.path.exists(tmp_path):
-                        os.unlink(tmp_path)
-                    raise
-
-                # 6. 回读验证
-                verify_cp = configparser.ConfigParser()
-                verify_cp.read(CONFIG_PATH, encoding='utf-8')
-                for section in data:
-                    if section not in verify_cp:
-                        if os.path.exists(bak_path):
-                            shutil.copy2(bak_path, CONFIG_PATH)
-                        return False, f"写入验证失败: 缺少段落 [{section}]"
-
-                fcntl.flock(lock_f, fcntl.LOCK_UN)
-
-            return True, f"配置已保存（备份: {bak_path}）"
+            return True, "配置已保存"
 
         except PermissionError as e:
             return False, f"权限不足: {e}"
@@ -329,6 +315,27 @@ async def lifespan(app_instance: FastAPI):
         logger.warning(f"⚠️  默认管理员密码: {admin_pw}（请通过环境变量 WEB_ADMIN_PASSWORD 设置）")
     if not os.environ.get('WEB_VIEWER_PASSWORD'):
         logger.info(f"查看者密码: {viewer_pw}（可通过环境变量 WEB_VIEWER_PASSWORD 设置）")
+
+    # ── 首次运行初始化 ────────────────────────
+    from app.config_manager import Config as _Config
+
+    # 1. 检查 config.ini，不存在则创建默认
+    if not os.path.exists(CONFIG_PATH):
+        _Config.create_default_at(CONFIG_PATH)
+        logger.info(f"已创建默认配置文件: {CONFIG_PATH}")
+
+    # 2. 检查 SQLite app_config 是否有数据，无则从 INI 导入
+    if not models.has_app_config_data():
+        count = models.import_from_ini_file(CONFIG_PATH)
+        logger.info(f"已从 config.ini 导入 {count} 条配置到 SQLite")
+
+    # 3. 检查 channel_rules.yml，不存在则创建默认
+    CHANNEL_RULES_PATH = os.path.join(PROJECT_ROOT, 'config', 'channel_rules.yml')
+    if not os.path.exists(CHANNEL_RULES_PATH):
+        os.makedirs(os.path.dirname(CHANNEL_RULES_PATH), exist_ok=True)
+        with open(CHANNEL_RULES_PATH, 'w', encoding='utf-8') as f:
+            f.write("# 默认频道分类规则\n# 请根据实际需求修改\n")
+        logger.info(f"已创建默认频道规则文件: {CHANNEL_RULES_PATH}")
 
     status_dir = os.path.join(PROJECT_ROOT, 'data', 'status')
     os.makedirs(status_dir, exist_ok=True)
@@ -757,6 +764,8 @@ async def api_trigger_test(current_user: dict = Depends(require_admin)):
 
 @app.websocket('/ws/test')
 async def websocket_test_endpoint(ws: WebSocket):
+    # 先 accept 再检查认证，否则无法收发消息
+    await ws.accept()
     # Cookie 认证（WebSocket 握手阶段检查 session）
     session_id = ws.cookies.get('session')
     if not session_id or not get_session(session_id):

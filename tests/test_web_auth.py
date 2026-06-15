@@ -248,13 +248,15 @@ class TestAuthMe:
     def test_me_invalid_session(self):
         """无效 session 返回 401"""
         client = _client()
-        resp = client.get('/api/auth/me', cookies={'session': 'invalid_session_id_12345'})
+        client.cookies.set('session', 'invalid_session_id_12345')
+        resp = client.get('/api/auth/me')
         assert resp.status_code == 401
 
     def test_me_expired_session(self):
         """过期 session 应返回 401（SQLite 中无此记录）"""
         client = _client()
-        resp = client.get('/api/auth/me', cookies={'session': 'a' * 32})
+        client.cookies.set('session', 'a' * 32)
+        resp = client.get('/api/auth/me')
         assert resp.status_code == 401
 
 

@@ -5,7 +5,7 @@
 
 import sys
 import os
-from app.scripts import test_http_service
+from app.scripts import test_http_service as scripts_test_http_service
 
 
 def test_test_http_module_import():
@@ -16,4 +16,5 @@ def test_test_http_module_import():
 
 def test_test_http_has_expected_functions():
     """验证 test_http 包含预期的函数"""
-    assert callable(test_http_service)
+    from app.scripts import test_http_service as _srv
+    assert callable(_srv)
