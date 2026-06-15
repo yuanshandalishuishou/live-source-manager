@@ -1,8 +1,8 @@
 import pytest
 import sys
 sys.path.insert(0, 'app')
-from error_handler import ErrorStats, catch_exception, format_error_response
-from exceptions import LsmError, ConfigError
+from app.utils import ErrorStats, catch_exception, format_error_response
+from app.utils import LsmError, ConfigError
 
 class TestErrorStats:
     def test_record_and_summary(self):

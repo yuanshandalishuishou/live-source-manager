@@ -3,7 +3,7 @@ import os
 import tempfile
 import sys
 sys.path.insert(0, 'app')
-from file_utils import atomic_write, safe_read_file
+from app.utils import atomic_write, safe_read_file
 
 class TestAtomicWrite:
     def test_basic_write_and_read(self):
@@ -42,6 +42,6 @@ class TestSafeReadFile:
             os.unlink(target)
     
     def test_read_nonexistent_file(self):
-        from exceptions import FileException
+        from app.utils import FileException
         with pytest.raises(FileException):
             safe_read_file("/nonexistent/path/file.txt")

@@ -35,7 +35,7 @@ def _clean_expired():
 
 
 def create_session(user: Dict) -> str:
-    """创建新 session，返回 session_id"""
+    """创建新 session，返回 session_id（同时写入内存和 SQLite）"""
     _clean_expired()
     session_id = uuid.uuid4().hex
     _sessions[session_id] = {
@@ -45,6 +45,19 @@ def create_session(user: Dict) -> str:
         'created_at': time.time(),
         'last_active': time.time(),
     }
+    # 同步写入 SQLite（使用相同的 session_id）
+    try:
+        from web import models
+        import time as _time
+        conn = models.get_conn()
+        now = _time.time()
+        conn.execute(
+            "INSERT OR REPLACE INTO sessions (id, user_id, username, role, created_at, last_active) VALUES (?, ?, ?, ?, ?, ?)",
+            (session_id, user['id'], user['username'], user['role'], now, now)
+        )
+        conn.commit()
+    except Exception:
+        pass  # DB 写入失败不影响内存 session
     return session_id
 
 
@@ -62,8 +75,15 @@ def get_session(session_id: str) -> Optional[Dict]:
 
 
 def destroy_session(session_id: str):
-    """销毁 session"""
+    """销毁 session（内存和 SQLite）"""
     _sessions.pop(session_id, None)
+    _csrf_tokens.pop(session_id, None)
+    # 同步删除 SQLite
+    try:
+        from web import models
+        models.destroy_session_db(session_id)
+    except Exception:
+        pass
 
 
 # ── FastAPI 依赖 ──────────────────────────────────
@@ -106,3 +126,27 @@ def login_required_page(func):
                 return RedirectResponse(url='/login', status_code=303)
         return await func(*args, **kwargs)
     return wrapper
+
+
+# ── CSRF 令牌管理 ────────────────────────────────
+# 维持与 web.webapp.csrf_middleware 的兼容性
+
+_csrf_tokens: Dict[str, str] = {}
+CSRF_EXEMPT_PATHS = {'/api/auth/login', '/api/auth/logout', '/login', '/health'}
+
+
+def _get_csrf_token(session_id: str) -> str:
+    """生成并存储 CSRF token"""
+    import hashlib
+    token = hashlib.sha256(f"{session_id}:{uuid.uuid4().hex}".encode()).hexdigest()
+    _csrf_tokens[session_id] = token
+    return token
+
+
+def verify_csrf_token(session_id: str, token: str) -> bool:
+    """验证 CSRF token"""
+    stored = _csrf_tokens.get(session_id)
+    if not stored:
+        return False
+    return stored == token
+

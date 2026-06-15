@@ -37,8 +37,8 @@ from channel_rules import ChannelRules
 from source_manager import SourceManager
 from stream_tester import StreamTester
 from m3u_generator import M3UGenerator
-from exceptions import LsmError, ConfigError, SourceError, \
-    SourceDownloadError, SourceParseError, StreamTestError, OutputError
+from app.utils import LsmError, ConfigError, SourceError,\
+    SourceParseError, StreamTestError, OutputError
 
 class EnhancedLiveSourceManager:
     """增强版直播源管理器 - 支持分层筛选和智能分类（修复版）

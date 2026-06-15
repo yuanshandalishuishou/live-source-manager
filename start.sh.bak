@@ -402,40 +402,38 @@ start_main_program() {
 monitor_processes() {
     log_info "启动进程监控..."
     
-    local check_interval=30
+    local check_interval=30  # 检查间隔（秒）
     local nginx_restart_count=0
     local max_restarts=3
-    local WEB_PID_FILE="/var/run/web.pid"
     
     while true; do
-        # 检查Nginx
-        if [ -f /var/run/nginx.pid ]; then
-            local npid=$(cat /var/run/nginx.pid 2>/dev/null)
-            if [ -z "$npid" ] || ! kill -0 "$npid" 2>/dev/null; then
-                log_error "Nginx已停止，尝试重启... ($((nginx_restart_count + 1))/$max_restarts)"
-                if [ $nginx_restart_count -lt $max_restarts ]; then
-                    setup_nginx && nginx_restart_count=0 || nginx_restart_count=$((nginx_restart_count + 1))
+        # 检查Nginx是否存活
+        if ! ps -p $(cat /var/run/nginx.pid 2>/dev/null) >/dev/null 2>&1; then
+            log_error "Nginx进程已停止，尝试重启... (重启次数: $((nginx_restart_count + 1))/$max_restarts)"
+            
+            if [ $nginx_restart_count -lt $max_restarts ]; then
+                if setup_nginx; then
+                    log_info "✓ Nginx重启成功"
+                    nginx_restart_count=0
                 else
-                    log_error "Nginx重启次数超限，停止重试"
-                    return 1
+                    nginx_restart_count=$((nginx_restart_count + 1))
+                    log_error "Nginx重启失败"
                 fi
+            else
+                log_error "Nginx重启次数超过限制，停止重启尝试"
+                return 1
             fi
         fi
         
-        # 检查Web管理进程（从PID文件读取）
-        if [ -f "$WEB_PID_FILE" ]; then
-            local web_pid=$(cat "$WEB_PID_FILE" 2>/dev/null)
-            if [ -z "$web_pid" ] || ! kill -0 "$web_pid" 2>/dev/null; then
-                log_warn "Web管理进程已退出，重启中..."
-                cd /app && python -m web.webapi &
-                local new_pid=$!
-                echo "$new_pid" > "$WEB_PID_FILE"
-                log_info "Web管理已重启 (PID: $new_pid)"
-            fi
+        # 检查端口是否监听
+        if ! netstat -tuln 2>/dev/null | grep -q ":${NGINX_PORT} "; then
+            log_warn "Nginx端口${NGINX_PORT}未监听，等待恢复..."
         fi
         
-        # 健康端点
-        curl -sf http://localhost:${NGINX_PORT}/health >/dev/null 2>&1 ||             log_warn "Nginx健康检查失败"
+        # 检查健康端点
+        if ! curl -f http://localhost:${NGINX_PORT}/health >/dev/null 2>&1; then
+            log_warn "Nginx健康检查失败，服务可能不可用"
+        fi
         
         sleep $check_interval
     done
@@ -484,8 +482,7 @@ main() {
     # 启动Web管理界面（后台守护）
     log_info "启动Web管理界面 (端口 ${WEB_PORT})..."
     cd /app && python -m web.webapi &
-    local WEB_PID=$!
-    echo "$WEB_PID" > /var/run/web.pid
+    WEB_PID=$!
     sleep 1
     if kill -0 $WEB_PID 2>/dev/null; then
         log_info "✓ Web管理界面已启动 (PID: $WEB_PID, 端口: ${WEB_PORT})"

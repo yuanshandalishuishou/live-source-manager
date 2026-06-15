@@ -14,7 +14,7 @@ import os
 import re
 from typing import List, Dict
 from config_manager import Config
-from exceptions import LsmError, OutputError
+from app.utils import LsmError, OutputError
 
 # C1: 重命名为 M3UGenerator（原 EnhancedM3UGenerator）
 class M3UGenerator:

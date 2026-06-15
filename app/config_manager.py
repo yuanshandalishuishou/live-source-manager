@@ -16,7 +16,7 @@ import logging
 import logging.handlers
 import configparser
 from typing import Dict, List, Any, Optional
-from exceptions import ConfigError
+from app.utils import ConfigError
 
 class Config:
     """配置管理类 - 增强版"""

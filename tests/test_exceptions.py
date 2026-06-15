@@ -8,7 +8,7 @@ import sys
 
 sys.path.insert(0, 'app')
 
-from exceptions import LsmError, ConfigError, SourceError, \
+from app.utils import LsmError, ConfigError, SourceError, \
     SourceDownloadError, SourceParseError, StreamTestError, OutputError
 
 
@@ -67,7 +67,7 @@ class TestExceptionIntegration:
         import tempfile
         import os
         from config_manager import Config
-        from exceptions import ConfigError
+        from app.utils import ConfigError
 
         # 创建一个格式错误的配置文件
         with tempfile.NamedTemporaryFile(mode='w', suffix='.ini', delete=False, encoding='utf-8') as f:
@@ -82,7 +82,7 @@ class TestExceptionIntegration:
 
     def test_source_parse_error_raised(self):
         """确认SourceParseError可被抛出具链式异常"""
-        from exceptions import SourceParseError
+        from app.utils import SourceParseError
         try:
             try:
                 raise ValueError("bad format")
@@ -94,7 +94,7 @@ class TestExceptionIntegration:
 
     def test_output_error_in_file_write(self):
         """OutputError在文件写入失败时使用"""
-        from exceptions import OutputError
+        from app.utils import OutputError
         try:
             try:
                 raise PermissionError("Permission denied")
@@ -107,19 +107,19 @@ class TestBaseAppExceptionFeatures:
     """测试BaseAppException（方案B合并后）的特性"""
     
     def test_error_code_present(self):
-        from exceptions import ConfigError, SourceDownloadError, StreamTestError, OutputError
+        from app.utils import ConfigError, SourceDownloadError, StreamTestError, OutputError
         assert ConfigError("test").error_code == 1001
         assert SourceDownloadError("test").error_code == 3002
         assert StreamTestError("test").error_code == 4001
         assert OutputError("test").error_code == 5001
     
     def test_suggestion_present(self):
-        from exceptions import ConfigError
+        from app.utils import ConfigError
         err = ConfigError("配置错误", suggestion="检查config.ini")
         assert err.suggestion == "检查config.ini"
     
     def test_to_dict(self):
-        from exceptions import ConfigError
+        from app.utils import ConfigError
         err = ConfigError("配置错误", suggestion="检查config.ini")
         d = err.to_dict()
         assert d["error_code"] == 1001
@@ -127,7 +127,7 @@ class TestBaseAppExceptionFeatures:
         assert d["suggestion"] == "检查config.ini"
     
     def test_traceback_str_with_original(self):
-        from exceptions import ConfigError
+        from app.utils import ConfigError
         try:
             raise ValueError("原始错误")
         except ValueError as e:
@@ -137,7 +137,7 @@ class TestBaseAppExceptionFeatures:
             assert "原始错误" in tb
     
     def test_str_representation(self):
-        from exceptions import ConfigError
+        from app.utils import ConfigError
         err = ConfigError("配置错误", suggestion="检查config.ini")
         s = str(err)
         assert "1001" in s

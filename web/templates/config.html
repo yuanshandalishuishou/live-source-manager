@@ -113,9 +113,13 @@ async function saveConfig() {
     const result = document.getElementById('config-result');
     result.innerHTML = '<div class="alert alert-info">保存中...</div>';
     try {
+        const csrfToken = window.__csrf_token || '';
         const resp = await fetch('/api/config', {
             method: 'PUT',
-            headers: {'Content-Type': 'application/json'},
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': csrfToken
+            },
             body: JSON.stringify(configData)
         });
         const data = await resp.json();
@@ -134,7 +138,11 @@ async function reloadConfig() {
     const result = document.getElementById('config-result');
     result.innerHTML = '<div class="alert alert-info">重新加载中...</div>';
     try {
-        const resp = await fetch('/api/config/reload', {method: 'POST'});
+        const csrfToken = window.__csrf_token || '';
+        const resp = await fetch('/api/config/reload', {
+            method: 'POST',
+            headers: { 'X-CSRF-Token': csrfToken }
+        });
         if (resp.ok) {
             result.innerHTML = '<div class="alert alert-success">配置已重新加载</div>';
             loadConfig();

@@ -236,7 +236,7 @@ class TestSourceDownload:
     async def test_download_with_retry_http_404(self, source_manager):
         """下载失败（HTTP 404）"""
         async def mock_download_fail(url, strategy):
-            from exceptions import SourceDownloadError
+            from app.utils import SourceDownloadError
             raise SourceDownloadError(f"HTTP错误 404: {url}")
 
         with patch.object(source_manager, 'download_file', side_effect=mock_download_fail), \

@@ -192,3 +192,38 @@ function escapeHtml(str) {
 }
 
 console.log('LSM Web UI loaded');
+
+// ── CSRF Token 注入 ───────────────────────────
+// 页面加载时从 API 获取 CSRF token，在所有写请求中注入
+document.addEventListener('DOMContentLoaded', async function() {
+    try {
+        const resp = await fetch('/api/auth/csrf-token', { credentials: 'same-origin' });
+        if (resp.ok) {
+            const data = await resp.json();
+            window.__csrf_token = data.csrf_token;
+        }
+    } catch(e) {
+        // 未登录时静默失败，登录后会通过 htmx:configRequest 自动注入
+    }
+});
+
+// 所有 htmx 写请求自动注入 CSRF token
+document.body.addEventListener('htmx:configRequest', function(evt) {
+    if (window.__csrf_token &&
+        evt.detail.verb !== 'GET' &&
+        evt.detail.verb !== 'get') {
+        evt.detail.headers['X-CSRF-Token'] = window.__csrf_token;
+    }
+});
+
+// 登录成功后刷新 CSRF token
+document.body.addEventListener('htmx:afterRequest', function(evt) {
+    if (evt.detail.pathInfo && evt.detail.pathInfo.requestPath === '/api/auth/login') {
+        if (evt.detail.successful) {
+            fetch('/api/auth/csrf-token', { credentials: 'same-origin' })
+                .then(r => r.json())
+                .then(data => { window.__csrf_token = data.csrf_token; })
+                .catch(() => {});
+        }
+    }
+});

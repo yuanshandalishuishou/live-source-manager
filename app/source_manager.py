@@ -22,7 +22,7 @@ from urllib.parse import urlparse
 from typing import List, Dict, Optional
 from config_manager import Config
 from channel_rules import ChannelRules
-from exceptions import SourceError, SourceDownloadError, SourceParseError
+from app.utils import SourceError, SourceDownloadError, SourceParseError
 from url_sanitizer import validate_url, is_safe_url
 
 class SourceManager:

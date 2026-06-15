@@ -112,7 +112,7 @@ function renderAuditLogs(data) {
         html += '<td><span class="status-badge status-audit-' + l.action + '">' + actionLabel + '</span></td>';
         html += '<td>' + escapeHtml(l.target || '-') + '</td>';
         html += '<td style="font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + escapeHtml(detail) + '">' + escapeHtml(detail) + '</td>';
-        html += '<td style="font-size:12px;color:var(--text-light)">' + (l.ip_address || '-') + '</td>';
+        html += '<td style="font-size:12px;color:var(--text-light)">' + escapeHtml(l.ip_address || '-') + '</td>';
         html += '</tr>';
     });
     html += '</tbody></table>';

@@ -1,0 +1,1 @@
+{"status": "completed", "progress": 100, "message": "\u6d4b\u8bd5\u5b8c\u6210", "started_at": "2024-01-01 12:00:00", "total": 10, "completed": 10, "passed": 8, "failed": 2, "results": [{"name": "CCTV1", "status": "passed", "response_time": 0.5, "resolution": "1920x1080"}, {"name": "CCTV2", "status": "failed", "reason": "\u8fde\u63a5\u8d85\u65f6"}]}

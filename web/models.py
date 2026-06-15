@@ -1,37 +1,67 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-SQLite ORM — 用户表、审计日志表
+SQLite ORM — 用户表、审计日志表、Session表
 """
-
 import os
 import sqlite3
 import threading
 import bcrypt
-from datetime import datetime
+import logging
 from typing import Optional, List, Dict
 
+logger = logging.getLogger('web.models')
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'web', 'data')
 DB_PATH = os.path.join(DATA_DIR, 'web.db')
 
-_local = threading.local()
+# 写锁 — 保护并发写入（check_same_thread=False + WAL 下仍可能竞态）
+_write_lock = threading.Lock()
 
 
 def get_conn() -> sqlite3.Connection:
-    """每个线程独立连接（加 row_factory）"""
-    if not hasattr(_local, 'conn') or _local.conn is None:
-        os.makedirs(DATA_DIR, exist_ok=True)
-        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA foreign_keys=ON")
-        _local.conn = conn
-    return _local.conn
+    """返回独立连接（避免 async 环境下 threading.local 导致连接状态竞态）"""
+    os.makedirs(DATA_DIR, exist_ok=True)
+    conn = sqlite3.connect(DB_PATH, timeout=30)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute("PRAGMA busy_timeout=30000")
+    return conn
 
 
-def init_db():
-    """建表 + 默认用户"""
+def _execute(sql: str, params=()):
+    """带写锁保护的执行（含重试机制）"""
+    max_retries = 5
+    for attempt in range(max_retries):
+        conn = None
+        try:
+            with _write_lock:
+                conn = get_conn()
+                cursor = conn.execute(sql, params)
+                conn.commit()
+                return cursor
+        except sqlite3.OperationalError as e:
+            if conn:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+            if 'locked' in str(e) and attempt < max_retries - 1:
+                import time
+                time.sleep(0.2 * (attempt + 1))
+                continue
+            raise
+        finally:
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+
+
+def init_db(admin_password: str, viewer_password: str):
+    """建表 + 默认用户（密码由调用方提供，非硬编码）"""
     conn = get_conn()
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS users (
@@ -58,25 +88,44 @@ def init_db():
         );
         CREATE INDEX IF NOT EXISTS idx_audit_created_at ON audit_logs(created_at);
         CREATE INDEX IF NOT EXISTS idx_audit_username ON audit_logs(username);
+
+        CREATE TABLE IF NOT EXISTS sessions (
+            id TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            username TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'viewer',
+            created_at REAL NOT NULL,
+            last_active REAL NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
     """)
     conn.commit()
 
-    # 检查是否有用户，无则创建默认用户
+    # 检查是否有用户，无则创建管理员 viewer（密码从环境变量或随机生成）
     cursor = conn.execute("SELECT COUNT(*) FROM users")
     if cursor.fetchone()[0] == 0:
-        admin_pw = os.environ.get('WEB_ADMIN_PASSWORD', 'admin123')
-        viewer_pw = os.environ.get('WEB_VIEWER_PASSWORD', 'viewer123')
-        admin_hash = bcrypt.hashpw(admin_pw.encode(), bcrypt.gensalt()).decode()
-        viewer_hash = bcrypt.hashpw(viewer_pw.encode(), bcrypt.gensalt()).decode()
+        admin_hash = bcrypt.hashpw(admin_password.encode(), bcrypt.gensalt()).decode()
+        viewer_hash = bcrypt.hashpw(viewer_password.encode(), bcrypt.gensalt()).decode()
         conn.execute(
-            "INSERT OR IGNORE INTO users (username, password_hash, role, display_name) VALUES (?, ?, ?, ?)",
+            "INSERT INTO users (username, password_hash, role, display_name) VALUES (?, ?, ?, ?)",
             ('admin', admin_hash, 'admin', '管理员')
         )
         conn.execute(
-            "INSERT OR IGNORE INTO users (username, password_hash, role, display_name) VALUES (?, ?, ?, ?)",
+            "INSERT INTO users (username, password_hash, role, display_name) VALUES (?, ?, ?, ?)",
             ('viewer', viewer_hash, 'viewer', '查看者')
         )
         conn.commit()
+        logger.info(f"默认用户已创建: admin(管理员) / viewer(查看者)")
+
+
+def cleanup_audit_logs(max_days: int = 90):
+    """清理旧审计日志（启动时调用一次，不频繁操作）"""
+    try:
+        conn = get_conn()
+        conn.execute("DELETE FROM audit_logs WHERE created_at < datetime('now', ? || ' days')", (str(-max_days),))
+        conn.commit()
+    except Exception as e:
+        logger.warning(f"审计日志清理失败: {e}")
 
 
 # ── 用户操作 ──────────────────────────────────────
@@ -112,26 +161,21 @@ def list_users() -> List[Dict]:
 
 
 def create_user(username: str, password: str, role: str = 'viewer', display_name: str = '') -> int:
-    conn = get_conn()
     pw_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
-    cursor = conn.execute(
+    cursor = _execute(
         "INSERT INTO users (username, password_hash, role, display_name) VALUES (?, ?, ?, ?)",
         (username, pw_hash, role, display_name)
     )
-    conn.commit()
     return cursor.lastrowid
 
 
 def delete_user(user_id: int) -> bool:
-    conn = get_conn()
-    cursor = conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
-    conn.commit()
+    cursor = _execute("DELETE FROM users WHERE id = ?", (user_id,))
     return cursor.rowcount > 0
 
 
 def update_user(user_id: int, **kwargs) -> bool:
     """更新用户信息（role, display_name, password等）"""
-    conn = get_conn()
     updates = []
     params = []
     for key in ('role', 'display_name'):
@@ -146,47 +190,91 @@ def update_user(user_id: int, **kwargs) -> bool:
         return False
     updates.append("updated_at = CURRENT_TIMESTAMP")
     params.append(user_id)
-    cursor = conn.execute(
+    cursor = _execute(
         f"UPDATE users SET {', '.join(updates)} WHERE id = ?",
         params
     )
-    conn.commit()
     return cursor.rowcount > 0
 
 
 def toggle_user(user_id: int) -> Optional[bool]:
     """切换用户启用/禁用状态，返回新状态或None（用户不存在）"""
-    conn = get_conn()
     user = get_user_by_id(user_id)
     if not user:
         return None
     new_status = 0 if user['is_active'] else 1
-    conn.execute("UPDATE users SET is_active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                  (new_status, user_id))
-    conn.commit()
+    _execute("UPDATE users SET is_active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+             (new_status, user_id))
     return bool(new_status)
 
 
 def update_user_password(user_id: int, new_password: str) -> bool:
-    conn = get_conn()
     pw_hash = bcrypt.hashpw(new_password.encode(), bcrypt.gensalt()).decode()
-    cursor = conn.execute(
+    cursor = _execute(
         "UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
         (pw_hash, user_id)
     )
-    conn.commit()
     return cursor.rowcount > 0
+
+
+# ── Session 操作 ──────────────────────────────────
+
+def create_session_db(user_id: int, username: str, role: str, ttl: float = 86400) -> str:
+    """创建 session 并存入 SQLite"""
+    import uuid
+    import time
+    session_id = uuid.uuid4().hex
+    now = time.time()
+    conn = get_conn()
+    conn.execute(
+        "INSERT OR REPLACE INTO sessions (id, user_id, username, role, created_at, last_active) VALUES (?, ?, ?, ?, ?, ?)",
+        (session_id, user_id, username, role, now, now)
+    )
+    conn.commit()
+    return session_id
+
+
+def get_session_db(session_id: str, idle_timeout: int = 7200, session_ttl: int = 86400) -> Optional[Dict]:
+    """从 SQLite 获取 session"""
+    import time
+    conn = get_conn()
+    row = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
+    if not row:
+        return None
+    s = dict(row)
+    now = time.time()
+    if now - s['created_at'] > session_ttl or now - s['last_active'] > idle_timeout:
+        conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+        conn.commit()
+        return None
+    # 刷新最后活跃时间
+    conn.execute("UPDATE sessions SET last_active = ? WHERE id = ?", (now, session_id))
+    conn.commit()
+    s['last_active'] = now
+    return s
+
+
+def destroy_session_db(session_id: str):
+    conn = get_conn()
+    conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+    conn.commit()
+
+
+def cleanup_expired_sessions():
+    """清理过期 session（使用写锁保护并发）"""
+    import time
+    now = time.time()
+    _execute("DELETE FROM sessions WHERE last_active < ? OR created_at < ?",
+             (now - 7200, now - 86400))
 
 
 # ── 审计日志 ──────────────────────────────────────
 
 def add_audit_log(user_id: int, username: str, action: str, target: str = '', detail: str = '', ip_address: str = ''):
-    conn = get_conn()
-    conn.execute(
+    _execute(
         "INSERT INTO audit_logs (user_id, username, action, target, detail, ip_address) VALUES (?, ?, ?, ?, ?, ?)",
         (user_id, username, action, target, detail, ip_address)
     )
-    conn.commit()
 
 
 def list_audit_logs(page: int = 1, size: int = 50, action_filter: str = '') -> Dict:
@@ -194,8 +282,7 @@ def list_audit_logs(page: int = 1, size: int = 50, action_filter: str = '') -> D
     offset = (page - 1) * size
     if action_filter:
         total = conn.execute(
-            "SELECT COUNT(*) FROM audit_logs WHERE action = ?",
-            (action_filter,)
+            "SELECT COUNT(*) FROM audit_logs WHERE action = ?", (action_filter,)
         ).fetchone()[0]
         rows = conn.execute(
             "SELECT * FROM audit_logs WHERE action = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",

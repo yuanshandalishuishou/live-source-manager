@@ -17,16 +17,8 @@ FROM ${BASE_IMAGE} AS builder
 
 # 安装构建工具（Debian bookworm 容器内，与宿主机 OS 无关）
 # 优先使用清华镜像源加速国内构建，失败则回退官方源
-# Debian bookworm (12+) 使用 .sources DEB822 格式，需替换 URIs 字段而非简单的域名替换
-RUN ( \
-    if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
-        sed -i 's|URIs: http://deb.debian.org|URIs: http://mirrors.tuna.tsinghua.edu.cn|g' \
-            /etc/apt/sources.list.d/debian.sources; \
-    fi; \
-    if [ -f /etc/apt/sources.list ]; then \
-        sed -i 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list; \
-    fi; \
-) && \
+RUN sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
+    sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
         curl \
@@ -36,10 +28,8 @@ RUN ( \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # 配置 pip 使用清华镜像（国内加速，不影响构建结果）
-# 增加 extra-index-url 官方源作为备用，避免清华源同步延迟导致个别依赖安装失败
 RUN pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple && \
-    pip config set global.extra-index-url https://pypi.org/simple && \
-    pip config set global.trusted-host pypi.tuna.tsinghua.edu.cn pypi.org
+    pip config set global.trusted-host pypi.tuna.tsinghua.edu.cn
 
 # 复制并安装 Python 依赖
 COPY requirements.txt /tmp/requirements.txt
@@ -47,13 +37,10 @@ RUN pip install --no-cache-dir --target=/opt/pylib -r /tmp/requirements.txt && \
     rm -rf /tmp/requirements.txt ~/.cache/pip
 
 # 下载静态编译的 ffprobe/ffmpeg
-# 多源容错：清华镜像（国内优先）→ 中科大镜像（国内备用）→ johnvansickle（海外主源）→ GitHub（最后备用）
+# 多源容错：清华镜像（国内优先）→ johnvansickle（海外主源）→ GitHub（最后备用）
 # 静态二进制约 76MB，避免 apt 安装 ffmpeg 带来的 500MB+ 编解码依赖链
 RUN curl -fSL --retry 3 --retry-delay 5 \
         "https://mirrors.tuna.tsinghua.edu.cn/ffmpeg/ffmpeg-release-amd64-static.tar.xz" \
-        -o /tmp/ffmpeg-static.tar.xz 2>/dev/null || \
-    curl -fSL --retry 3 --retry-delay 5 \
-        "https://mirrors.ustc.edu.cn/ffmpeg/ffmpeg-release-amd64-static.tar.xz" \
         -o /tmp/ffmpeg-static.tar.xz 2>/dev/null || \
     curl -fSL --retry 3 --retry-delay 5 \
         "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz" \
@@ -99,16 +86,8 @@ LABEL maintainer="Live Source Manager <admin@example.com>" \
       version="3.0"
 
 # 运行时 apt：只装绝对必需的包，优先使用清华镜像源加速国内构建
-# Debian bookworm (12+) 使用 .sources DEB822 格式，需替换 URIs 字段而非简单的域名替换
-RUN ( \
-    if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
-        sed -i 's|URIs: http://deb.debian.org|URIs: http://mirrors.tuna.tsinghua.edu.cn|g' \
-            /etc/apt/sources.list.d/debian.sources; \
-    fi; \
-    if [ -f /etc/apt/sources.list ]; then \
-        sed -i 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list; \
-    fi; \
-) && \
+RUN sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
+    sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
         tzdata \

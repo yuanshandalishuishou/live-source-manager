@@ -17,7 +17,7 @@ import ipaddress
 from typing import Dict, List, Optional, Any, Tuple
 from urllib.parse import urlparse, urlunparse, parse_qs, urlencode, quote
 
-from exceptions import BaseAppException
+from app.utils import BaseAppException
 
 
 # ============================================================
