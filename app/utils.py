@@ -273,7 +273,7 @@ def catch_exception(logger: Optional[logging.Logger] = None, module_name: str = 
 
 def _log_exception(logger: logging.Logger, error: Exception, module: str, func_name: str):
     if isinstance(error, BaseAppException):
-        logger.error("[%s] %s | 建议: %s", error.message, error.suggestion)
+        logger.error("[%s] %s | 建议: %s", error.error_code, error.message, error.suggestion)
         if error.original:
             logger.debug("原始异常: %s", traceback.format_exc())
     else:
@@ -297,7 +297,7 @@ def setup_global_exception_hook(logger: Optional[logging.Logger] = None):
         logger = logging.getLogger("GlobalHook")
     def global_excepthook(exc_type, exc_value, exc_tb):
         if issubclass(exc_type, BaseAppException):
-            logger.critical("[%s] %s | 建议: %s", exc_value.message, exc_value.suggestion)
+            logger.critical("[%s] %s | 建议: %s", exc_value.error_code, exc_value.message, exc_value.suggestion)
         else:
             logger.critical("未捕获的异常 (类型: %s): %s\n%s",
                             exc_type.__name__, str(exc_value),

@@ -37,7 +37,7 @@ from channel_rules import ChannelRules
 from source_manager import SourceManager
 from stream_tester import StreamTester
 from m3u_generator import M3UGenerator
-from app.utils import LsmError, ConfigError, SourceError,\
+from app.utils import LsmError, ConfigError, SourceError, SourceDownloadError,\
     SourceParseError, StreamTestError, OutputError
 
 class EnhancedLiveSourceManager:
