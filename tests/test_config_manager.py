@@ -123,10 +123,10 @@ ipv6_enabled = False
         # 验证默认值
         testing = config.get_testing_params()
         assert testing['timeout'] == 10
-        assert testing['concurrent_threads'] == 30
+        assert testing['concurrent_threads'] == 40  # 与 SECTION_SCHEMA 对齐后的默认值
 
         filter_params = config.get_filter_params()
-        assert filter_params['min_speed'] == 40
+        assert filter_params['min_speed'] == 50  # 与 SECTION_SCHEMA 对齐后的默认值
 
         # 清理
         os.unlink(tmp_path)
@@ -177,8 +177,8 @@ concurrent_threads = 10
             assert config.get_testing_params()['timeout'] == 8
             # 缺失的用默认值
             filter_params = config.get_filter_params()
-            assert filter_params['max_latency'] == 5000
-            assert filter_params['min_speed'] == 40
+            assert filter_params['max_latency'] == 4000  # 与 SECTION_SCHEMA 对齐后的默认值
+            assert filter_params['min_speed'] == 50  # 与 SECTION_SCHEMA 对齐后的默认值
         finally:
             os.unlink(tmp_path)
 

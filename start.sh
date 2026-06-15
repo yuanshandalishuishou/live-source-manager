@@ -509,6 +509,9 @@ main() {
     log_info "Nginx服务访问地址: http://<容器IP>:${NGINX_PORT}/"
     log_info "查看日志: docker logs -f <容器名>"
     log_info "定时任务配置: $UPDATE_CRON"
+    log_info "加密密钥查看: docker logs <container> | grep CONFIG_ENCRYPT_KEY"
+    log_info "首次运行自动生成随机密钥，建议设置自定义环境变量"
+    log_info "设置方式: docker run -e CONFIG_ENCRYPT_KEY=<您的密钥> ..."
     
     # 输出当前文件列表
     log_info "当前可访问的文件:"

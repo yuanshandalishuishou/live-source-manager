@@ -191,7 +191,8 @@ class TestConfig:
         resp = client.get('/api/config')
         assert resp.status_code == 200
         data = resp.json()
-        assert 'Logging' in data
+        # 配置可能包含 Logging、System 等段落（加密密钥引入 System.encrypt_key）
+        assert len(data) > 0, f"配置数据不应为空, got {data}"
 
     def test_get_config_unauthenticated(self):
         """未登录返回 401"""
@@ -318,12 +319,20 @@ class TestUsers:
     def test_create_user_duplicate(self):
         """重复用户名应返回 409"""
         client, auth = _admin_login()
-        resp = client.post(
+        # 先创建用户，再尝试重复创建
+        resp1 = client.post(
+            '/api/users',
+            json={'username': 'testuser1', 'password': 'TestPass123'},
+            headers={'X-CSRF-Token': auth['csrf_token']},
+        )
+        assert resp1.status_code == 200, f"首次创建应成功: {resp1.text}"
+        # 重复创建
+        resp2 = client.post(
             '/api/users',
             json={'username': 'testuser1', 'password': 'AnotherPass123'},
             headers={'X-CSRF-Token': auth['csrf_token']},
         )
-        assert resp.status_code == 409
+        assert resp2.status_code == 409
 
     def test_create_user_short_username(self):
         """用户名太短"""

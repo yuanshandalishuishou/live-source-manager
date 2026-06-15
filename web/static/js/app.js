@@ -193,6 +193,53 @@ function escapeHtml(str) {
 
 console.log('LSM Web UI loaded');
 
+// ── 加密密钥提示 ───────────────────────────────
+document.addEventListener('DOMContentLoaded', function() {
+    if (localStorage.getItem('encrypt_key_dismissed')) return;
+    fetch('/api/auth/encrypt-key-status', { credentials: 'same-origin' })
+        .then(r => r.json())
+        .then(data => {
+            if (!data.has_custom_key) {
+                showEncryptKeyBanner();
+            }
+        })
+        .catch(() => {});
+});
+
+function showEncryptKeyBanner() {
+    const content = document.querySelector('.content-body');
+    if (!content) return;
+    const banner = document.createElement('div');
+    banner.id = 'encrypt-key-banner';
+    banner.style.cssText = `
+        background: #fef3c7; border: 1px solid #fde68a;
+        border-radius: 8px; padding: 12px 16px; margin-bottom: 16px;
+        display: flex; align-items: center; justify-content: space-between;
+        gap: 12px; font-size: 14px;
+    `;
+    banner.innerHTML = `
+        <div style="display:flex;align-items:center;gap:8px;flex:1">
+            <span style="font-size:20px">🔐</span>
+            <span>
+                系统使用<strong>自动生成的加密密钥</strong>，
+                建议设置自定义环境变量 <code>CONFIG_ENCRYPT_KEY</code> 以增强安全性。
+                <a href="/config" style="color:var(--primary);text-decoration:underline">前往配置页</a>
+            </span>
+        </div>
+        <button onclick="dismissEncryptKeyBanner()" style="
+            background:none;border:none;cursor:pointer;font-size:18px;padding:4px;
+            color:#92400e;flex-shrink:0;
+        " title="我知道了，不再提示">✕</button>
+    `;
+    content.insertBefore(banner, content.firstChild);
+}
+
+function dismissEncryptKeyBanner() {
+    localStorage.setItem('encrypt_key_dismissed', '1');
+    const banner = document.getElementById('encrypt-key-banner');
+    if (banner) banner.remove();
+}
+
 // ── CSRF Token 注入 ───────────────────────────
 // 页面加载时从 API 获取 CSRF token，在所有写请求中注入
 document.addEventListener('DOMContentLoaded', async function() {

@@ -83,7 +83,7 @@ def init_db(admin_password: str, viewer_password: str):
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
-        CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+        -- 注意：username 上的 UNIQUE 约束已自动创建索引，无需冗余的 idx_users_username
 
         CREATE TABLE IF NOT EXISTS audit_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -113,6 +113,9 @@ def init_db(admin_password: str, viewer_password: str):
             last_active REAL NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
+
+        -- P2-2: audit_logs (action, created_at) 复合索引
+        CREATE INDEX IF NOT EXISTS idx_audit_action_created ON audit_logs(action, created_at);
     """)
     conn.commit()
 
@@ -134,6 +137,57 @@ def init_db(admin_password: str, viewer_password: str):
 
 
 # ── 应用配置操作 ────────────────────────────────────
+
+# ── 应用配置操作（原始读写——不自动加解密） ──────────
+
+def get_app_config_raw(key: str) -> Optional[str]:
+    """读取配置原始值（不自动解密）"""
+    conn = get_conn()
+    row = conn.execute("SELECT value FROM app_config WHERE key = ?", (key,)).fetchone()
+    conn.close()
+    return row['value'] if row else None
+
+
+def set_app_config_raw(key: str, value: str):
+    """写入配置原始值（不自动加密）"""
+    _execute(
+        "INSERT OR REPLACE INTO app_config (key, value, updated_at) VALUES (?, ?, datetime('now'))",
+        (key, value)
+    )
+
+
+def get_all_sensitive_config() -> Dict[str, str]:
+    """获取所有敏感配置的原始加密值"""
+    from web.crypto_utils import SENSITIVE_KEYS
+    if not SENSITIVE_KEYS:
+        return {}
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT key, value FROM app_config WHERE key IN ({})".format(
+            ','.join('?' for _ in SENSITIVE_KEYS)
+        ),
+        list(SENSITIVE_KEYS)
+    ).fetchall()
+    conn.close()
+    return {row['key']: row['value'] for row in rows}
+
+
+def get_all_sensitive_raw() -> Dict[str, str]:
+    """获取所有敏感配置的原始加密值（解密前的原始值），供 re_encrypt_all 使用"""
+    from web.crypto_utils import SENSITIVE_KEYS
+    if not SENSITIVE_KEYS:
+        return {}
+    conn = get_conn()
+    placeholders = ','.join('?' for _ in SENSITIVE_KEYS)
+    rows = conn.execute(
+        f"SELECT key, value FROM app_config WHERE key IN ({placeholders})",
+        list(SENSITIVE_KEYS)
+    ).fetchall()
+    conn.close()
+    return {row['key']: row['value'] for row in rows}
+
+
+# ── 应用配置操作（带自动加解密） ────────────────
 
 def get_app_config(key: str) -> Optional[str]:
     """读取单个配置值（敏感字段自动解密）"""

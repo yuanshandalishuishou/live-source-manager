@@ -10,6 +10,9 @@ pytest 共享环境配置
 1. 两个测试文件使用相同的临时目录和数据库
 2. 两个测试文件使用相同的密码
 3. 数据库只初始化一次
+
+修复（审计 P2-16A）：添加 clean_db_before_each fixture，每个测试前清理数据库
+避免测试间数据污染。
 """
 import os
 import sys
@@ -39,6 +42,9 @@ models.DB_PATH = os.path.join(SHARED_TMP_DIR, 'web.db')
 import web.webapp
 web.webapp.CONFIG_PATH = os.path.join(SHARED_TMP_DIR, 'config.ini')
 
+# ── 覆写 web.webapp 下的 CSRF_EXEMPT_PATHS 确保一致 ──
+web.webapp.CSRF_EXEMPT_PATHS = {'/api/auth/login', '/api/auth/logout', '/login', '/health'}
+
 # 写最小测试配置
 _cp = configparser.ConfigParser()
 _cp.add_section('Logging')
@@ -48,6 +54,8 @@ _cp.add_section('Sources')
 _cp.set('Sources', 'local_dirs', '/config/sources')
 _cp.add_section('Network')
 _cp.set('Network', 'proxy_enabled', 'False')
+_cp.set('Network', 'proxy_username', '')
+_cp.set('Network', 'proxy_password', '')
 with open(web.webapp.CONFIG_PATH, 'w') as _f:
     _cp.write(_f)
 
@@ -57,7 +65,55 @@ open(os.path.join(SHARED_TMP_DIR, 'app.log'), 'a').close()
 # ── 初始化数据库（统一密码）──────────────────────
 models.init_db(admin_password=SHARED_ADMIN_PW, viewer_password=SHARED_VIEWER_PW)
 
-# 注意：webapi app 由各测试文件在需要时导入（from web.webapi import app）
+# 导入加密工具并初始化密钥（确保测试前加密体系就绪）
+import web.crypto_utils as _cu
+try:
+    _cu.ensure_key_initialized()
+except Exception:
+    pass
+
+# ── 每个测试前清理数据库（P2-16A 修复） ──────────
+
+import pytest
+import logging
+
+# 注意：Session 存在全局内存 dict 中，每个测试前清理 DB 不自动清除 session
+# 因此我们同时清理内存中的 session
+
+@pytest.fixture(autouse=True)
+def clean_db_before_each():
+    """每个测试函数前清理数据库和会话状态，防止测试间数据污染"""
+    # 清理所有数据表
+    try:
+        from web import models
+        conn = models.get_conn()
+        conn.executescript("""
+            DELETE FROM audit_logs;
+            DELETE FROM app_config;
+            DELETE FROM sessions;
+            DELETE FROM users WHERE username NOT IN ('admin', 'viewer');
+        """)
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+    # 清理内存中的 session 和 CSRF token
+    try:
+        from web.auth import _sessions, _csrf_tokens
+        _sessions.clear()
+        _csrf_tokens.clear()
+    except Exception:
+        pass
+
+    # 重置加密密钥初始化标志，允许测试重新初始化
+    # （P2-16B 修复：conftest 初始化的 _initialized_flag 会阻止 test_encrypt_key 的重新初始化）
+    try:
+        import web.crypto_utils as _cu2
+        _cu2._initialized_flag = False
+        _cu2._fernet_instance = None
+    except Exception:
+        pass
 
 
 # ── 双保险清理 ─────────────────────────────────

@@ -19,6 +19,7 @@ logger = logging.getLogger('web.auth')
 _sessions: Dict[str, Dict] = {}
 SESSION_TTL = 24 * 3600  # 24 小时
 IDLE_TIMEOUT = 2 * 3600  # 2 小时无操作过期
+CSRF_TTL = 1 * 3600      # CSRF token 1 小时有效
 
 
 def _clean_expired():
@@ -96,6 +97,8 @@ async def get_current_user(request: Request) -> Dict:
     session = get_session(session_id)
     if not session:
         raise HTTPException(status_code=401, detail="会话已过期，请重新登录")
+    # 注入 session_id 字段，供 CSRF token / audit 等路由使用
+    session['session_id'] = session_id
     return session
 
 
@@ -130,16 +133,27 @@ def login_required_page(func):
 
 # ── CSRF 令牌管理 ────────────────────────────────
 # 维持与 web.webapp.csrf_middleware 的兼容性
+# 使用 Dict[session_id, (token, expiry_ts)] 结构支持 TTL 和复用
 
-_csrf_tokens: Dict[str, str] = {}
-CSRF_EXEMPT_PATHS = {'/api/auth/login', '/api/auth/logout', '/login', '/health'}
+_csrf_tokens: Dict[str, tuple] = {}
+CSRF_EXEMPT_PATHS = {'/api/auth/login', '/api/auth/logout', '/login'}
 
 
 def _get_csrf_token(session_id: str) -> str:
-    """生成并存储 CSRF token"""
+    """生成并存储 CSRF token
+
+    TTL: 1 小时内复用同一 token（支持多标签页）
+    """
     import hashlib
+    now = time.time()
+    stored = _csrf_tokens.get(session_id)
+    if stored:
+        token, expires = stored
+        if now < expires:
+            return token  # 复用未过期 token
+    # 生成新 token（1 小时有效期）
     token = hashlib.sha256(f"{session_id}:{uuid.uuid4().hex}".encode()).hexdigest()
-    _csrf_tokens[session_id] = token
+    _csrf_tokens[session_id] = (token, now + CSRF_TTL)
     return token
 
 
@@ -148,5 +162,9 @@ def verify_csrf_token(session_id: str, token: str) -> bool:
     stored = _csrf_tokens.get(session_id)
     if not stored:
         return False
-    return stored == token
+    stored_token, expires = stored
+    if time.time() > expires:
+        _csrf_tokens.pop(session_id, None)
+        return False
+    return stored_token == token
 

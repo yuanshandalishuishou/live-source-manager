@@ -9,24 +9,20 @@ Web 管理服务 — 合并模块 (方案B)
 
 # ── 第三方/标准库 import ──────────────────────
 import os
-import configparser
-import logging
-import threading
-from typing import Dict, Any, Tuple
-import asyncio
+import sys
 import json
-from typing import Set
-from fastapi import WebSocket, WebSocketException
 import uuid
 import time
-from typing import Optional, Dict
-from fastapi import Request, HTTPException, Depends
-from fastapi.responses import RedirectResponse
-import sys
 import socket
+import asyncio
+import logging
+import threading
+import configparser
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Any, Tuple, Optional, Set
+
 import uvicorn
+from cryptography.fernet import Fernet
 from fastapi import FastAPI, Request, Form, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -39,7 +35,7 @@ from . import models
 # config.ini 安全读写代理 (原 config_proxy.py)
 # ═══════════════════════════════════════════════════
 
-logger = logging.getLogger('web.config_proxy')
+logger = logging.getLogger('web.webapp')
 
 # 配置文件路径（相对于项目根）
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -222,7 +218,7 @@ def write_config(data: Dict[str, Dict[str, str]]) -> Tuple[bool, str]:
 # WebSocket 连接管理 (原 ws_manager.py)
 # ═══════════════════════════════════════════════════
 
-logger = logging.getLogger('web.ws_manager')
+logger = logging.getLogger('web.webapp')
 
 MAX_CONNECTIONS = 50  # 单实例最大连接数
 class ConnectionManager:
@@ -273,7 +269,7 @@ manager = ConnectionManager()
 # CSRF token 函数在 webapp 模块内有别名引用，通过模块级重定向确保
 # 所有代码（含 webapp.csrf_middleware）使用 auth 模块的同一份 _csrf_tokens
 
-logger = logging.getLogger('web.auth')
+logger = logging.getLogger('web.webapp')
 
 SESSION_TTL = 86400
 IDLE_TIMEOUT = 7200
@@ -293,7 +289,12 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
 )
-logger = logging.getLogger('web.webapp')
+
+# ═══════════════════════════════════════════════════════
+# 加密密钥状态标记
+# 在 lifespan startup 中被覆写，默认为 True（无隐患）
+# ═══════════════════════════════════════════════════════
+CONFIG_KEY_IS_MANUAL = True
 
 # ── lifespan（替代弃用的 on_event）先于 app 定义 ──
 from contextlib import asynccontextmanager
@@ -309,12 +310,23 @@ async def lifespan(app_instance: FastAPI):
     viewer_pw = os.environ.get('WEB_VIEWER_PASSWORD') or \
         ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(12))
     await asyncio.to_thread(models.init_db, admin_password=admin_pw, viewer_password=viewer_pw)
+    await asyncio.to_thread(models.cleanup_expired_sessions)
     await asyncio.to_thread(models.cleanup_audit_logs, max_days=90)
-    logger.info("数据库初始化完成，清理90天前审计日志")
+    logger.info("数据库初始化完成，已清除过期Session，清理90天前审计日志")
     if not os.environ.get('WEB_ADMIN_PASSWORD'):
         logger.warning(f"⚠️  默认管理员密码: {admin_pw}（请通过环境变量 WEB_ADMIN_PASSWORD 设置）")
     if not os.environ.get('WEB_VIEWER_PASSWORD'):
         logger.info(f"查看者密码: {viewer_pw}（可通过环境变量 WEB_VIEWER_PASSWORD 设置）")
+
+    # ═══════════════════════════════════════════════════════
+    # 加密密钥初始化（必须在 SQLite导入之前，确保加密体系就绪）
+    # ═══════════════════════════════════════════════════════
+    from web import crypto_utils
+    crypto_utils.ensure_key_initialized()
+    # 更新模块级标记供 login API 和 encrypt-key-status API 使用
+    import web.webapp as _ww
+    _ww.CONFIG_KEY_IS_MANUAL = crypto_utils.is_custom_key()
+    logger.info(f"加密密钥初始状态: {'自定义' if _ww.CONFIG_KEY_IS_MANUAL else '自动生成'}")
 
     # ── 首次运行初始化 ────────────────────────
     from app.config_manager import Config as _Config
@@ -359,8 +371,10 @@ app = FastAPI(
 # ── CSRF 中间件 ──────────────────────────────────
 # 跳过 GET/HEAD/OPTIONS + 登录路径和 WebSocket
 # 所有写操作必须在 header 中携带 X-CSRF-Token
+# 注意：'/health' 路由如果不存在，不从豁免列表移除（保留为空也没危害）
+# 与 auth.py 中的 CSRF_EXEMPT_PATHS 保持一致
 
-CSRF_EXEMPT_PATHS = {'/api/auth/login', '/api/auth/logout', '/login', '/health'}
+CSRF_EXEMPT_PATHS = {'/api/auth/login', '/api/auth/logout', '/login'}
 
 @app.middleware("http")
 async def csrf_middleware(request: Request, call_next):
@@ -478,7 +492,11 @@ async def api_login(request: Request, username: str = Form(...), password: str =
         action='login', target='',
         ip_address=request.client.host if request.client else '',
     )
-    resp = JSONResponse({'status': 'ok', 'role': user['role']})
+    resp = JSONResponse({
+        'status': 'ok',
+        'role': user['role'],
+        'encrypt_key_hint': not CONFIG_KEY_IS_MANUAL,
+    })
     resp.set_cookie(
         key='session', value=session_id,
         httponly=True, max_age=86400,
@@ -508,6 +526,33 @@ async def api_csrf_token(current_user: dict = Depends(get_current_user)):
     """获取 CSRF token——前端所有写操作必须在 X-CSRF-Token header 中带上此值"""
     token = _get_csrf_token(current_user['session_id'])
     return {'csrf_token': token}
+
+
+@app.get('/api/auth/encrypt-key-status')
+async def api_encrypt_key_status(current_user: dict = Depends(get_current_user)):
+    """检查当前密钥是否用户自定义"""
+    return {'has_custom_key': CONFIG_KEY_IS_MANUAL}
+
+
+@app.put('/api/auth/encrypt-key')
+async def api_update_encrypt_key(data: dict, request: Request, current_user: dict = Depends(require_admin)):
+    """修改加密密钥并重新加密所有敏感配置"""
+    new_key = data.get('new_key', '').strip()
+    if not new_key:
+        raise HTTPException(status_code=400, detail='新密钥不能为空')
+    if len(new_key) < 16:
+        raise HTTPException(status_code=400, detail='密钥长度至少16位')
+    from web import crypto_utils
+    count = crypto_utils.re_encrypt_all(new_key)
+    models.add_audit_log(
+        user_id=current_user['user_id'], username=current_user['username'],
+        action='encrypt_key_update', target='app_config',
+        detail=f'已重新加密 {count} 条敏感配置',
+        ip_address=request.client.host if request.client else '',
+    )
+    return {'status': 'ok', 'message': f'密钥已更新，重新加密 {count} 条记录'}
+
+
 # ══════════════════════════════════════════════════
 # 仪表盘 API
 # ══════════════════════════════════════════════════
@@ -764,7 +809,7 @@ async def api_trigger_test(current_user: dict = Depends(require_admin)):
 
 @app.websocket('/ws/test')
 async def websocket_test_endpoint(ws: WebSocket):
-    # 先 accept 再检查认证，否则无法收发消息
+    # 先 accept 再检查认证，否则 testclient 无法处理 pre-accept close
     await ws.accept()
     # Cookie 认证（WebSocket 握手阶段检查 session）
     session_id = ws.cookies.get('session')
