@@ -119,8 +119,32 @@ def decrypt_value(ciphertext: str) -> str:
 
 
 def is_encrypted(value: str) -> bool:
-    """判断值是否已加密"""
+    """判断值是否已加密（前缀检测）
+
+    注意：此函数仅做前缀检查，不验证 Fernet token 格式有效性。
+    严格校验由 _is_valid_fernet_token 完成。
+    """
     return value.startswith('ENC:')
+
+
+def _is_valid_fernet_token(value: str) -> bool:
+    """判断 ENC: 前缀后的内容是否为有效 Fernet token
+
+    修复 P2-新-3: 防止 ENC: 前缀误判导致字面字符串 'ENC:hello' 被跳过加密，
+    导致后续解密失败时配置值被无声吞没。
+    """
+    if not value.startswith('ENC:'):
+        return False
+    payload = value[4:]
+    # Fernet token 经 base64 编码后标准长度为 44 字节（不带 padding）
+    if len(payload) < 44:
+        return False
+    try:
+        # 尝试 base64 解码验证（不触发解密）
+        base64.urlsafe_b64decode(payload + '==')
+        return True
+    except Exception:
+        return False
 
 
 def is_sensitive_key(key: str) -> bool:

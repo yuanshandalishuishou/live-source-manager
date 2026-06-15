@@ -73,3 +73,21 @@ class TestWebSocketEndpoint:
             ws.send_text('ping')
             data = ws.receive_json()
             assert data == {'type': 'pong'}
+
+    def test_ws_no_cookie_closes(self):
+        """无 session cookie 连接，应被拒绝（修复 P2-新-6）"""
+        client = TestClient(app)
+        with client.websocket_connect('/ws/test') as ws:
+            with pytest.raises(WebSocketDisconnect) as exc_info:
+                ws.receive_json()
+            assert exc_info.value.code == 4001, \
+                f"无cookie应返回4001, got {exc_info.value.code}"
+
+    def test_ws_expired_session_closes(self):
+        """过期/无效 session cookie 连接，应被拒绝（修复 P2-新-6）"""
+        client = TestClient(app)
+        with client.websocket_connect('/ws/test', cookies={'session': 'invalid-session-id'}) as ws:
+            with pytest.raises(WebSocketDisconnect) as exc_info:
+                ws.receive_json()
+            assert exc_info.value.code == 4001, \
+                f"无效session应返回4001, got {exc_info.value.code}"

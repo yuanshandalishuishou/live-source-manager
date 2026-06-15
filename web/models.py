@@ -93,7 +93,8 @@ def init_db(admin_password: str, viewer_password: str):
             target TEXT DEFAULT '',
             detail TEXT DEFAULT '',
             ip_address TEXT DEFAULT '',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
         );
         CREATE INDEX IF NOT EXISTS idx_audit_created_at ON audit_logs(created_at);
         CREATE INDEX IF NOT EXISTS idx_audit_username ON audit_logs(username);
@@ -106,7 +107,7 @@ def init_db(admin_password: str, viewer_password: str):
 
         CREATE TABLE IF NOT EXISTS sessions (
             id TEXT PRIMARY KEY,
-            user_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
             username TEXT NOT NULL,
             role TEXT NOT NULL DEFAULT 'viewer',
             created_at REAL NOT NULL,
@@ -204,8 +205,10 @@ def get_app_config(key: str) -> Optional[str]:
 
 def set_app_config(key: str, value: str):
     """INSERT OR REPLACE 写入单个配置值（敏感字段自动加密）"""
-    from web.crypto_utils import is_sensitive_key, encrypt_value, is_encrypted
-    if is_sensitive_key(key) and not is_encrypted(value):
+    from web.crypto_utils import is_sensitive_key, encrypt_value, is_encrypted, _is_valid_fernet_token
+    # 使用格式严格校验：仅当 value 是有效的 Fernet token 时才跳过加密
+    # 防止字面字符串 'ENC:hello' 被误判为已加密（P2-新-3）
+    if is_sensitive_key(key) and not (is_encrypted(value) and _is_valid_fernet_token(value)):
         value = encrypt_value(value)
     _execute(
         "INSERT OR REPLACE INTO app_config (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)",

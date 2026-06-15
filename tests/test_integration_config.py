@@ -23,6 +23,23 @@ from fastapi.testclient import TestClient
 
 # 密码必须与 conftest.py 保持一致
 ADMIN_PASSWORD = 'TestAdminPw1!'
+
+
+@pytest.fixture(autouse=True)
+def setup_encryption(clean_db_before_each):
+    """显式初始化加密环境，不依赖conftest隐式行为
+    
+    修复 P1-新-2: test_integration_config.py 测试依赖全局加密状态
+    clean_db_before_each 清空 app_config（含 System.encrypt_key），
+    此 fixture 确保加密密钥被正确重新初始化。
+    """
+    from web import crypto_utils as cu
+    import os
+    cu._initialized_flag = False
+    cu._fernet_instance = None
+    os.environ.pop('CONFIG_ENCRYPT_KEY', None)
+    os.environ.pop('CONFIG_ENCRYPT_KEY_INITIALIZED', None)
+    cu.ensure_key_initialized()
 VIEWER_PASSWORD = 'TestViewerPw1!'
 
 

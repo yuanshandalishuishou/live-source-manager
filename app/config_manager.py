@@ -75,13 +75,14 @@ class Config:
         'UserAgents.ua_enabled': 'True',
     }
 
-    def __init__(self, config_path: str = "/config/config.ini", reload_interval: int = 60):
+    def __init__(self, config_path: str = None, reload_interval: int = 60):
         """
         参数向后兼容：
         - config_path: 仅首次导入时使用，运行时读取走 SQLite
+          （默认从环境变量 CONFIG_PATH 读取，容器外/开发环境可灵活覆盖）
         - reload_interval: 保留但 SQLite 模式无需重载
         """
-        self.config_path = config_path
+        self.config_path = config_path or os.environ.get('CONFIG_PATH', '/config/config.ini')
         self.config = configparser.ConfigParser()  # 仅用于 create_default_config / INI回退
         self.reload_interval = reload_interval
         self._last_mtime = 0.0
@@ -114,7 +115,11 @@ class Config:
             raise
 
     def _ensure_ini_loaded(self):
-        """加载 INI 文件内容供回退使用"""
+        """加载 INI 文件内容供回退使用
+        
+        修复 P2-新-2: SQLite 模式下 INI 不存在时不自动创建，仅记录警告
+        （避免 check_reload 在无 INI 时意外创建默认配置覆盖 SQLite 主存储）
+        """
         if os.path.exists(self.config_path):
             encodings = ['utf-8', 'gbk', 'gb2312', 'latin1', 'utf-8-sig']
             for encoding in encodings:
@@ -213,7 +218,7 @@ class Config:
         if not os.path.exists(self.config_path):
             return
         try:
-            import configparser
+            # configparser 已在模块级导入（line 19），此处不再重复 import
             cp = configparser.ConfigParser()
             cp.read(self.config_path, encoding='utf-8')
             if section not in cp:
@@ -233,11 +238,16 @@ class Config:
 
         检测 INI 文件 mtime 变化，如有更新则重新加载 INI 配置。
         SQLite 模式也保留此能力，以便 INI 回退数据保持最新。
+
+        修复 P2-新-2: INI 不存在时不创建默认配置（SQLite 为主存储），仅记录警告。
         """
         now = time.time()
         if now - self._last_check_time < self.reload_interval:
             return False
         self._last_check_time = now
+        if not os.path.exists(self.config_path):
+            logging.warning(f"INI文件不存在 ({self.config_path})，check_reload 跳过")
+            return False
         try:
             current_mtime = os.path.getmtime(self.config_path)
             if current_mtime != self._last_mtime:

@@ -218,8 +218,6 @@ def write_config(data: Dict[str, Dict[str, str]]) -> Tuple[bool, str]:
 # WebSocket 连接管理 (原 ws_manager.py)
 # ═══════════════════════════════════════════════════
 
-logger = logging.getLogger('web.webapp')
-
 MAX_CONNECTIONS = 50  # 单实例最大连接数
 class ConnectionManager:
     """WebSocket 连接管理器"""
@@ -246,16 +244,23 @@ class ConnectionManager:
         logger.info(f"WebSocket 客户端断开 (剩余: {len(self._connections)})")
 
     async def broadcast(self, message: dict):
-        """向所有已连接客户端广播 JSON 消息"""
-        dead = set()
+        """向所有已连接客户端广播 JSON 消息
+
+        修复 P3-新-3: 先快照 connections 副本，在锁外逐个发送 send_json，
+        避免长时间持锁阻塞 connect/disconnect。
+        """
         async with self._lock:
-            for ws in self._connections:
-                try:
-                    await ws.send_json(message)
-                except Exception:
-                    dead.add(ws)
-            for ws in dead:
-                self._connections.discard(ws)
+            conns = self._connections.copy()
+        dead = set()
+        for ws in conns:
+            try:
+                await ws.send_json(message)
+            except Exception:
+                dead.add(ws)
+        if dead:
+            async with self._lock:
+                for ws in dead:
+                    self._connections.discard(ws)
 
     @property
     def count(self) -> int:
@@ -268,8 +273,6 @@ manager = ConnectionManager()
 # ═══════════════════════════════════════════════════
 # CSRF token 函数在 webapp 模块内有别名引用，通过模块级重定向确保
 # 所有代码（含 webapp.csrf_middleware）使用 auth 模块的同一份 _csrf_tokens
-
-logger = logging.getLogger('web.webapp')
 
 SESSION_TTL = 86400
 IDLE_TIMEOUT = 7200
@@ -346,7 +349,26 @@ async def lifespan(app_instance: FastAPI):
     if not os.path.exists(CHANNEL_RULES_PATH):
         os.makedirs(os.path.dirname(CHANNEL_RULES_PATH), exist_ok=True)
         with open(CHANNEL_RULES_PATH, 'w', encoding='utf-8') as f:
-            f.write("# 默认频道分类规则\n# 请根据实际需求修改\n")
+            f.write("""# 默认频道分类规则
+# 请根据实际需求修改
+# ── 示例规则 ──────────────────────────
+# 命名规则: category_keywords:
+#   category_name: [关键词列表]
+#
+# 内置分类关键词示例（覆盖常见频道类型）:
+# 央视频道: 包含 'CCTV' / '中央' / '央视' 等
+# 卫视频道: 包含 '卫视' 关键词
+# 体育频道: 包含 '体育' / 'NBA' / 'CBA' 等
+# 新闻频道: 包含 '新闻' / 'NEWS' / 'CNC' 等
+# 影视/剧集: 包含 '电影' / '电视剧' / '影院' / '影视' 等
+# 少儿频道: 包含 '少儿' / '卡通' / '动画' / 'kids' 等
+# 音乐频道: 包含 '音乐' / 'MV' 等
+# 纪实频道: 包含 '纪实' / '纪录片' / '探索' 等
+# 财经频道: 包含 '财经' / '金融' 等
+# 教育频道: 包含 '教育' / '学' 等
+# 生活频道: 包含 '生活' / '美食' / '旅游' / '健康' 等
+# 北京/上海/天津/重庆/河北/浙江/江苏/广东/湖南/湖北/山东/山西/四川/福建/安徽/广西/云南/贵州/辽宁/吉林/黑龙江/陕西/甘肃/宁夏/青海/新疆/内蒙古/西藏/海南/江西/河南 频道: 按地区分类
+""")
         logger.info(f"已创建默认频道规则文件: {CHANNEL_RULES_PATH}")
 
     status_dir = os.path.join(PROJECT_ROOT, 'data', 'status')
@@ -535,8 +557,15 @@ async def api_encrypt_key_status(current_user: dict = Depends(get_current_user))
 
 
 @app.put('/api/auth/encrypt-key')
-async def api_update_encrypt_key(data: dict, request: Request, current_user: dict = Depends(require_admin)):
+async def api_update_encrypt_key(request: Request, current_user: dict = Depends(require_admin)):
     """修改加密密钥并重新加密所有敏感配置"""
+    try:
+        data = await request.json()
+    except Exception:
+        raise HTTPException(
+            status_code=400,
+            detail='请求体必须为JSON格式（Content-Type: application/json）'
+        )
     new_key = data.get('new_key', '').strip()
     if not new_key:
         raise HTTPException(status_code=400, detail='新密钥不能为空')
@@ -773,6 +802,11 @@ async def api_update_config(data: dict, request: Request, current_user: dict = D
     return {'status': 'ok', 'message': msg}
 @app.post('/api/config/reload')
 async def api_reload_config(request: Request, current_user: dict = Depends(require_admin)):
+    """
+    预留接口：触发配置重载
+    当前仅记录审计日志，不执行实际重载操作。
+    后续实现可将配置从 SQLite 重新同步到各模块的运行时缓存。
+    """
     models.add_audit_log(
         user_id=current_user['user_id'], username=current_user['username'],
         action='config_reload', target='config.ini',

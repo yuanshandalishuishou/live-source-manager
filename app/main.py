@@ -50,8 +50,13 @@ class EnhancedLiveSourceManager:
     - 生成多级播放列表文件
     """
     
-    def __init__(self):
-        """初始化管理器实例"""
+    def __init__(self, config_path: str = None):
+        """初始化管理器实例
+        
+        Args:
+            config_path: 配置文件路径（默认从环境变量 CONFIG_PATH 读取）
+        """
+        self.config_path = config_path or os.environ.get('CONFIG_PATH', '/config/config.ini')
         self.config = None
         self.logger = None
         self.channel_rules = None
@@ -79,7 +84,7 @@ class EnhancedLiveSourceManager:
             self.start_time = time.time()
             
             # 第一步：初始化配置管理器
-            self.config = Config()
+            self.config = Config(self.config_path)
             self.logger_info("开始初始化增强版直播源管理工具...")
             
             # 第二步：初始化日志系统
