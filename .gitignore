@@ -90,6 +90,14 @@ cython_debug/
 !config/config.ini
 !pytest.ini
 
-# 第三方评审文件（保留一份参考即可）
+# 旧的审核/计划/报告文件（历史版本已推送，本地不再跟踪）
+architecture_audit_*.md
+config_migration_*.md
+key_display_plan.md
+plan_*.md
 review_*.md
+test_report_*.md
+REPORT*.md
+
+# 第三方评审文件（保留一份参考即可）
 web/data/

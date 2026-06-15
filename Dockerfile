@@ -90,7 +90,7 @@ ENV TZ=Asia/Shanghai \
     WEB_PORT=23455 \
     CONFIG_PATH=/config/config.ini \
     TEST_TIMEOUT=30 \
-    CONCURRENT_THREADS=10 \
+    CONCURRENT_THREADS=40 \
     OUTPUT_FILENAME=live.m3u \
     UPDATE_CRON="0 6,12,18,22 * * *"
 

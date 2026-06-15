@@ -33,11 +33,22 @@
 ```bash
 # 海外机器
 docker build -t lsm:latest .
-docker run -d --name lsm -p 12345:12345 lsm:latest
+# 挂载卷持久化配置和输出
+# -v /host/config:/config 持久化配置
+# -v /host/output:/www/output 持久化输出文件
+docker run -d --name lsm \
+    -p 12345:12345 -p 23455:23455 \
+    -v /host/config:/config \
+    -v /host/output:/www/output \
+    lsm:latest
 
 # 国内机器（使用镜像代理加速）
 docker build --build-arg BASE_IMAGE=docker.1ms.run/python:3.9-slim-bookworm -t lsm:latest .
-docker run -d --name lsm -p 12345:12345 lsm:latest
+docker run -d --name lsm \
+    -p 12345:12345 -p 23455:23455 \
+    -v /host/config:/config \
+    -v /host/output:/www/output \
+    lsm:latest
 ```
 
 ### 构建参数说明
@@ -58,7 +69,7 @@ git clone <仓库URL> && cd live-source-manager-main
 ./build.sh --proxy
 
 # 启动
-docker run -d --name lsm -p 12345:12345 lsm:latest
+docker run -d --name lsm -p 12345:12345 -p 23455:23455 lsm:latest
 ```
 
 ---
@@ -101,12 +112,16 @@ docker run -d --name lsm -p 12345:12345 lsm:latest
 # 构建
 docker build --build-arg BASE_IMAGE=docker.1ms.run/python:3.9-slim-bookworm -t lsm:latest .
 
-# 运行（前台）
+# 运行
+# -p 12345:12345 为M3U播放列表端口
+# -p 23455:23455 为Web管理界面端口（可选）
 docker run -d --name lsm \
   -p 12345:12345 \
+  -p 23455:23455 \
   -v /host/config:/config \
   -v /host/output:/www/output \
   -e NGINX_PORT=12345 \
+  -e WEB_PORT=23455 \
   -e TEST_TIMEOUT=30 \
   -e UPDATE_CRON="0 6,12,18,22 * * *" \
   --restart unless-stopped \
@@ -118,8 +133,10 @@ docker run -d --name lsm \
 | 变量 | 默认值 | 说明 |
 |:----|:------|:-----|
 | `NGINX_PORT` | `12345` | Nginx 监听端口 |
+| `WEB_PORT` | `23455` | Web 管理界面端口 |
+| `CONFIG_PATH` | `/config/config.ini` | 配置文件路径 |
 | `TEST_TIMEOUT` | `30` | 单流测试超时时间（秒） |
-| `CONCURRENT_THREADS` | `10` | 并发测试数量 |
+| `CONCURRENT_THREADS` | `40` | 并发测试数量 |
 | `OUTPUT_FILENAME` | `live.m3u` | 输出文件名称 |
 | `UPDATE_CRON` | `0 6,12,18,22 * * *` | 定时更新 cron 表达式 |
 
@@ -151,7 +168,7 @@ services:
     environment:
       - NGINX_PORT=12345
       - TEST_TIMEOUT=30
-      - CONCURRENT_THREADS=10
+      - CONCURRENT_THREADS=40
       - UPDATE_CRON=0 6,12,18,22 * * *
     restart: unless-stopped
     healthcheck:
@@ -171,10 +188,10 @@ services:
 ```ini
 [Network]
 timeout = 30
-concurrent_threads = 10
+concurrent_threads = 40
 proxy_type =
 proxy_host =
-proxy_port =
+proxy_port = 1800
 proxy_username =
 proxy_password =
 
@@ -263,7 +280,7 @@ http://<服务器IP>:12345/status
 
 ```
 lsm/
-├── app/                        # Python 核心模块（13 个）
+├── app/                        # Python 核心模块（11 个）
 │   ├── __init__.py             # 包初始化
 │   ├── main.py                 # 主入口及 EnhancedLiveSourceManager
 │   ├── config_manager.py       # 配置管理与热加载
@@ -272,24 +289,57 @@ lsm/
 │   ├── channel_rules.py        # 频道规则与自动分类
 │   ├── m3u_generator.py        # M3U 文件生成
 │   ├── url_sanitizer.py        # URL 安全审查（抵御 6 种攻击向量）
-│   ├── error_handler.py        # 统一错误处理
-│   ├── exceptions.py           # 异常体系（6 层继承）
-│   ├── file_utils.py           # 文件工具
 │   ├── models.py               # 数据模型（TypedDict）
-│   ├── helpers.py              # 辅助函数
-│   ├── network_test.py         # 网络诊断脚本（运维用）
-│   └── test_http.py            # HTTP 服务测试脚本（运维用）
-├── tests/                      # 测试文件（17 个，207 个用例）
+│   ├── scripts.py              # 命令行工具集（网络诊断、HTTP测试等）
+│   └── utils.py                # 通用工具（错误处理、文件操作、辅助函数合并）
+├── web/                        # Web 管理模块
+│   ├── __init__.py             # Flask 应用工厂
+│   ├── webapp.py               # 主应用与路由
+│   ├── auth.py                 # 认证管理
+│   ├── crypto_utils.py         # 密钥加密工具
+│   ├── models.py               # 数据模型
+│   ├── templates/              # Jinja2 模板
+│   │   ├── base.html           #   基础布局
+│   │   ├── login.html          #   登录页
+│   │   ├── dashboard.html      #   仪表盘
+│   │   ├── config.html         #   配置管理
+│   │   ├── sources.html        #   源管理
+│   │   ├── source_form.html    #   源表单
+│   │   ├── logs.html           #   日志查看
+│   │   ├── users.html          #   用户管理
+│   │   ├── audit.html          #   审计日志
+│   │   └── livetest.html       #   在线测试
+│   └── static/
+│       ├── css/app.css
+│       └── js/app.js
+├── tests/                      # 测试文件（25 个，378 个用例）
 │   ├── test_main.py
 │   ├── test_source_manager.py
 │   ├── test_stream_tester.py
 │   ├── test_channel_rules.py
 │   ├── test_m3u_generator.py
 │   ├── test_config_manager.py
-│   ├── test_url_sanitizer.py
+│   ├── test_config_reload.py
+│   ├── test_config_sqlite.py
+│   ├── test_config_sqlite_r2.py
+│   ├── test_encrypt_key.py
+│   ├── test_error_handler.py
+│   ├── test_exceptions.py
+│   ├── test_file_utils.py
+│   ├── test_gitignore.py
+│   ├── test_integration_config.py
+│   ├── test_m3u_generator.py
+│   ├── test_models.py
 │   ├── test_network_test.py
+│   ├── test_periodic.py
+│   ├── test_source_manager.py
+│   ├── test_startup.py
+│   ├── test_stream_tester.py
 │   ├── test_test_http.py
-│   └── ……
+│   ├── test_url_sanitizer.py
+│   ├── test_web_api.py
+│   ├── test_web_auth.py
+│   └── test_websocket.py
 ├── config/
 │   ├── config.ini              # 主配置
 │   └── channel_rules.yml       # 频道规则
@@ -311,9 +361,13 @@ main.py
   ├── source_manager.py     ← 源下载（依赖 aiohttp）
   │     └── url_sanitizer.py ← URL 安全审查
   ├── stream_tester.py      ← 流测试（依赖 ffprobe）
-  │     └── file_utils.py   ← 文件操作
+  │     └── utils.py        ← 通用工具（文件操作、错误处理等）
   ├── channel_rules.py      ← 频道分类
-  └── m3u_generator.py      ← M3U 输出
+  ├── m3u_generator.py      ← M3U 输出
+  ├── scripts.py            ← 命令行工具
+  └── web/webapp.py        ← Web 管理界面
+        ├── auth.py         ←   认证
+        └── crypto_utils.py ←   密钥加密
 ```
 
 ---
@@ -326,6 +380,9 @@ main.py
 | `/status` | GET | Nginx 状态（仅限内网） |
 | `/*.m3u` | GET | M3U 播放列表 |
 | `/*.txt` | GET | TXT 格式源列表 |
+| `/api/auth/*` | POST | 管理员认证（登录、登出、令牌刷新） |
+| `/api/config/*` | GET/POST | 直播源配置管理（增删改查） |
+| `/api/keys/*` | GET/POST | 加密密钥管理（展示、刷新、重置） |
 
 ---
 
@@ -400,7 +457,7 @@ PYTHONPATH=app python3 -m pytest tests/ -v
 ### 运行测试
 
 ```bash
-# 全量测试（207 个用例）
+# 全量测试（378 个用例）
 PYTHONPATH=app python3 -m pytest tests/ -v --tb=short
 
 # 指定模块
@@ -482,7 +539,7 @@ docker exec lsm python3 /app/network_test.py
 > **项目交付状态**
 >
 > ✅ 三位专家终审通过（架构/代码/测试）
-> ✅ 207 个测试用例全部通过
+> ✅ 378 个测试用例全部通过
 > ✅ Docker 镜像 460MB，一键部署
 > ✅ 所有历史问题已修复（3 轮审核，33 项修复）
 > ✅ 最终报告：`REPORT.md`

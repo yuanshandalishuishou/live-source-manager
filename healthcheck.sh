@@ -22,5 +22,13 @@ exit(0 if age < 7200 else 1)
     fi
 fi
 
+# 检查Web管理服务（如果配置了WEB_PORT）
+if [ -n "$WEB_PORT" ]; then
+    if ! curl -sf "http://localhost:${WEB_PORT:-23455}/api/auth/encrypt-key-status" > /dev/null 2>&1; then
+        echo "Web service not running on port ${WEB_PORT}"
+        # 不exit 1，仅记录warning，因为健康检查以Nginx为主
+    fi
+fi
+
 echo "healthy"
 exit 0
