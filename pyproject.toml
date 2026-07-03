@@ -5,6 +5,17 @@ description = "直播源管理工具 — 增强分层筛选修复版"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "pre-commit>=4.0",
+    "pytest>=8.0",
+    "pytest-asyncio>=1.0",
+    "types-requests",
+    "types-PyYAML",
+]
+
 [tool.ruff]
 target-version = "py311"
 line-length = 120
@@ -33,8 +44,10 @@ ignore = ["E501", "B008", "SIM108", "RUF001", "RUF002", "RUF003"]
 # CLI 入口和 logger fallback 使用 print 是合理的
 "app/manager.py" = ["T201"]
 "app/logger.py" = ["T201"]
+# conftest.py 需要在导入前设置环境，模块级导入不在顶部是预期行为
+"tests/conftest.py" = ["E402", "I001", "SIM105", "F401", "UP009"]
 # 测试代码允许一些宽松
-"tests/*" = ["B017", "S101"]
+"tests/*" = ["B017", "S101", "RUF059", "F841"]
 
 [tool.ruff.format]
 quote-style = "single"

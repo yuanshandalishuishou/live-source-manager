@@ -14,6 +14,7 @@ pytest 共享环境配置
 修复（审计 P2-16A）：添加 clean_db_before_each fixture，每个测试前清理数据库
 避免测试间数据污染。
 """
+
 import os
 import sys
 import tempfile
@@ -33,11 +34,13 @@ os.environ['WEB_ADMIN_PASSWORD'] = SHARED_ADMIN_PW
 
 # ── 覆写 models 全局变量 ────────────────────────
 from web import models
+
 models.DATA_DIR = SHARED_TMP_DIR
 models.DB_PATH = os.path.join(SHARED_TMP_DIR, 'web.db')
 
 # ── 覆写 web.webapp.CONFIG_PATH (原 config_proxy) ─
 import web.webapp
+
 web.webapp.CONFIG_PATH = os.path.join(SHARED_TMP_DIR, 'config.ini')
 
 # ── 覆写 web.webapp 下的 CSRF_EXEMPT_PATHS 确保一致 ──
@@ -65,6 +68,7 @@ models.init_db(admin_password=SHARED_ADMIN_PW)
 
 # 导入加密工具并初始化密钥（确保测试前加密体系就绪）
 import web.crypto_utils as _cu
+
 try:
     _cu.ensure_key_initialized()
 except Exception:
@@ -78,12 +82,14 @@ import logging
 # 注意：Session 存在全局内存 dict 中，每个测试前清理 DB 不自动清除 session
 # 因此我们同时清理内存中的 session
 
+
 @pytest.fixture(autouse=True)
 def clean_db_before_each():
     """每个测试函数前清理数据库和会话状态，防止测试间数据污染"""
     # 清理所有数据表
     try:
         from web import models
+
         conn = models.get_conn()
         conn.executescript("""
             DELETE FROM audit_logs;
@@ -99,6 +105,7 @@ def clean_db_before_each():
     # 清理内存中的 session 和 CSRF token
     try:
         from web.webapp import _auth_sessions, _auth_csrf_tokens
+
         _auth_sessions.clear()
         _auth_csrf_tokens.clear()
     except Exception:
@@ -108,6 +115,7 @@ def clean_db_before_each():
     # （P2-16B 修复：conftest 初始化的 _initialized_flag 会阻止 test_encrypt_key 的重新初始化）
     try:
         import web.crypto_utils as _cu2
+
         _cu2._initialized_flag = False
         _cu2._fernet_instance = None
     except Exception:
@@ -118,12 +126,16 @@ def clean_db_before_each():
 # 1) pytest_sessionfinish – pytest 框架内触发，避免并发 xdist 竞态
 # 2) atexit – Python 进程退出时兜底
 
+
 def pytest_sessionfinish(session, exitstatus):
     _cleanup_tmpdir()
+
 
 def _cleanup_tmpdir():
     if os.path.isdir(SHARED_TMP_DIR):
         shutil.rmtree(SHARED_TMP_DIR, ignore_errors=True)
 
+
 import atexit
+
 atexit.register(_cleanup_tmpdir)
