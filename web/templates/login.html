@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}登录 - 直播源管理器{% endblock %}
+{% block page_title %}登录{% endblock %}
+
+{% block head %}
+<style>
+.app-layout { display: block; }
+.sidebar { display: none; }
+.main-content { margin-left: 0; max-width: 400px; margin: 60px auto; }
+.top-bar { display: none; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="login-card">
+    <div class="login-header">
+        <h2>直播源管理器</h2>
+        <p>Live Source Manager — Web 管理</p>
+    </div>
+    <form hx-post="/api/auth/login"
+          hx-target="body"
+          hx-push-url="/"
+          hx-indicator="#login-spinner"
+          class="login-form">
+        <div class="form-group">
+            <label for="username">用户名</label>
+            <input type="text" id="username" name="username" class="form-input" required autofocus>
+        </div>
+        <div class="form-group">
+            <label for="password">密码</label>
+            <input type="password" id="password" name="password" class="form-input" required>
+        </div>
+        <div id="login-error" class="alert alert-error" style="display:none"></div>
+        <button type="submit" class="btn btn-primary btn-block" id="login-btn">
+            <span id="login-spinner" class="spinner htmx-indicator"></span>
+            登录
+        </button>
+    </form>
+</div>
+
+<script>
+document.querySelector('.login-form')?.addEventListener('htmx:responseError', function(evt) {
+    const errDiv = document.getElementById('login-error');
+    errDiv.style.display = 'block';
+    try {
+        const data = JSON.parse(evt.detail.xhr.responseText);
+        errDiv.textContent = data.detail || '登录失败';
+    } catch {
+        errDiv.textContent = '登录失败';
+    }
+});
+document.querySelector('.login-form')?.addEventListener('htmx:afterRequest', function(evt) {
+    if (evt.detail.successful) {
+        window.location.href = '/';
+    }
+});
+</script>
+{% endblock %}

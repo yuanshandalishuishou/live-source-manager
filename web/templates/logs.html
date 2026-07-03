@@ -1,0 +1,198 @@
+{% extends "base.html" %}
+{% block title %}日志与审计 - 直播源管理器{% endblock %}
+{% block page_title %}日志与审计{% endblock %}
+
+{% block content %}
+<div class="logs-page">
+    <!-- Tab 切换（使用 CSS class 驱动，与 rules.html/config.html 一致） -->
+    <div class="tabs" role="tablist">
+        <button class="tab-btn active" data-tab="app-logs" role="tab" aria-selected="true">📋 应用日志</button>
+        {% if user and user.role == 'admin' %}
+        <button class="tab-btn" data-tab="audit-logs" role="tab" aria-selected="false">🔍 审计日志</button>
+        {% endif %}
+    </div>
+
+    <!-- 应用日志 Tab -->
+    <div id="tab-app-logs" class="tab-content active" role="tabpanel">
+        <div class="toolbar">
+            <div class="toolbar-left">
+                <select id="log-level" class="form-select form-select-sm" onchange="refreshLogs()">
+                    <option value="ALL">ALL</option>
+                    <option value="DEBUG">DEBUG</option>
+                    <option value="INFO" selected>INFO</option>
+                    <option value="WARNING">WARNING</option>
+                    <option value="ERROR">ERROR</option>
+                </select>
+                <input type="number" id="log-tail" class="form-input form-input-sm" value="100"
+                       style="width:80px" onchange="refreshLogs()" placeholder="行数" min="10" max="1000">
+                <span style="font-size:13px;color:var(--text-light)" id="log-count"></span>
+            </div>
+            <div class="toolbar-right">
+                <label style="font-size:13px;display:flex;align-items:center;gap:4px;cursor:pointer">
+                    <input type="checkbox" id="auto-refresh" checked onchange="toggleAutoRefresh()">
+                    自动刷新
+                </label>
+                <button class="btn btn-outline btn-sm" onclick="refreshLogs()">🔄 刷新</button>
+                {% if user and user.role == 'admin' %}
+                <a href="#" class="btn btn-outline btn-sm" onclick="downloadLogs();return false">⬇ 下载</a>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="log-viewer" id="logs-content">
+                <div class="loading">加载中...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 审计日志 Tab（仅管理员可见） -->
+    <div id="tab-audit-logs" class="tab-content" role="tabpanel">
+        <div class="toolbar">
+            <div class="toolbar-left">
+                <label style="font-size:14px;display:flex;align-items:center;gap:6px">
+                    操作类型:
+                    <select id="audit-action-filter" class="form-select form-select-sm" onchange="loadAuditLogs(1)">
+                        <option value="">全部</option>
+                    </select>
+                </label>
+                <span style="font-size:13px;color:var(--text-light)" id="audit-total"></span>
+            </div>
+            <div class="toolbar-right">
+                <button class="btn btn-outline btn-sm" onclick="loadAuditLogs(currentPage)">🔄 刷新</button>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-body" id="audit-list">
+                <div class="loading">加载中...</div>
+            </div>
+        </div>
+
+        <div class="pagination" id="audit-pagination"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block head %}
+<script src="/static/js/audit-components.js"></script>
+<script>
+var autoRefreshTimer = null;
+var currentPage = 1;
+var pageSize = 50;
+
+// ── Tab 切换（class 驱动） ──────────────────────
+function switchTab(name) {
+    // 切换 tab 按钮
+    document.querySelectorAll('.logs-page .tabs .tab-btn').forEach(function(el) {
+        el.classList.toggle('active', el.dataset.tab === name);
+        el.setAttribute('aria-selected', el.dataset.tab === name ? 'true' : 'false');
+    });
+    // 切换 tab 内容面板
+    document.querySelectorAll('.logs-page .tab-content').forEach(function(el) {
+        el.classList.toggle('active', el.id === 'tab-' + name);
+    });
+
+    if (name === 'audit-logs') {
+        loadActionTypes();
+        loadAuditLogs(1);
+        if (autoRefreshTimer) { clearInterval(autoRefreshTimer); autoRefreshTimer = null; }
+    } else {
+        toggleAutoRefresh();
+    }
+}
+
+// ── 初始化 Tab 绑定 ──────────────────────────────
+document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.logs-page .tabs .tab-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var tabName = this.dataset.tab;
+            if (tabName) switchTab(tabName);
+        });
+    });
+    toggleAutoRefresh();
+});
+
+// ── 应用日志（修复：fetch JSON 后按行渲染为独立 div，避免 JSON 原文显示与换行问题） ──
+function refreshLogs() {
+    const level = document.getElementById('log-level').value;
+    const tail = document.getElementById('log-tail').value;
+    const levelParam = level === 'ALL' ? 'INFO' : level;
+    const url = '/api/logs?level=' + levelParam + '&tail=' + tail;
+    fetch(url)
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var logLines = data.logs || [];
+            var html = logLines.map(function(line) {
+                return '<div class="log-line">' + escapeHtml(line) + '</div>';
+            }).join('');
+            document.getElementById('logs-content').innerHTML = html;
+            var countEl = document.getElementById('log-count');
+            if (countEl) countEl.textContent = '共 ' + logLines.length + ' 行';
+        })
+        .catch(function(e) {
+            document.getElementById('logs-content').innerHTML = '<div class="alert alert-error">加载失败: ' + e + '</div>';
+        });
+}
+
+function toggleAutoRefresh() {
+    if (autoRefreshTimer) { clearInterval(autoRefreshTimer); autoRefreshTimer = null; }
+    if (document.getElementById('auto-refresh').checked && !document.getElementById('tab-audit-logs').classList.contains('active')) {
+        autoRefreshTimer = setInterval(refreshLogs, 5000);
+    }
+}
+
+function downloadLogs() {
+    fetch('/api/logs/download')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.path) {
+                fetch('/api/logs?level=ALL&tail=99999')
+                    .then(function(r) { return r.json(); })
+                    .then(function(logData) {
+                        var blob = new Blob([(logData.logs || []).join('\n')], {type: 'text/plain;charset=utf-8'});
+                        var a = document.createElement('a');
+                        a.href = URL.createObjectURL(blob);
+                        a.download = data.filename || 'app.log';
+                        a.click();
+                        URL.revokeObjectURL(a.href);
+                    });
+            }
+        })
+        .catch(function(e) { alert('下载失败: ' + e); });
+}
+
+// ── 审计日志 ──
+function loadActionTypes() {
+    fetch('/api/audit/actions')
+        .then(function(r) { return r.json(); })
+        .then(function(actions) {
+            var sel = document.getElementById('audit-action-filter');
+            if (!sel) return;
+            while (sel.options.length > 1) sel.remove(1);
+            (actions || []).forEach(function(a) {
+                var opt = document.createElement('option');
+                opt.value = a;
+                opt.textContent = actionLabels[a] || a;
+                sel.appendChild(opt);
+            });
+        })
+        .catch(function() {});
+}
+
+function loadAuditLogs(page) {
+    page = page || 1;
+    currentPage = page;
+    var action = document.getElementById('audit-action-filter').value;
+    var url = '/api/audit?page=' + page + '&size=' + pageSize;
+    if (action) url += '&action=' + encodeURIComponent(action);
+
+    fetch(url)
+        .then(function(r) { return r.json(); })
+        .then(function(data) { renderAuditLogs(data); })
+        .catch(function(e) {
+            document.getElementById('audit-list').innerHTML = '<div class="alert alert-error">加载失败: ' + e + '</div>';
+        });
+}
+</script>
+{% endblock %}

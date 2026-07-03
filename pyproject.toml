@@ -1,0 +1,72 @@
+[project]
+name = "live-source-manager"
+version = "2.0.0"
+description = "直播源管理工具 — 增强分层筛选修复版"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+src = ["app", "web", "tests"]
+
+[tool.ruff.lint]
+# 规则集说明：
+# E/W  — pycodestyle 错误/警告
+# F    — pyflakes (未使用导入/变量等)
+# I    — isort (导入排序)
+# UP   — pyupgrade (现代化语法)
+# B    — flake8-bugbear (常见陷阱)
+# SIM  — flake8-simplify (代码简化)
+# TCH  — flake8-type-checking (类型导入优化)
+# RUF  — ruff 特有规则
+select = ["E", "W", "F", "I", "UP", "B", "SIM", "TCH", "RUF"]
+
+# 合理豁免：
+# E501 — 行长度由 formatter 管，lint 不重复检查
+# B008 — FastAPI Depends() 在默认参数中使用是标准模式
+# SIM108 — 三元表达式不一定更清晰
+# RUF001/002/003 — 中文全角标点（✓✗→等）被误报为 ambiguous unicode
+ignore = ["E501", "B008", "SIM108", "RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.lint.per-file-ignores]
+# CLI 入口和 logger fallback 使用 print 是合理的
+"app/manager.py" = ["T201"]
+"app/logger.py" = ["T201"]
+# 测试代码允许一些宽松
+"tests/*" = ["B017", "S101"]
+
+[tool.ruff.format]
+quote-style = "single"
+indent-style = "space"
+docstring-code-format = true
+
+[tool.mypy]
+python_version = "3.11"
+# 基本模式：检查类型注解的正确性，但不强制 strict
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_return_any = false
+no_implicit_optional = true
+check_untyped_defs = true
+# 排除测试和迁移文件
+exclude = ["tests/", "venv/", ".venv/"]
+
+# 对核心模块启用更严格的检查
+[[tool.mypy.overrides]]
+module = ["app.exceptions", "app.utils", "app.logger"]
+strict = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+filterwarnings = [
+    "ignore::DeprecationWarning:starlette.testclient",
+    "ignore::pytest.PytestReturnNotNoneWarning",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.backends._legacy:_Backend"

@@ -1,0 +1,1095 @@
+{% extends "base.html" %}
+{% block title %}源管理 - 直播源管理器{% endblock %}
+{% block page_title %}源管理{% endblock %}
+
+{% block content %}
+<div class="sources-page">
+    <!-- 工具栏 -->
+    <div class="toolbar">
+        <div class="toolbar-left">
+            <span id="source-stats-info" class="text-muted" style="font-size:13px;color:var(--text-light)"></span>
+        </div>
+        <div class="toolbar-right">
+            {% if user and user.role == 'admin' %}
+            <button class="btn btn-primary btn-sm" onclick="showAddFileForm()">+ 添加源文件</button>
+            <button class="btn btn-outline btn-sm" onclick="collectAllSources()" id="btn-collect">采集所有源</button>
+            {% endif %}
+            <button class="btn btn-outline btn-sm" onclick="loadSourceFiles()">刷新</button>
+        </div>
+    </div>
+
+    <!-- 第一步：源文件列表 -->
+    <div class="card">
+        <div class="card-header">
+            <h3>源文件列表</h3>
+        </div>
+        <div class="card-body">
+            <table class="data-table" id="source-files-table">
+                <thead>
+                    <tr>
+                        <th>名称</th>
+                        <th>类型</th>
+                        <th>地址 / 路径</th>
+                        <th>状态</th>
+                        <th>频道数</th>
+                        <th>UA</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody id="source-files-tbody">
+                    <tr><td colspan="7" class="loading">加载中...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- 第二步：频道展开区（点击"展开"后显示） -->
+    <div class="card" id="channels-card" style="display:none">
+        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center">
+            <h3 id="channels-title">频道列表</h3>
+            <button class="btn btn-icon" onclick="closeChannels()">×</button>
+        </div>
+        <div class="card-body">
+            <div id="channels-info" style="margin-bottom:12px;font-size:13px;color:var(--text-light)"></div>
+            <div style="overflow-x:auto">
+                <table class="data-table" id="channels-table">
+                    <thead>
+                        <tr>
+                            <th>频道名</th>
+                            <th>URL</th>
+                            <th>分组</th>
+                            <th>分类</th>
+                            <th>UA</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="channels-tbody">
+                    </tbody>
+                </table>
+            </div>
+            <div class="pagination" id="channels-pagination"></div>
+        </div>
+    </div>
+</div>
+
+{# ── 添加源文件 Modal ── #}
+<div id="add-file-modal" class="modal" style="display:none">
+    <div class="modal-backdrop" onclick="hideAddFileForm()"></div>
+    <div class="modal-content" style="min-width:520px">
+        <div class="modal-header">
+            <h3>添加源文件</h3>
+            <button class="btn btn-icon" onclick="hideAddFileForm()">×</button>
+        </div>
+        <div class="modal-body">
+            <form id="add-file-form" class="form">
+                <div class="form-group">
+                    <label>源类型</label>
+                    <select id="file-type" class="form-select" onchange="onTypeChange()">
+                        <option value="online">在线文件 URL</option>
+                        <option value="github">GitHub 仓库源</option>
+                        <option value="local">本地文件 / 目录</option>
+                    </select>
+                </div>
+                <div class="form-group" id="value-group">
+                    <label id="value-label">文件 URL</label>
+                    <input type="text" id="file-value" class="form-input" placeholder="https://example.com/iptv.m3u">
+                    <span class="form-help" id="value-help">包含多个视频源的 m3u/txt 文件 URL</span>
+                </div>
+                <div class="form-group" id="method-group" style="display:none">
+                    <label>下载方式（仅 GitHub 源）</label>
+                    <select id="download-method" class="form-select">
+                        <option value="raw" selected>raw.githubusercontent.com（默认）</option>
+                        <option value="api">GitHub API（有速率限制）</option>
+                        <option value="proxy">SOCKS/HTTP 代理</option>
+                        <option value="mirror">代理网站（如 ghproxy.com）</option>
+                    </select>
+                </div>
+                <div id="add-file-result"></div>
+            </form>
+        </div>
+        <div class="modal-footer" style="display:flex;gap:8px;justify-content:flex-end;margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
+            <button class="btn btn-outline" onclick="hideAddFileForm()">取消</button>
+            <button class="btn btn-primary" onclick="submitAddFile()">添加</button>
+        </div>
+    </div>
+</div>
+
+<style>
+/* 分类编辑 popover 样式 */
+.category-edit-popover {
+    position: absolute;
+    z-index: 1000;
+    background: var(--card-bg, #fff);
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: 12px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.15);
+    padding: 16px;
+    min-width: 320px;
+    max-width: 400px;
+}
+.category-edit-popover .popover-title {
+    font-weight: 600;
+    font-size: 14px;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border, #e2e8f0);
+}
+.category-edit-popover .dim-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+.category-edit-popover .dim-row label {
+    font-size: 12px;
+    color: var(--text-light, #64748b);
+    min-width: 48px;
+    text-align: right;
+}
+.category-edit-popover .dim-row select {
+    flex: 1;
+    padding: 4px 8px;
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: 6px;
+    font-size: 13px;
+    background: var(--input-bg, #fff);
+    color: var(--text, #1e293b);
+}
+.category-edit-popover .popover-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    margin-top: 12px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border, #e2e8f0);
+}
+.category-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.category-badge.auto { background: #e0f2fe; color: #0369a1; }
+.category-badge.manual { background: #fef3c7; color: #92400e; border: 1px dashed #f59e0b; }
+.category-badge:hover { opacity: 0.8; }
+.mapping-summary {
+    font-size: 11px;
+    color: var(--text-light, #64748b);
+    margin-top: 2px;
+    max-width: 200px;
+    line-height: 1.4;
+}
+</style>
+
+<script>
+// ══════════════════════════════════════════════════
+// 源文件管理（第一步）
+// ══════════════════════════════════════════════════
+
+var sourceFilesData = [];
+var categoryDict = {};       // { dimension: [{value, label, sort_order}, ...] }
+var activePopover = null;    // 当前打开的分类 popover 引用
+
+// ── 加载分类字典（页面初始化时） ──
+function loadCategoryDictionary() {
+    fetch('/api/category-dictionary')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            categoryDict = data.raw || {};
+        })
+        .catch(function(e) {
+            console.error('加载分类字典失败:', e);
+        });
+}
+
+// ── 渲染源文件表格 ──
+function renderSourceFiles(data) {
+    var files = data.files || [];
+    sourceFilesData = files;
+    var tbody = document.getElementById('source-files-tbody');
+
+    var totalChannels = 0;
+    for (var i = 0; i < files.length; i++) totalChannels += files[i].channel_count || 0;
+    var el = document.getElementById('source-stats-info');
+    if (el) el.textContent = '源文件: ' + files.length + ' 个 | 频道: ' + totalChannels + ' 个';
+
+    if (files.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" class="empty-state">暂无源文件，点击"添加源文件"开始</td></tr>';
+        return;
+    }
+
+    var html = '';
+    for (var i = 0; i < files.length; i++) {
+        var f = files[i];
+        var typeLabel = '', typeClass = '';
+        if (f.type === 'online') { typeLabel = '在线URL'; typeClass = 'badge badge-blue'; }
+        else if (f.type === 'github') {
+            typeLabel = 'GitHub';
+            var method = f.download_method || 'raw';
+            var methodLabels = {raw:'raw', api:'API', proxy:'代理', mirror:'镜像'};
+            typeLabel += ' <span class="badge badge-gray" style="font-size:10px;cursor:pointer" title="' + (f.download_method_label || 'raw.githubusercontent.com') + ' — 点击切换" onclick="changeDownloadMethod(\'' + f.id + '\',\'' + method + '\')">#' + (methodLabels[method] || method) + '</span>';
+            typeClass = 'badge badge-yellow';
+        }
+        else { typeLabel = '本地'; typeClass = 'badge badge-green'; }
+
+        var statusLabel = '', statusClass = '';
+        if (f.file_status === 'downloaded') {
+            statusLabel = '已下载';
+            if (f.discovered_count > 0) statusLabel += ' ' + f.matched_count + '/' + f.discovered_count;
+            statusClass = 'badge badge-green';
+        }
+        else if (f.file_status === 'partial') {
+            statusLabel = '部分下载 ' + f.matched_count + '/' + f.discovered_count;
+            statusClass = 'badge badge-yellow';
+        }
+        else if (f.file_status === 'not_downloaded') {
+            statusLabel = '未下载 ' + f.matched_count + '/' + f.discovered_count;
+            statusClass = 'badge badge-red';
+        }
+        else if (f.file_status === 'github_pending') { statusLabel = '待展开'; statusClass = 'badge badge-gray'; }
+        else if (f.file_status === 'local_exists') { statusLabel = '存在'; statusClass = 'badge badge-green'; }
+        else if (f.file_status === 'local_missing') { statusLabel = '路径缺失'; statusClass = 'badge badge-red'; }
+        else { statusLabel = '未知'; statusClass = 'badge badge-gray'; }
+
+        var chCount = f.channel_count > 0 ? f.channel_count : '-';
+        var addrDisplay = truncateText(f.url_or_path || '', 60);
+
+        // UA 状态显示
+        var ua = f.ua_settings || {};
+        var uaBadge = '';
+        if (ua.enabled && ua.ua_value) {
+            var uaShort = truncateText(ua.ua_value, 25);
+            var uaPosLabel = ua.ua_position === 'url' ? 'URL参数' : '属性';
+            uaBadge = '<span class="badge badge-blue" style="cursor:pointer;font-size:11px" title="' + escapeHtmlAttr(ua.ua_value) + ' (' + uaPosLabel + ')" onclick="showFileUaEditor(\'' + f.id + '\')">UA: ' + escapeHtml(uaShort) + '</span>';
+        } else {
+            uaBadge = '<span class="badge badge-gray" style="cursor:pointer;font-size:11px" onclick="showFileUaEditor(\'' + f.id + '\')">未设置</span>';
+        }
+
+        html += '<tr id="file-row-' + f.id + '">';
+        html += '<td>' + escapeHtml(f.name || '') + '</td>';
+        html += '<td><span class="' + typeClass + '">' + typeLabel + '</span></td>';
+        html += '<td class="url-cell" title="' + escapeHtml(f.url_or_path || '') + '">' + escapeHtml(addrDisplay) + '</td>';
+        html += '<td><span class="' + statusClass + '">' + statusLabel + '</span></td>';
+        html += '<td style="text-align:center">' + chCount + '</td>';
+        html += '<td>' + uaBadge + '</td>';
+        html += '<td class="actions">';
+        html += '<button class="btn btn-sm btn-outline" onclick="expandChannels(\'' + f.id + '\')">展开</button>';
+        {% if user and user.role == 'admin' %}
+        html += '<button class="btn btn-sm btn-outline" onclick="deleteSourceFile(\'' + f.id + '\')">删除</button>';
+        {% endif %}
+        html += '</td>';
+        html += '</tr>';
+    }
+    tbody.innerHTML = html;
+}
+
+function truncateText(text, maxLen) {
+    if (!text) return '';
+    if (text.length > maxLen) return text.substring(0, maxLen - 3) + '...';
+    return text;
+}
+
+// ── 加载源文件列表 ──
+function loadSourceFiles() {
+    fetch('/api/source-files')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            renderSourceFiles(data);
+        })
+        .catch(function(e) {
+            document.getElementById('source-files-tbody').innerHTML =
+                '<tr><td colspan="6" class="alert alert-error">加载失败: ' + escapeHtml(String(e)) + '</td></tr>';
+        });
+}
+
+// ── 采集所有源 ──
+async function collectAllSources() {
+    var btn = document.getElementById('btn-collect');
+    btn.disabled = true;
+    btn.textContent = '采集中...';
+    var csrfToken = await ensureCsrfToken();
+    fetch('/api/sources/collect', {
+        method: 'POST',
+        headers: { 'X-CSRF-Token': csrfToken }
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        showToast(data.message || '源采集已启动', 'info');
+        setTimeout(function() {
+            loadSourceFiles();
+            btn.disabled = false;
+            btn.textContent = '采集所有源';
+        }, 5000);
+    })
+    .catch(function(e) {
+        showToast('采集请求失败: ' + e, 'error');
+        btn.disabled = false;
+        btn.textContent = '采集所有源';
+    });
+}
+
+// ══════════════════════════════════════════════════
+// 频道展开（第二步）
+// ══════════════════════════════════════════════════
+
+var channelsCurrentPage = 1;
+var channelsPageSize = 100;
+var channelsAllData = [];
+var currentExpandedId = null;
+
+function expandChannels(fileId) {
+    if (currentExpandedId === fileId) {
+        closeChannels();
+        return;
+    }
+    currentExpandedId = fileId;
+
+    var rows = document.querySelectorAll('#source-files-tbody tr');
+    rows.forEach(function(r) { r.style.background = ''; });
+    var row = document.getElementById('file-row-' + fileId);
+    if (row) row.style.background = 'rgba(37,99,235,0.08)';
+
+    var card = document.getElementById('channels-card');
+    card.style.display = '';
+    var tbody = document.getElementById('channels-tbody');
+    tbody.innerHTML = '<tr><td colspan="6" class="loading">解析中...</td></tr>';
+    document.getElementById('channels-info').textContent = '';
+    document.getElementById('channels-pagination').innerHTML = '';
+
+    var fileObj = null;
+    for (var i = 0; i < sourceFilesData.length; i++) {
+        if (sourceFilesData[i].id === fileId) { fileObj = sourceFilesData[i]; break; }
+    }
+    document.getElementById('channels-title').textContent = '频道列表 - ' + (fileObj ? fileObj.name : '');
+
+    fetch('/api/source-files/' + fileId + '/channels')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            channelsAllData = data.channels || [];
+            channelsCurrentPage = 1;
+            if (data.message) {
+                document.getElementById('channels-info').textContent = data.message;
+            } else {
+                document.getElementById('channels-info').textContent = '共 ' + data.total + ' 个频道';
+            }
+            renderChannelsPage();
+        })
+        .catch(function(e) {
+            tbody.innerHTML = '<tr><td colspan="6" class="alert alert-error">加载失败: ' + escapeHtml(String(e)) + '</td></tr>';
+        });
+}
+
+function closeChannels() {
+    document.getElementById('channels-card').style.display = 'none';
+    currentExpandedId = null;
+    var rows = document.querySelectorAll('#source-files-tbody tr');
+    rows.forEach(function(r) { r.style.background = ''; });
+}
+
+function renderChannelsPage() {
+    var total = channelsAllData.length;
+    var totalPages = Math.ceil(total / channelsPageSize) || 1;
+    var start = (channelsCurrentPage - 1) * channelsPageSize;
+    var end = start + channelsPageSize;
+    var pageData = channelsAllData.slice(start, end);
+
+    var tbody = document.getElementById('channels-tbody');
+    if (pageData.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="empty-state">无频道数据</td></tr>';
+    } else {
+        var html = '';
+        for (var i = 0; i < pageData.length; i++) {
+            var ch = pageData[i];
+            var chName = ch.name || '';
+            var chIdx = start + i;
+
+            // 判断是否有手动分类
+            var mapping = ch.existing_mapping;
+            var hasManual = mapping && mapping.is_manual == 1;
+            var is_manual = hasManual;
+
+            // 显示的分类文本：优先手动映射，其次自动分类
+            var catDisplay = '';
+            var catClass = 'auto';
+            if (mapping && is_manual) {
+                // 手动映射：显示多维度汇总
+                var parts = [];
+                if (mapping.content && mapping.content !== '其他频道') {
+                    var contents = mapping.content.split(',');
+                    for (var ci = 0; ci < contents.length; ci++) {
+                        parts.push(contents[ci]);
+                    }
+                }
+                if (mapping.region && mapping.region !== '未知') parts.push(mapping.region);
+                if (mapping.quality && mapping.quality !== '未知') parts.push(mapping.quality);
+                catDisplay = parts.length > 0 ? parts.join(' · ') : '已设置';
+                catClass = 'manual';
+            } else if (mapping && !is_manual) {
+                catDisplay = mapping.content || ch.category || '-';
+                catClass = 'auto';
+            } else {
+                catDisplay = ch.category || '-';
+                catClass = 'auto';
+            }
+
+            // UA 状态显示
+            var uaDisplay = '';
+            var uaClass = 'auto';
+            if (ch.ua_override) {
+                // 频道级覆盖
+                uaDisplay = truncateText(ch.user_agent || '', 20);
+                uaClass = 'manual';
+            } else if (ch.user_agent) {
+                // 文件级或源文件内置
+                uaDisplay = truncateText(ch.user_agent, 20);
+                uaClass = 'auto';
+            } else {
+                uaDisplay = '-';
+            }
+
+            html += '<tr id="ch-row-' + chIdx + '" style="position:relative">';
+            html += '<td>' + escapeHtml(chName) + '</td>';
+            html += '<td class="url-cell" title="' + escapeHtml(ch.url || '') + '">' + escapeHtml(truncateText(ch.url || '', 60)) + '</td>';
+            html += '<td>' + escapeHtml(ch.group || '-') + '</td>';
+            html += '<td><span class="category-badge ' + catClass + '" onclick="showCategoryEditor(\'' + chIdx + '\', \'' + escapeHtmlAttr(chName) + '\')" title="点击修改分类">' + escapeHtml(catDisplay) + '</span></td>';
+            html += '<td><span class="category-badge ' + uaClass + '" onclick="showChannelUaEditor(' + chIdx + ')" title="点击配置 UA">' + escapeHtml(uaDisplay) + '</span></td>';
+            html += '<td class="actions"><button class="btn btn-sm btn-outline" onclick="showCategoryEditor(\'' + chIdx + '\', \'' + escapeHtmlAttr(chName) + '\')">分类</button></td>';
+            html += '</tr>';
+        }
+        tbody.innerHTML = html;
+    }
+
+    // 分页
+    var container = document.getElementById('channels-pagination');
+    if (totalPages <= 1) { container.innerHTML = ''; return; }
+    var html = '';
+    html += '<button onclick="channelsGoPage(' + (channelsCurrentPage - 1) + ')"' + (channelsCurrentPage <= 1 ? ' disabled' : '') + '>上一页</button>';
+    var s = Math.max(1, channelsCurrentPage - 2);
+    var e = Math.min(totalPages, channelsCurrentPage + 2);
+    if (s > 1) { html += '<button onclick="channelsGoPage(1)">1</button>'; if (s > 2) html += '<span>...</span>'; }
+    for (var pi = s; pi <= e; pi++) {
+        html += '<button onclick="channelsGoPage(' + pi + ')"' + (pi === channelsCurrentPage ? ' class="active"' : '') + '>' + pi + '</button>';
+    }
+    if (e < totalPages) { if (e < totalPages - 1) html += '<span>...</span>'; html += '<button onclick="channelsGoPage(' + totalPages + ')">' + totalPages + '</button>'; }
+    html += '<button onclick="channelsGoPage(' + (channelsCurrentPage + 1) + ')"' + (channelsCurrentPage >= totalPages ? ' disabled' : '') + '>下一页</button>';
+    container.innerHTML = html;
+}
+
+function channelsGoPage(page) {
+    channelsCurrentPage = page;
+    renderChannelsPage();
+}
+
+// ══════════════════════════════════════════════════
+// 频道分类编辑 Popover
+// ══════════════════════════════════════════════════
+
+var editingChannelName = '';
+var editingChannelIdx = -1;
+
+function showCategoryEditor(chIdx, chName) {
+    // 关闭已有 popover
+    if (activePopover) {
+        activePopover.remove();
+        activePopover = null;
+    }
+
+    editingChannelIdx = parseInt(chIdx);
+    editingChannelName = chName;
+
+    var ch = channelsAllData[editingChannelIdx];
+    if (!ch) return;
+
+    var currentMapping = ch.existing_mapping || {};
+    var rowEl = document.getElementById('ch-row-' + chIdx);
+    if (!rowEl) return;
+
+    // 构建 popover HTML
+    var dimOrder = ['content', 'region', 'language', 'quality', 'media_type', 'genre'];
+    var dimLabels = {content:'内容分类', region:'地区', language:'语言', quality:'画质', media_type:'媒体类型', genre:'类型'};
+
+    var popoverHtml = '<div class="category-edit-popover" id="cat-popover">';
+    popoverHtml += '<div class="popover-title">分类编辑 — ' + escapeHtml(chName) + '</div>';
+
+    for (var d = 0; d < dimOrder.length; d++) {
+        var dim = dimOrder[d];
+        var opts = categoryDict[dim] || [];
+        var curVal = currentMapping[dim] || '';
+        var curVals = curVal ? curVal.split(',') : [];
+        var isMulti = (dim === 'content');
+        popoverHtml += '<div class="dim-row">';
+        if (isMulti) {
+            popoverHtml += '<label>' + (dimLabels[dim] || dim) + ' <span style="font-size:11px;color:var(--text-tertiary)">(可多选)</span></label>';
+            popoverHtml += '<select id="cat-dim-' + dim + '" multiple size="5" style="min-height:90px">';
+        } else {
+            popoverHtml += '<label>' + (dimLabels[dim] || dim) + '</label>';
+            popoverHtml += '<select id="cat-dim-' + dim + '">';
+            popoverHtml += '<option value="">— 自动 —</option>';
+        }
+        for (var o = 0; o < opts.length; o++) {
+            var sel = isMulti
+                ? (curVals.indexOf(opts[o].value) >= 0 ? ' selected' : '')
+                : (opts[o].value === curVal ? ' selected' : '');
+            popoverHtml += '<option value="' + escapeHtml(opts[o].value) + '"' + sel + '>' + escapeHtml(opts[o].label || opts[o].value) + '</option>';
+        }
+        popoverHtml += '</select>';
+        if (isMulti) {
+            popoverHtml += '<div style="font-size:11px;color:var(--text-tertiary);margin-top:2px">按住 Ctrl/Cmd 多选，选多个时输出会复制频道到各分组</div>';
+        }
+        popoverHtml += '</div>';
+    }
+
+    popoverHtml += '<div class="popover-actions">';
+    popoverHtml += '<button class="btn btn-sm btn-outline" onclick="hideCategoryEditor()">取消</button>';
+    popoverHtml += '<button class="btn btn-sm btn-outline" style="color:var(--error);border-color:var(--error)" onclick="clearChannelCategory()">清除手动分类</button>';
+    popoverHtml += '<button class="btn btn-sm btn-primary" onclick="saveChannelCategory()">保存</button>';
+    popoverHtml += '</div>';
+    popoverHtml += '</div>';
+
+    // 插入到行后面
+    var wrapper = document.createElement('div');
+    wrapper.innerHTML = popoverHtml;
+    var popover = wrapper.firstChild;
+
+    // 插入到行后
+    rowEl.parentNode.insertBefore(popover, rowEl.nextSibling);
+
+    // 定位 popover（相对于行的右侧）
+    activePopover = popover;
+}
+
+function hideCategoryEditor() {
+    if (activePopover) {
+        activePopover.remove();
+        activePopover = null;
+    }
+    editingChannelName = '';
+    editingChannelIdx = -1;
+}
+
+async function saveChannelCategory() {
+    if (!editingChannelName) return;
+
+    var dimOrder = ['content', 'region', 'language', 'quality', 'media_type', 'genre'];
+    var categories = {};
+    for (var d = 0; d < dimOrder.length; d++) {
+        var dim = dimOrder[d];
+        var el = document.getElementById('cat-dim-' + dim);
+        if (!el) continue;
+        if (dim === 'content' && el.multiple) {
+            var selected = [];
+            for (var i = 0; i < el.options.length; i++) {
+                if (el.options[i].selected && el.options[i].value) selected.push(el.options[i].value);
+            }
+            if (selected.length > 0) categories[dim] = selected.join(',');
+        } else if (el.value) {
+            categories[dim] = el.value;
+        }
+    }
+
+    var csrfToken = await ensureCsrfToken();
+    try {
+        var resp = await fetch('/api/channel-mapping/' + encodeURIComponent(editingChannelName), {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': csrfToken
+            },
+            body: JSON.stringify(categories)
+        });
+        var result = await resp.json();
+
+        if (resp.ok) {
+            showToast('分类已保存: ' + editingChannelName, 'success');
+            // 更新本地缓存
+            if (channelsAllData[editingChannelIdx]) {
+                channelsAllData[editingChannelIdx].existing_mapping = Object.assign(
+                    {is_manual: 1}, result.categories || categories
+                );
+            }
+            hideCategoryEditor();
+            renderChannelsPage();
+        } else {
+            showToast(result.detail || '保存失败', 'error');
+        }
+    } catch(e) {
+        showToast('保存失败: ' + e, 'error');
+    }
+}
+
+async function clearChannelCategory() {
+    if (!editingChannelName) return;
+    if (!confirm('确认清除 "' + editingChannelName + '" 的手动分类？')) return;
+
+    var csrfToken = await ensureCsrfToken();
+    try {
+        var resp = await fetch('/api/channel-mapping/' + encodeURIComponent(editingChannelName), {
+            method: 'DELETE',
+            headers: { 'X-CSRF-Token': csrfToken }
+        });
+        var result = await resp.json();
+
+        if (resp.ok) {
+            showToast('手动分类已清除', 'success');
+            if (channelsAllData[editingChannelIdx]) {
+                channelsAllData[editingChannelIdx].existing_mapping = null;
+            }
+            hideCategoryEditor();
+            renderChannelsPage();
+        } else {
+            showToast(result.detail || '清除失败', 'error');
+        }
+    } catch(e) {
+        showToast('清除失败: ' + e, 'error');
+    }
+}
+
+// ══════════════════════════════════════════════════
+// 添加源文件 Modal
+// ══════════════════════════════════════════════════
+
+function showAddFileForm() {
+    document.getElementById('add-file-modal').style.display = '';
+    document.getElementById('file-type').value = 'online';
+    document.getElementById('file-value').value = '';
+    document.getElementById('add-file-result').innerHTML = '';
+    onTypeChange();
+}
+
+function hideAddFileForm() {
+    document.getElementById('add-file-modal').style.display = 'none';
+}
+
+function onTypeChange() {
+    var type = document.getElementById('file-type').value;
+    var label = document.getElementById('value-label');
+    var input = document.getElementById('file-value');
+    var help = document.getElementById('value-help');
+    var methodGroup = document.getElementById('method-group');
+
+    if (type === 'online') {
+        label.textContent = '文件 URL';
+        input.placeholder = 'https://example.com/iptv.m3u';
+        help.textContent = '包含多个视频源的 m3u/txt 文件 URL，添加后自动下载';
+        methodGroup.style.display = 'none';
+    } else if (type === 'github') {
+        label.textContent = 'GitHub 仓库';
+        input.placeholder = 'owner/repo 或 owner/repo/branch';
+        help.textContent = '格式: owner/repo、owner/repo/branch、owner/repo/branch/path。添加后需点击"采集所有源"下载';
+        methodGroup.style.display = '';
+    } else if (type === 'local') {
+        label.textContent = '本地路径';
+        input.placeholder = './config/sources/myfile.m3u';
+        help.textContent = '相对于项目根目录的文件或目录路径，目录下所有 m3u/txt 文件都会被解析';
+        methodGroup.style.display = 'none';
+    }
+}
+
+async function submitAddFile() {
+    var type = document.getElementById('file-type').value;
+    var value = document.getElementById('file-value').value.trim();
+    var resultDiv = document.getElementById('add-file-result');
+
+    if (!value) {
+        resultDiv.innerHTML = '<div class="alert alert-error">地址不能为空</div>';
+        return;
+    }
+
+    resultDiv.innerHTML = '<div class="alert alert-info">处理中...</div>';
+    var csrfToken = await ensureCsrfToken();
+
+    var body = { type: type, value: value };
+    if (type === 'github') {
+        body.download_method = document.getElementById('download-method').value;
+    }
+
+    fetch('/api/source-files', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': csrfToken
+        },
+        body: JSON.stringify(body)
+    })
+    .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+    .then(function(resp) {
+        if (resp.ok || resp.data.status === 'created' || resp.data.status === 'exists') {
+            hideAddFileForm();
+            showToast(resp.data.message || '添加成功', resp.data.status === 'exists' ? 'info' : 'success');
+            loadSourceFiles();
+        } else {
+            resultDiv.innerHTML = '<div class="alert alert-error">' + escapeHtml(resp.data.detail || resp.data.message || '操作失败') + '</div>';
+        }
+    })
+    .catch(function(e) {
+        resultDiv.innerHTML = '<div class="alert alert-error">' + escapeHtml(String(e)) + '</div>';
+    });
+}
+
+// ══════════════════════════════════════════════════
+// 删除源文件
+// ══════════════════════════════════════════════════
+
+async function deleteSourceFile(fileId) {
+    var fileName = fileId;
+    for (var i = 0; i < sourceFilesData.length; i++) {
+        if (sourceFilesData[i].id === fileId) { fileName = sourceFilesData[i].name; break; }
+    }
+    if (!confirm('确认删除源文件 "' + fileName + '"？\n\n在线源：删除已下载的文件和配置\nGitHub源：移除配置（已下载文件保留）\n本地源：移除配置（原文件不删除）')) return;
+    var csrfToken = await ensureCsrfToken();
+    fetch('/api/source-files/' + fileId, {
+        method: 'DELETE',
+        headers: { 'X-CSRF-Token': csrfToken }
+    })
+    .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+    .then(function(resp) {
+        if (resp.ok) {
+            showToast(resp.data.message || '删除成功', 'success');
+            if (currentExpandedId === fileId) closeChannels();
+            loadSourceFiles();
+        } else {
+            showToast(resp.data.detail || '删除失败', 'error');
+        }
+    })
+    .catch(function(e) {
+        showToast('删除失败: ' + e, 'error');
+    });
+}
+
+// ── 切换下载方式 ──────────────────────────
+async function changeDownloadMethod(fileId, currentMethod) {
+    var methods = ['raw', 'api', 'proxy', 'mirror'];
+    var methodLabels = {raw: 'raw.githubusercontent.com（默认）', api: 'GitHub API', proxy: 'SOCKS/HTTP代理', mirror: '代理网站'};
+    var method = prompt('选择下载方式:\n1. raw = raw.githubusercontent.com\n2. api = GitHub API\n3. proxy = SOCKS/HTTP代理\n4. mirror = 代理网站\n\n当前: ' + (methodLabels[currentMethod] || currentMethod), currentMethod);
+    if (!method || !methods.includes(method)) return;
+
+    var csrfToken = await ensureCsrfToken();
+    fetch('/api/source-files/' + fileId, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+        body: JSON.stringify({ download_method: method })
+    })
+    .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+    .then(function(resp) {
+        if (resp.ok) {
+            showToast(resp.data.message || '下载方式已更新', 'success');
+            loadSourceFiles();
+        } else {
+            showToast(resp.data.detail || '更新失败', 'error');
+        }
+    })
+    .catch(function(e) {
+        showToast('更新失败: ' + e, 'error');
+    });
+}
+
+// ── escapeHtml 用于 attr 值 ──────────────────
+function escapeHtmlAttr(str) {
+    if (!str) return '';
+    return str.replace(/&/g, '&amp;').replace(/'/g, '&#39;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// ══════════════════════════════════════════════════
+// 文件级 UA 配置
+// ══════════════════════════════════════════════════
+
+var uaFilePopover = null;
+
+function showFileUaEditor(fileId) {
+    // 关闭已有 popover
+    if (uaFilePopover) { uaFilePopover.remove(); uaFilePopover = null; }
+    if (activePopover) { activePopover.remove(); activePopover = null; }
+
+    // 查找文件信息
+    var fileObj = null;
+    for (var i = 0; i < sourceFilesData.length; i++) {
+        if (sourceFilesData[i].id === fileId) { fileObj = sourceFilesData[i]; break; }
+    }
+    if (!fileObj) return;
+
+    var ua = fileObj.ua_settings || {};
+    var enabled = ua.enabled || false;
+    var uaValue = ua.ua_value || '';
+    var uaPosition = ua.ua_position || 'extinf';
+
+    var html = '<div class="category-edit-popover" id="ua-file-popover" style="min-width:360px">';
+    html += '<div class="popover-title">UA 配置 — ' + escapeHtml(fileObj.name) + '</div>';
+
+    // 启用开关
+    html += '<div class="dim-row" style="margin-bottom:12px">';
+    html += '<label style="min-width:auto"><input type="checkbox" id="ua-enabled" ' + (enabled ? 'checked' : '') + ' onchange="onFileUaToggle()"> 启用 User-Agent</label>';
+    html += '</div>';
+
+    // UA 位置选择
+    html += '<div class="dim-row">';
+    html += '<label>输出位置</label>';
+    html += '<select id="ua-position" class="form-select" style="flex:1">';
+    html += '<option value="extinf"' + (uaPosition === 'extinf' ? ' selected' : '') + '>EXTINF 属性 (user-agent="...")</option>';
+    html += '<option value="url"' + (uaPosition === 'url' ? ' selected' : '') + '>URL 参数 (|User-Agent=...)</option>';
+    html += '</select>';
+    html += '</div>';
+
+    // UA 值输入
+    html += '<div class="dim-row" style="align-items:flex-start">';
+    html += '<label style="margin-top:4px">UA 值</label>';
+    html += '<textarea id="ua-value" class="form-input" style="flex:1;min-height:60px;font-size:12px;resize:vertical" placeholder="Mozilla/5.0 (Windows NT 10.0; Win64; x64) ...">' + escapeHtml(uaValue) + '</textarea>';
+    html += '</div>';
+
+    // 常用 UA 快捷选择
+    html += '<div style="font-size:11px;color:var(--text-tertiary);margin-top:4px;margin-left:48px">';
+    html += '快捷: <a href="javascript:void(0)" onclick="setQuickUa(\'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36\')">Chrome</a>';
+    html += ' | <a href="javascript:void(0)" onclick="setQuickUa(\'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1\')">iPhone</a>';
+    html += ' | <a href="javascript:void(0)" onclick="setQuickUa(\'VLC/3.0.18 LibVLC/3.0.18\')">VLC</a>';
+    html += ' | <a href="javascript:void(0)" onclick="setQuickUa(\'okhttp/4.9.3\')">okhttp</a>';
+    html += '</div>';
+
+    // 说明
+    html += '<div style="font-size:11px;color:var(--text-tertiary);margin-top:8px;margin-left:48px;line-height:1.5">';
+    html += '启用后，该文件中的所有视频源默认使用此 UA。<br>每个视频源仍可单独配置 UA 覆盖此设置。';
+    html += '</div>';
+
+    // 按钮
+    html += '<div class="popover-actions">';
+    html += '<button class="btn btn-sm btn-outline" onclick="hideFileUaEditor()">取消</button>';
+    if (enabled) {
+        html += '<button class="btn btn-sm btn-outline" style="color:var(--error);border-color:var(--error)" onclick="clearFileUa(\'' + fileId + '\')">清除</button>';
+    }
+    html += '<button class="btn btn-sm btn-primary" onclick="saveFileUa(\'' + fileId + '\')">保存</button>';
+    html += '</div>';
+    html += '</div>';
+
+    var wrapper = document.createElement('div');
+    wrapper.innerHTML = html;
+    var popover = wrapper.firstChild;
+
+    var rowEl = document.getElementById('file-row-' + fileId);
+    if (rowEl) {
+        rowEl.parentNode.insertBefore(popover, rowEl.nextSibling);
+    } else {
+        document.body.appendChild(popover);
+    }
+    uaFilePopover = popover;
+
+    onFileUaToggle();
+}
+
+function setQuickUa(ua) {
+    document.getElementById('ua-value').value = ua;
+}
+
+function onFileUaToggle() {
+    var enabled = document.getElementById('ua-enabled').checked;
+    document.getElementById('ua-position').disabled = !enabled;
+    document.getElementById('ua-value').disabled = !enabled;
+}
+
+function hideFileUaEditor() {
+    if (uaFilePopover) { uaFilePopover.remove(); uaFilePopover = null; }
+}
+
+async function saveFileUa(fileId) {
+    var enabled = document.getElementById('ua-enabled').checked;
+    var uaValue = document.getElementById('ua-value').value.trim();
+    var uaPosition = document.getElementById('ua-position').value;
+
+    if (enabled && !uaValue) {
+        showToast('启用 UA 时必须填写 UA 值', 'error');
+        return;
+    }
+
+    var csrfToken = await ensureCsrfToken();
+    try {
+        var resp = await fetch('/api/source-files/' + fileId + '/ua', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+            body: JSON.stringify({ enabled: enabled, ua_value: uaValue, ua_position: uaPosition })
+        });
+        var result = await resp.json();
+        if (resp.ok) {
+            showToast(result.message || 'UA 设置已保存', 'success');
+            hideFileUaEditor();
+            loadSourceFiles();
+        } else {
+            showToast(result.detail || '保存失败', 'error');
+        }
+    } catch(e) {
+        showToast('保存失败: ' + e, 'error');
+    }
+}
+
+async function clearFileUa(fileId) {
+    if (!confirm('确认清除该源文件的 UA 配置？')) return;
+    var csrfToken = await ensureCsrfToken();
+    try {
+        var resp = await fetch('/api/source-files/' + fileId + '/ua', {
+            method: 'DELETE',
+            headers: { 'X-CSRF-Token': csrfToken }
+        });
+        var result = await resp.json();
+        if (resp.ok) {
+            showToast(result.message || 'UA 设置已清除', 'success');
+            hideFileUaEditor();
+            loadSourceFiles();
+        } else {
+            showToast(result.detail || '清除失败', 'error');
+        }
+    } catch(e) {
+        showToast('清除失败: ' + e, 'error');
+    }
+}
+
+// ══════════════════════════════════════════════════
+// 频道级 UA 配置
+// ══════════════════════════════════════════════════
+
+var uaChannelPopover = null;
+
+function showChannelUaEditor(chIdx) {
+    // 关闭已有 popover
+    if (uaChannelPopover) { uaChannelPopover.remove(); uaChannelPopover = null; }
+    if (activePopover) { activePopover.remove(); activePopover = null; }
+
+    var ch = channelsAllData[chIdx];
+    if (!ch) return;
+
+    var rowEl = document.getElementById('ch-row-' + chIdx);
+    if (!rowEl) return;
+
+    var isOverride = ch.ua_override || false;
+    var uaValue = ch.user_agent || '';
+    var uaPosition = ch.ua_position || 'extinf';
+
+    var html = '<div class="category-edit-popover" id="ua-ch-popover" style="min-width:360px">';
+    html += '<div class="popover-title">频道 UA — ' + escapeHtml(ch.name || '') + '</div>';
+
+    if (isOverride) {
+        html += '<div style="font-size:11px;color:#92400e;margin-bottom:8px">⚠ 当前为频道级覆盖</div>';
+    } else if (ch.user_agent) {
+        html += '<div style="font-size:11px;color:var(--text-tertiary);margin-bottom:8px">当前 UA 来自文件级或源文件内置，设置后将覆盖为频道级</div>';
+    } else {
+        html += '<div style="font-size:11px;color:var(--text-tertiary);margin-bottom:8px">当前无 UA，设置后将为此频道单独配置</div>';
+    }
+
+    // UA 位置选择
+    html += '<div class="dim-row">';
+    html += '<label>输出位置</label>';
+    html += '<select id="ch-ua-position" class="form-select" style="flex:1">';
+    html += '<option value="extinf"' + (uaPosition === 'extinf' ? ' selected' : '') + '>EXTINF 属性</option>';
+    html += '<option value="url"' + (uaPosition === 'url' ? ' selected' : '') + '>URL 参数</option>';
+    html += '</select>';
+    html += '</div>';
+
+    // UA 值输入
+    html += '<div class="dim-row" style="align-items:flex-start">';
+    html += '<label style="margin-top:4px">UA 值</label>';
+    html += '<textarea id="ch-ua-value" class="form-input" style="flex:1;min-height:60px;font-size:12px;resize:vertical" placeholder="留空清除覆盖，恢复文件级 UA">' + escapeHtml(uaValue) + '</textarea>';
+    html += '</div>';
+
+    // 常用 UA
+    html += '<div style="font-size:11px;color:var(--text-tertiary);margin-top:4px;margin-left:48px">';
+    html += '快捷: <a href="javascript:void(0)" onclick="setQuickChUa(\'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36\')">Chrome</a>';
+    html += ' | <a href="javascript:void(0)" onclick="setQuickChUa(\'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1\')">iPhone</a>';
+    html += ' | <a href="javascript:void(0)" onclick="setQuickChUa(\'VLC/3.0.18 LibVLC/3.0.18\')">VLC</a>';
+    html += ' | <a href="javascript:void(0)" onclick="setQuickChUa(\'okhttp/4.9.3\')">okhttp</a>';
+    html += '</div>';
+
+    // 按钮
+    html += '<div class="popover-actions">';
+    html += '<button class="btn btn-sm btn-outline" onclick="hideChannelUaEditor()">取消</button>';
+    if (isOverride) {
+        html += '<button class="btn btn-sm btn-outline" style="color:var(--error);border-color:var(--error)" onclick="clearChannelUa(' + chIdx + ')">清除覆盖</button>';
+    }
+    html += '<button class="btn btn-sm btn-primary" onclick="saveChannelUa(' + chIdx + ')">保存</button>';
+    html += '</div>';
+    html += '</div>';
+
+    var wrapper = document.createElement('div');
+    wrapper.innerHTML = html;
+    var popover = wrapper.firstChild;
+    rowEl.parentNode.insertBefore(popover, rowEl.nextSibling);
+    uaChannelPopover = popover;
+}
+
+function setQuickChUa(ua) {
+    document.getElementById('ch-ua-value').value = ua;
+}
+
+function hideChannelUaEditor() {
+    if (uaChannelPopover) { uaChannelPopover.remove(); uaChannelPopover = null; }
+}
+
+async function saveChannelUa(chIdx) {
+    var ch = channelsAllData[chIdx];
+    if (!ch) return;
+    var uaValue = document.getElementById('ch-ua-value').value.trim();
+    var uaPosition = document.getElementById('ch-ua-position').value;
+
+    if (!uaValue) {
+        // 空值 = 清除覆盖
+        if (ch.ua_override) {
+            await clearChannelUa(chIdx);
+        } else {
+            showToast('请输入 UA 值', 'error');
+        }
+        return;
+    }
+
+    var csrfToken = await ensureCsrfToken();
+    var fileId = currentExpandedId;
+    try {
+        var resp = await fetch('/api/source-files/' + fileId + '/channel-ua', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+            body: JSON.stringify({ url: ch.url, ua_value: uaValue, ua_position: uaPosition })
+        });
+        var result = await resp.json();
+        if (resp.ok) {
+            showToast(result.message || '频道 UA 已保存', 'success');
+            // 更新本地缓存
+            channelsAllData[chIdx].user_agent = uaValue;
+            channelsAllData[chIdx].ua_position = uaPosition;
+            channelsAllData[chIdx].ua_override = true;
+            hideChannelUaEditor();
+            renderChannelsPage();
+        } else {
+            showToast(result.detail || '保存失败', 'error');
+        }
+    } catch(e) {
+        showToast('保存失败: ' + e, 'error');
+    }
+}
+
+async function clearChannelUa(chIdx) {
+    var ch = channelsAllData[chIdx];
+    if (!ch) return;
+    var csrfToken = await ensureCsrfToken();
+    var fileId = currentExpandedId;
+    try {
+        var resp = await fetch('/api/source-files/' + fileId + '/channel-ua?url=' + encodeURIComponent(ch.url), {
+            method: 'DELETE',
+            headers: { 'X-CSRF-Token': csrfToken }
+        });
+        var result = await resp.json();
+        if (resp.ok) {
+            showToast(result.message || '频道 UA 覆盖已删除', 'success');
+            // 重新加载频道列表以获取最新的文件级 UA
+            hideChannelUaEditor();
+            expandChannels(currentExpandedId);
+        } else {
+            showToast(result.detail || '清除失败', 'error');
+        }
+    } catch(e) {
+        showToast('清除失败: ' + e, 'error');
+    }
+}
+
+// ── 页面初始化 ────────────────────────────
+document.addEventListener('DOMContentLoaded', function() {
+    loadCategoryDictionary();
+    loadSourceFiles();
+});
+</script>
+{% endblock %}

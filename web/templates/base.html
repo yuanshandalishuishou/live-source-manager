@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}直播源管理器{% endblock %}</title>
+    <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+    <script src="https://unpkg.com/htmx.org@1.9.12/dist/ext/ws.js"></script>
+    <script src="/static/js/app.js"></script>
+    <script src="/static/js/lsm-components.js"></script>
+    <link rel="stylesheet" href="/static/css/app.css">
+    {% block head %}{% endblock %}
+</head>
+<body>
+    <div class="app-layout">
+        <!-- 侧边栏 -->
+        <nav class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <h2>LSM</h2>
+                <span class="sidebar-subtitle">直播源管理</span>
+            </div>
+            {% if user %}
+            <div class="sidebar-user">
+                <span class="user-avatar">{{ user.username[:1] | upper }}</span>
+                <div class="user-info">
+                    <span class="user-name">{{ user.username }}</span>
+                    <span class="user-role">{{ '管理员' if user.role == 'admin' else '查看者' }}</span>
+                </div>
+            </div>
+            <ul class="nav-list">
+                <li><a href="/" class="nav-item {% if request.url.path == '/' %}active{% endif %}">📊 仪表盘</a></li>
+                <li><a href="/sources" class="nav-item {% if 'sources' in request.url.path %}active{% endif %}">📡 源管理</a></li>
+                <li><a href="/config" class="nav-item {% if request.url.path == '/config' %}active{% endif %}">⚙️ 配置中心</a></li>
+                <li><a href="/rules" class="nav-item {% if request.url.path == '/rules' %}active{% endif %}">🏷️ 分类规则</a></li>
+                <li><a href="/test" class="nav-item {% if request.url.path == '/test' %}active{% endif %}">🧪 实时测试</a></li>
+                <li><a href="/logs" class="nav-item {% if request.url.path == '/logs' %}active{% endif %}">📋 日志查看</a></li>
+                {% if user.role == 'admin' %}
+                <li><a href="/users" class="nav-item {% if request.url.path == '/users' %}active{% endif %}">👥 用户管理</a></li>
+                {% endif %}
+            </ul>
+            <div class="sidebar-footer">
+                <button class="btn btn-sm btn-outline" hx-post="/api/auth/logout" hx-target="body" hx-push-url="/login">退出登录</button>
+            </div>
+            <div class="sidebar-shortcuts">
+                <div>Ctrl+K 搜索</div>
+            </div>
+            {% endif %}
+        </nav>
+
+        <!-- 主内容区 -->
+        <main class="main-content">
+            <div class="top-bar">
+                <button class="btn btn-icon sidebar-toggle" onclick="document.getElementById('sidebar').classList.toggle('collapsed')">☰</button>
+                <h1 class="page-title">{% block page_title %}仪表盘{% endblock %}</h1>
+            </div>
+            <div class="content-body">
+                {% block content %}{% endblock %}
+            </div>
+        </main>
+    </div>
+</body>
+</html>

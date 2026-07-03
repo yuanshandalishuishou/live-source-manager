@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% block title %}仪表盘 - 直播源管理器{% endblock %}
+{% block page_title %}仪表盘{% endblock %}
+
+{% block content %}
+<div class="dashboard">
+    <!-- 统计卡片（JS fetch 渲染） -->
+    <div class="card-grid" id="stats-cards">
+        <div class="card loading">加载中...</div>
+    </div>
+
+    <!-- 频道分组统计 -->
+    <div class="card" style="margin-top:20px;">
+        <div class="card-header"><h3>📊 频道分组统计</h3></div>
+        <div class="card-body" id="channel-stats">
+            <div class="loading">加载中...</div>
+        </div>
+    </div>
+
+    <!-- 系统运行状态 -->
+    <div class="card" style="margin-top:20px;">
+        <div class="card-header"><h3>🔧 系统运行状态</h3></div>
+        <div class="card-body" id="system-status">
+            <div class="loading">加载中...</div>
+        </div>
+    </div>
+
+    <!-- 快速操作 -->
+    <div class="card" style="margin-top:20px;">
+        <div class="card-header"><h3>⚡ 快速操作</h3></div>
+        <div class="card-body quick-actions">
+            <a href="/sources" class="btn btn-outline">📡 查看源列表</a>
+            <a href="/config" class="btn btn-outline">⚙️ 修改配置</a>
+            <a href="/test" class="btn btn-outline">🧪 测试源</a>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block head %}
+<script>
+// ── 加载统计卡片 ────────────────────────────
+function loadStats() {
+    fetch('/api/dashboard/stats')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var html = '';
+            html += '<div class="card"><div class="stat-value">' + (data.total_sources || 0) + '</div><div class="stat-label">直播源总数</div></div>';
+            html += '<div class="card stat-valid"><div class="stat-value">' + (data.valid || 0) + '</div><div class="stat-label">有效源</div></div>';
+            html += '<div class="card stat-invalid"><div class="stat-value">' + (data.invalid || 0) + '</div><div class="stat-label">无效源</div></div>';
+            html += '<div class="card stat-rate"><div class="stat-value">' + (data.rate || '0%') + '</div><div class="stat-label">有效率</div></div>';
+            document.getElementById('stats-cards').innerHTML = html;
+        })
+        .catch(function() {
+            document.getElementById('stats-cards').innerHTML = '<div class="card loading">加载失败</div>';
+        });
+}
+
+// ── 加载频道分组统计 ────────────────────────
+function loadChannelStats() {
+    fetch('/api/dashboard/channel-stats')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var channels = data.channels || [];
+            if (channels.length === 0) {
+                document.getElementById('channel-stats').innerHTML = '<div class="empty-state">暂无频道数据</div>';
+                return;
+            }
+            var html = '';
+            for (var i = 0; i < channels.length; i++) {
+                html += '<div class="stat-row"><span>' + escapeHtml(channels[i].name) + '</span><span>' + channels[i].count + '</span></div>';
+            }
+            document.getElementById('channel-stats').innerHTML = html;
+        })
+        .catch(function() {
+            document.getElementById('channel-stats').innerHTML = '<div class="loading">加载失败</div>';
+        });
+}
+
+// ── 加载系统运行状态 ────────────────────────
+function loadSystemStatus() {
+    fetch('/api/dashboard/status')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var sys = data.system || {};
+            var test = data.test || {};
+            var html = '<div class="status-grid">';
+            html += '<div class="status-item"><span class="label">内存使用</span><span>' + (sys.memory_usage || 'N/A') + '</span></div>';
+            html += '<div class="status-item"><span class="label">CPU</span><span>' + (sys.cpu || 'N/A') + '</span></div>';
+            html += '<div class="status-item"><span class="label">FFmpeg/FFprobe</span><span class="' + (sys.ffprobe_available ? 'status-passed' : 'status-failed') + '">' + (sys.ffprobe_available ? '可用' : '不可用') + '</span></div>';
+            html += '<div class="status-item"><span class="label">服务进程</span><span>' + (sys.process_running ? '运行中' : '已停止') + '</span></div>';
+            html += '<div class="status-item"><span class="label">版本</span><span>' + escapeHtml(data.version || '1.0.0') + '</span></div>';
+            html += '</div>';
+            // test status
+            if (test.last_run) {
+                var testStatus = test.status === 'running' ? '运行中' : (test.status === 'completed' ? '已完成' : '空闲');
+                html += '<div class="test-section" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">';
+                html += '<div style="font-size:13px;font-weight:600;margin-bottom:8px">🧪 最近测试</div>';
+                html += '<div class="status-grid">';
+                html += '<div class="status-item"><span class="label">状态</span><span>' + testStatus + '</span></div>';
+                var passed = test.passed || 0;
+                var failed = test.failed || 0;
+                var total = test.total || 0;
+                var pct = total > 0 ? ((passed / total * 100).toFixed(1) + '%') : '-';
+                html += '<div class="status-item"><span class="label">通过 / 失败</span><span>' + passed + ' / ' + failed + ' (' + pct + ')</span></div>';
+                html += '<div class="status-item"><span class="label">最后运行</span><span>' + escapeHtml(test.last_run) + '</span></div>';
+                html += '</div></div>';
+            }
+            document.getElementById('system-status').innerHTML = html;
+        })
+        .catch(function() {
+            document.getElementById('system-status').innerHTML = '<div class="loading">加载失败</div>';
+        });
+}
+
+// ── HTML 转义 ──────────────────────────────
+function escapeHtml(str) {
+    if (!str) return '';
+    var div = document.createElement('div');
+    div.appendChild(document.createTextNode(str));
+    return div.innerHTML;
+}
+
+// ── 初始化加载 + 30 秒轮询 ──────────────────
+document.addEventListener('DOMContentLoaded', function() {
+    loadStats();
+    loadChannelStats();
+    loadSystemStatus();
+    setInterval(loadStats, 30000);
+    setInterval(loadChannelStats, 30000);
+    setInterval(loadSystemStatus, 30000);
+});
+</script>
+{% endblock %}

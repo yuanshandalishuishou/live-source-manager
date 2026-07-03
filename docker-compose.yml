@@ -1,0 +1,106 @@
+version: '3.8'
+
+# =============================================================
+# docker-compose.yml — Live Source Manager
+# =============================================================
+# 使用:
+#   1. 构建并启动: docker-compose up -d --build
+#   2. 查看日志: docker-compose logs -f
+#   3. 停止服务: docker-compose down
+#
+# 国内网络优化:
+#   设置环境变量使用国内镜像加速：
+#   export DOCKER_MIRROR=https://mirror.ccs.tencentyun.com
+#   docker-compose up -d
+# =============================================================
+
+services:
+  live-source-manager:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # 国内用户可使用腾讯云镜像加速构建
+        BASE_IMAGE: ${DOCKER_MIRROR:mirror.ccs.tencentyun.com/}python:3.13-slim-bookworm
+    image: lsm:latest
+    container_name: live-source-manager
+    hostname: lsm
+    restart: unless-stopped
+    
+    ports:
+      - "${NGINX_PORT:-12345}:12345"     # 文件共享端口 (HTTPServer.fileshare_port)
+      - "${WEB_PORT:-23456}:23456"       # Web 管理端口 (HTTPServer.manager_port)
+    
+    volumes:
+      # 配置文件（持久化）
+      - ${CONFIG_DIR:-./config}:/config:rw
+      # 日志文件（持久化）
+      - ${LOG_DIR:-./logs}:/log:rw
+      # 输出文件（M3U 播放列表，持久化）
+      - ${OUTPUT_DIR:-./output}:/www/output:rw
+      # 数据库文件（持久化）
+      - ${DATA_DIR:-./data}:/data:rw
+      # 本地直播源文件（可选）
+      - ${SOURCES_DIR:-./sources}:/config/sources:ro
+    
+    environment:
+      # 时区
+      - TZ=Asia/Shanghai
+      # Nginx 端口
+      - NGINX_PORT=${NGINX_PORT:-12345}
+      # Web 管理端口
+      - WEB_PORT=${WEB_PORT:-23456}
+      # 测试超时时间（秒）
+      - TEST_TIMEOUT=${TEST_TIMEOUT:-10}
+      # 并发线程数
+      - CONCURRENT_THREADS=${CONCURRENT_THREADS:-50}
+      # 输出文件名
+      - OUTPUT_FILENAME=${OUTPUT_FILENAME:-live.m3u}
+      # 定时任务 Cron 表达式
+      - UPDATE_CRON=${UPDATE_CRON:-"0 6,12,18,22 * * *"}
+      # Web 管理员密码（务必修改！）
+      - WEB_ADMIN_PASSWORD=${WEB_ADMIN_PASSWORD:-admin123}
+      # 配置加密密钥（务必修改！）
+      - CONFIG_ENCRYPT_KEY=${CONFIG_ENCRYPT_KEY:-}
+    
+    healthcheck:
+      test: ["CMD", "/healthcheck.sh"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    
+    networks:
+      - lsm-network
+
+networks:
+  lsm-network:
+    driver: bridge
+
+# =============================================================
+# .env 文件示例（在项目根目录创建）
+# =============================================================
+# 复制以下内容保存为 .env 文件：
+#
+# NGINX_PORT=12345
+# WEB_PORT=23456
+# TEST_TIMEOUT=10
+# CONCURRENT_THREADS=50
+# OUTPUT_FILENAME=live.m3u
+# UPDATE_CRON=0 6,12,18,22 * * *
+# WEB_ADMIN_PASSWORD=your_strong_password_here
+# CONFIG_ENCRYPT_KEY=your_32byte_base64_encoded_key
+#
+# # 目录映射（可选，默认使用当前目录下的子目录）
+# CONFIG_DIR=./config
+# LOG_DIR=./logs
+# OUTPUT_DIR=./output
+# DATA_DIR=./data
+# SOURCES_DIR=./sources
+# =============================================================

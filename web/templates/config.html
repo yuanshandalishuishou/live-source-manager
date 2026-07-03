@@ -1,0 +1,851 @@
+{% extends "base.html" %}
+{% block title %}配置中心 - 直播源管理器{% endblock %}
+{% block page_title %}⚙️ 统一配置管理{% endblock %}
+
+{% block content %}
+<div class="config-page" id="config-app">
+
+    {# ── 顶部工具栏 ── #}
+    {% if user and user.role == 'admin' %}
+    <div class="toolbar" id="config-toolbar">
+        <div class="toolbar-left">
+            <span id="status-indicator" class="badge badge-gray">等待加载…</span>
+            <span id="modified-count" class="badge badge-gray" style="display:none">修改项: 0</span>
+        </div>
+        <div class="toolbar-right">
+            <button class="btn btn-outline btn-sm" onclick="reloadConfig()">🔄 重新加载</button>
+            <button class="btn btn-outline btn-sm" id="btn-reset-all" onclick="resetAllConfig()">↺ 重置</button>
+            <button class="btn btn-primary btn-sm" id="btn-save-all" onclick="saveAllConfig()">💾 保存全部</button>
+        </div>
+    </div>
+    {% endif %}
+
+    {# ── 加载状态 ── #}
+    <div id="config-loading" class="loading">
+        <div class="skeleton skeleton-card"></div>
+        <div class="skeleton skeleton-line" style="width:60%;margin-top:16px"></div>
+        <div class="skeleton skeleton-line" style="width:80%"></div>
+        <div class="skeleton skeleton-line" style="width:45%"></div>
+    </div>
+
+    {# ── Tab 导航 ── #}
+    <div id="config-tabs-wrapper" style="display:none">
+        <div class="tabs" id="config-tabs" role="tablist">
+            <button class="tab-btn active" data-tab="Testing" role="tab" aria-selected="true">
+                <span class="tab-icon">🧪</span>测试
+            </button>
+            <button class="tab-btn" data-tab="Output" role="tab" aria-selected="false">
+                <span class="tab-icon">📤</span>输出
+            </button>
+            <button class="tab-btn" data-tab="Network" role="tab" aria-selected="false">
+                <span class="tab-icon">🌐</span>网络
+            </button>
+            <button class="tab-btn" data-tab="GitHub" role="tab" aria-selected="false">
+                <span class="tab-icon">🐙</span>GitHub
+            </button>
+            <button class="tab-btn" data-tab="Filter" role="tab" aria-selected="false">
+                <span class="tab-icon">🔍</span>筛选
+            </button>
+            <button class="tab-btn" data-tab="CategoryDict" role="tab" aria-selected="false">
+                <span class="tab-icon">🏷️</span>分类字典
+            </button>
+        </div>
+
+        {# ── Tab 内容面板 ── #}
+        <div id="config-content">
+            {# 由 JS 动态渲染到各个 tab-content 中 #}
+        </div>
+    </div>
+
+    {# ── 底部状态栏 ── #}
+    <div id="config-footer" style="display:none;padding:12px 0;font-size:13px;color:var(--text-light);display:flex;align-items:center;gap:16px;border-top:1px solid var(--border);margin-top:20px">
+        <span id="footer-status">✅ 就绪</span>
+        <span class="badge badge-blue" id="footer-modified" style="display:none">修改项: 0</span>
+        <span id="footer-last-save" style="display:none"></span>
+    </div>
+</div>
+{% endblock %}
+
+{# ══════════════════════════════════════════════════════ #}
+{#  JS 部分                                              #}
+{# ══════════════════════════════════════════════════════ #}
+{% block head %}
+<script>
+/* ════════════════════════════════════════════════════════
+   统一配置管理 — 前端逻辑
+   ════════════════════════════════════════════════════════ */
+
+// ── 全局状态 ─────────────────────────────────────
+let configData = {};       // { section: { key: value, ... }, ... }
+let fieldMeta = {};        // { section: { key: [type, default, label, help], ... }, ... }
+let modifiedSections = {}; // { section: true/false }
+let originalSnapshots = {};// { section: { key: value, ... } } — 用于对比
+let lastSaveTimes = {};    // { section: 'HH:MM:SS' }
+let activeTab = 'Testing';
+let validationErrors = {}; // { 'section.key': 'error message' }
+
+// ── Tab → 字段映射（用于配置段展示） ─────────────
+const TAB_SECTIONS = {
+    Testing:  { section: 'Testing',  icon: '🧪', label: '测试' },
+    Output:   { section: 'Output',   icon: '📤', label: '输出' },
+    Network:  { section: 'Network',  icon: '🌐', label: '网络' },
+    GitHub:   { section: 'GitHub',   icon: '🐙', label: 'GitHub' },
+    Filter:   { section: 'Filter',   icon: '🔍', label: '筛选' },
+};
+
+// ── 密码字段白名单（用于 `<input type="password">`）─
+const PASSWORD_KEYS = ['token', 'secret', 'password', 'api_key', 'api_secret'];
+
+// ── 加载配置 ─────────────────────────────────────
+async function loadConfig() {
+    const loadingEl = document.getElementById('config-loading');
+    const tabsWrapper = document.getElementById('config-tabs-wrapper');
+    const footerEl = document.getElementById('config-footer');
+    const statusIndicator = document.getElementById('status-indicator');
+
+    try {
+        statusIndicator.textContent = '⏳ 加载中…';
+        statusIndicator.className = 'badge badge-yellow';
+
+        const [cfgResp, metaResp] = await Promise.all([
+            fetch('/api/config'),
+            fetch('/api/config/fields')
+        ]);
+        configData = await cfgResp.json();
+        fieldMeta = await metaResp.json();
+
+        // 保存原始快照用于脏检测
+        originalSnapshots = {};
+        for (const [section, fields] of Object.entries(configData)) {
+            originalSnapshots[section] = Object.assign({}, fields);
+        }
+
+        // 初始化修改状态
+        modifiedSections = {};
+        validationErrors = {};
+
+        loadingEl.style.display = 'none';
+        tabsWrapper.style.display = 'block';
+        footerEl.style.display = 'flex';
+
+        renderAllTabs();
+        activateTab(activeTab);
+        updateFooter();
+        statusIndicator.textContent = '✅ 已加载';
+        statusIndicator.className = 'badge badge-green';
+    } catch (e) {
+        loadingEl.textContent = '❌ 加载配置失败: ' + e.message;
+        statusIndicator.textContent = '❌ 加载失败';
+        statusIndicator.className = 'badge badge-red';
+    }
+}
+
+// ── 渲染全部 Tab 面板 ──────────────────────────
+function renderAllTabs() {
+    const container = document.getElementById('config-content');
+    let html = '';
+
+    for (const [tabKey, info] of Object.entries(TAB_SECTIONS)) {
+        const section = info.section;
+        const fields = configData[section];
+        if (!fields) {
+            html += '<div class="tab-content" id="tab-panel-' + section + '" data-tab="' + tabKey + '">';
+            html += '<div class="empty-state">⚠️ 未找到配置段: ' + section + '</div>';
+            html += '</div>';
+            continue;
+        }
+
+        html += '<div class="tab-content" id="tab-panel-' + section + '" data-tab="' + tabKey + '">';
+        html += '<div class="card config-section">';
+        html += '<div class="card-header"><h3>' + info.icon + ' ' + info.label + '</h3></div>';
+        html += '<div class="card-body">';
+
+        // ── GitHub Tab 特殊信息栏 ──
+        if (section === 'GitHub') {
+            html += '<div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;padding:12px 16px;margin-bottom:20px;font-size:13px;line-height:1.7">';
+            html += '<div style="font-weight:600;margin-bottom:6px">🐙 GitHub API Token 说明</div>';
+            html += '<div style="color:var(--text-light)">未配置 Token 时 GitHub API 限流为 <b>60次/时</b>，配置后提升至 <b>5000次/时</b>。Token 无需任何权限，仅用于提升配额。</div>';
+            html += '<div style="color:var(--text-light);margin-top:4px">获取方式：<a href="https://github.com/settings/tokens/new" target="_blank" style="color:var(--primary)">GitHub → Settings → Developer settings → Personal access tokens → Generate new token</a>，不勾选任何权限直接生成即可。</div>';
+            html += '</div>';
+        }
+
+        const sectionMeta = fieldMeta[section] || {};
+        // 按字段类型分组渲染
+        for (const [key, value] of Object.entries(fields)) {
+            const meta = sectionMeta[key];
+            const ftype = meta ? meta[0] : 'str';
+            const label = meta ? (meta[2] || key) : key;
+            const helpText = meta ? (meta[3] || '') : '';
+            const fieldId = 'cfg-' + section + '-' + key;
+
+            html += '<div class="form-group" id="fg-' + fieldId + '">';
+            html += '<label for="' + fieldId + '">' + label + '</label>';
+
+            if (ftype === 'bool') {
+                const checked = value === 'True' || value === 'true' || value === '1' || value === true;
+                html += '<label class="toggle">';
+                html += '<input type="checkbox" id="' + fieldId + '" ';
+                html += 'data-section="' + section + '" data-key="' + key + '" ';
+                html += (checked ? 'checked' : '') + ' onchange="onFieldChange(this)">';
+                html += '<span class="toggle-slider"></span>';
+                html += '<span class="toggle-label" id="tl-' + fieldId + '">' + (checked ? '已启用' : '已禁用') + '</span>';
+                html += '</label>';
+            } else if (ftype === 'textarea' || (ftype === 'str' && value && value.length > 80)) {
+                html += '<textarea id="' + fieldId + '" ';
+                html += 'data-section="' + section + '" data-key="' + key + '" ';
+                html += 'class="form-input form-textarea" rows="4" ';
+                html += 'onchange="onFieldChange(this)" oninput="onFieldInput(this)">' + escapeHtml(String(value || '')) + '</textarea>';
+            } else if (ftype === 'str' && PASSWORD_KEYS.some(pk => key.toLowerCase().includes(pk))) {
+                html += '<input type="password" id="' + fieldId + '" ';
+                html += 'data-section="' + section + '" data-key="' + key + '" ';
+                html += 'class="form-input" value="' + escapeHtml(String(value || '')) + '" ';
+                html += 'onchange="onFieldChange(this)" oninput="onFieldInput(this)">';
+                html += '<button type="button" class="btn btn-sm btn-outline" style="margin-top:4px" ';
+                html += 'onclick="togglePasswordVisibility(\'' + fieldId + '\')">👁 显示/隐藏</button>';
+            } else if (ftype === 'int') {
+                html += '<input type="number" id="' + fieldId + '" ';
+                html += 'data-section="' + section + '" data-key="' + key + '" ';
+                html += 'class="form-input" value="' + escapeHtml(String(value || '')) + '" ';
+                html += 'onchange="onFieldChange(this)" oninput="onFieldInput(this)">';
+            } else {
+                html += '<input type="text" id="' + fieldId + '" ';
+                html += 'data-section="' + section + '" data-key="' + key + '" ';
+                html += 'class="form-input" value="' + escapeHtml(String(value || '')) + '" ';
+                html += 'onchange="onFieldChange(this)" oninput="onFieldInput(this)">';
+            }
+
+            if (helpText) {
+                html += '<small class="form-help" id="fh-' + fieldId + '">' + escapeHtml(helpText) + '</small>';
+            }
+            html += '<div class="field-validation" id="fv-' + fieldId + '" style="font-size:12px;margin-top:2px;min-height:0"></div>';
+            html += '</div>';
+        }
+
+        // ── GitHub Tab 特殊测试区 ──
+        if (section === 'GitHub') {
+            html += '<div style="border-top:1px solid var(--border);margin-top:16px;padding-top:16px">';
+            html += '<div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">';
+            html += '<button type="button" class="btn btn-outline btn-sm" id="btn-test-github-token" onclick="testGitHubToken()">🔌 测试 Token</button>';
+            html += '<span id="github-token-status" style="font-size:13px;color:var(--text-light)"></span>';
+            html += '</div>';
+            html += '<div id="github-rate-limit" style="display:none;font-size:13px;background:var(--bg-secondary);border-radius:6px;padding:10px 14px;margin-top:8px"></div>';
+            html += '</div>';
+        }
+
+        // 独立保存按钮
+        html += '<div class="form-actions">';
+        html += '<span class="section-save-status" id="ss-' + section + '" style="font-size:13px;flex:1;align-self:center"></span>';
+        html += '<button class="btn btn-primary btn-sm" onclick="saveSection(\'' + section + '\')" id="btn-save-' + section + '">💾 保存</button>';
+        html += '</div>';
+
+        html += '</div>'; // card-body
+        html += '</div>'; // card
+        html += '</div>'; // tab-content
+    }
+
+    // ── 分类字典 Tab ─────────────────────────────
+    html += '<div class="tab-content" id="tab-panel-CategoryDict" data-tab="CategoryDict">';
+    html += '<div class="card config-section">';
+    html += '<div class="card-header"><h3>🏷️ 频道分类数据字典</h3></div>';
+    html += '<div class="card-body">';
+    html += '<p style="font-size:13px;color:var(--text-light);margin-bottom:16px">定义各维度的可选项，用于频道列表中的分类选择。修改后影响输出 M3U 的分类标记。</p>';
+    html += '<div id="category-dict-content"><div class="loading">加载中...</div></div>';
+    html += '</div>'; // card-body
+    html += '</div>'; // card
+    html += '</div>'; // tab-content
+
+    container.innerHTML = html;
+}
+
+// ── Tab 切换 ────────────────────────────────────
+function activateTab(tabKey) {
+    activeTab = tabKey;
+
+    // 更新 tab 按钮
+    document.querySelectorAll('#config-tabs .tab-btn').forEach(function(btn) {
+        const isActive = btn.dataset.tab === tabKey;
+        btn.classList.toggle('active', isActive);
+        btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    });
+
+    // 显示对应面板
+    document.querySelectorAll('.tab-content').forEach(function(panel) {
+        panel.classList.toggle('active', panel.dataset.tab === tabKey);
+    });
+
+    // 分类字典 Tab 需要异步加载数据
+    if (tabKey === 'CategoryDict') {
+        loadCategoryDictTab();
+    }
+
+    updateFooter();
+}
+
+// ── 字段修改事件 ────────────────────────────────
+function onFieldChange(el) {
+    onFieldInput(el);
+    // 重新计算该 section 的修改状态
+    markSectionDirty(el.dataset.section);
+    updateFooter();
+}
+
+function onFieldInput(el) {
+    const section = el.dataset.section;
+    const key = el.dataset.key;
+    const fieldId = 'cfg-' + section + '-' + key;
+    const valEl = document.getElementById('fv-' + fieldId);
+    const fgEl = document.getElementById('fg-' + fieldId);
+
+    // 更新数据
+    let value;
+    if (el.type === 'checkbox') {
+        value = el.checked ? 'True' : 'False';
+        // 更新 toggle label
+        const labelEl = document.getElementById('tl-' + fieldId);
+        if (labelEl) labelEl.textContent = el.checked ? '已启用' : '已禁用';
+    } else {
+        value = el.value;
+    }
+    if (!configData[section]) configData[section] = {};
+    configData[section][key] = value;
+
+    // 实时校验
+    validateField(section, key, value).then(function(errorMsg) {
+        if (errorMsg) {
+            el.style.borderColor = 'var(--error)';
+            el.style.boxShadow = '0 0 0 3px rgba(220,38,38,.15)';
+            valEl.textContent = '❌ ' + errorMsg;
+            valEl.style.color = 'var(--error)';
+            validationErrors[section + '.' + key] = errorMsg;
+        } else {
+            el.style.borderColor = '';
+            el.style.boxShadow = '';
+            valEl.textContent = '';
+            delete validationErrors[section + '.' + key];
+        }
+    });
+}
+
+// ── 字段校验 ────────────────────────────────────
+async function validateField(section, key, value) {
+    // 客户端基础校验
+    const meta = (fieldMeta[section] || {})[key];
+    if (!meta) return null;
+
+    const ftype = meta[0];
+
+    // bool 类型无需校验
+    if (ftype === 'bool') return null;
+
+    // int 类型校验
+    if (ftype === 'int') {
+        const num = Number(value);
+        if (value === '' || value === null || value === undefined) return '此字段不能为空';
+        if (isNaN(num)) return '请输入有效的整数';
+        if (num < 0) return '值不能为负数';
+        return null;
+    }
+
+    // 密码字段检查
+    if (PASSWORD_KEYS.some(pk => key.toLowerCase().includes(pk))) {
+        if (value && value.length < 6) return '至少 6 个字符';
+    }
+
+    return null;
+}
+
+// ── 标记段为已修改 ──────────────────────────────
+function markSectionDirty(section) {
+    const snap = originalSnapshots[section];
+    const current = configData[section];
+    if (!snap || !current) {
+        modifiedSections[section] = true;
+        return;
+    }
+    let dirty = false;
+    for (const key of Object.keys(snap)) {
+        if (String(snap[key]) !== String(current[key])) {
+            dirty = true;
+            break;
+        }
+    }
+    if (!dirty) {
+        // 反向检查新增字段
+        for (const key of Object.keys(current)) {
+            if (!(key in snap)) {
+                dirty = true;
+                break;
+            }
+        }
+    }
+    modifiedSections[section] = dirty;
+}
+
+// ── 收集某个段的数据 ────────────────────────────
+function collectSectionData(section) {
+    const data = {};
+    const fields = configData[section] || {};
+    const sectionMeta = fieldMeta[section] || {};
+
+    for (const [key, value] of Object.entries(fields)) {
+        const meta = sectionMeta[key];
+        const ftype = meta ? meta[0] : 'str';
+        if (ftype === 'bool') {
+            data[key] = (value === 'True' || value === 'true' || value === true || value === '1') ? 'True' : 'False';
+        } else if (ftype === 'int') {
+            data[key] = String(value);
+        } else {
+            data[key] = String(value);
+        }
+    }
+    return data;
+}
+
+// ── 分段保存 ────────────────────────────────────
+async function saveSection(section) {
+    const statusEl = document.getElementById('ss-' + section);
+    const btnEl = document.getElementById('btn-save-' + section);
+    if (!statusEl || !btnEl) return;
+
+    // 检查是否有校验错误
+    const hasErrors = Object.keys(validationErrors).some(k => k.startsWith(section + '.'));
+    if (hasErrors) {
+        statusEl.innerHTML = '<span style="color:var(--error)">❌ 请先修正字段错误</span>';
+        return;
+    }
+
+    statusEl.innerHTML = '<span style="color:var(--text-light)">⏳ 保存中…</span>';
+    btnEl.disabled = true;
+    btnEl.textContent = '⏳ 保存中…';
+
+    try {
+        const data = collectSectionData(section);
+        const csrfToken = await ensureCsrfToken();
+        const resp = await fetch('/api/config/' + section, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': csrfToken
+            },
+            body: JSON.stringify(data)
+        });
+        const result = await resp.json();
+
+        if (resp.ok) {
+            statusEl.innerHTML = '<span style="color:var(--success)">✅ ' + (result.message || '配置已保存') + '</span>';
+            // 更新原始快照
+            originalSnapshots[section] = Object.assign({}, data);
+            modifiedSections[section] = false;
+            // 记录保存时间
+            const now = new Date();
+            lastSaveTimes[section] = now.toLocaleTimeString('zh-CN', { hour12: false });
+            updateFooter();
+            showToast('✅ ' + (result.message || '配置已保存'), 'success');
+        } else {
+            statusEl.innerHTML = '<span style="color:var(--error)">❌ ' + (result.detail || '保存失败') + '</span>';
+            showToast('❌ ' + (result.detail || '保存失败'), 'error');
+        }
+    } catch (e) {
+        statusEl.innerHTML = '<span style="color:var(--error)">❌ 网络错误: ' + e.message + '</span>';
+        showToast('❌ 保存失败: ' + e.message, 'error');
+    } finally {
+        btnEl.disabled = false;
+        btnEl.textContent = '💾 保存';
+    }
+}
+
+// ── 全量保存 ────────────────────────────────────
+async function saveAllConfig() {
+    const statusIndicator = document.getElementById('status-indicator');
+    const saveBtn = document.getElementById('btn-save-all');
+
+    // 校验所有段
+    let allValid = true;
+    for (const [section, fields] of Object.entries(configData)) {
+        if (section === 'DEFAULT') continue;
+        const sectionMeta = fieldMeta[section] || {};
+        for (const [key, value] of Object.entries(fields)) {
+            const err = await validateField(section, key, value);
+            if (err) {
+                allValid = false;
+                const fieldEl = document.getElementById('cfg-' + section + '-' + key);
+                if (fieldEl) {
+                    fieldEl.style.borderColor = 'var(--error)';
+                    fieldEl.style.boxShadow = '0 0 0 3px rgba(220,38,38,.15)';
+                }
+            }
+        }
+    }
+
+    if (!allValid) {
+        showToast('❌ 存在校验错误，请修正后重试', 'error');
+        return;
+    }
+
+    statusIndicator.textContent = '⏳ 全量保存中…';
+    statusIndicator.className = 'badge badge-yellow';
+    saveBtn.disabled = true;
+    saveBtn.textContent = '⏳ 保存中…';
+
+    try {
+        const csrfToken = await ensureCsrfToken();
+        // 构造完整配置（排除 DEFAULT）
+        const payload = {};
+        for (const [section, fields] of Object.entries(configData)) {
+            if (section === 'DEFAULT') continue;
+            payload[section] = collectSectionData(section);
+        }
+
+        const resp = await fetch('/api/config', {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': csrfToken
+            },
+            body: JSON.stringify(payload)
+        });
+        const result = await resp.json();
+
+        if (resp.ok) {
+            statusIndicator.textContent = '✅ ' + (result.message || '全部配置已保存');
+            statusIndicator.className = 'badge badge-green';
+            // 重置所有快照
+            for (const section of Object.keys(configData)) {
+                if (section === 'DEFAULT') continue;
+                originalSnapshots[section] = Object.assign({}, configData[section]);
+                modifiedSections[section] = false;
+                const sectionStatus = document.getElementById('ss-' + section);
+                if (sectionStatus) sectionStatus.innerHTML = '';
+            }
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString('zh-CN', { hour12: false });
+            for (const section of Object.keys(configData)) {
+                if (section === 'DEFAULT') continue;
+                lastSaveTimes[section] = timeStr;
+            }
+            updateFooter();
+            showToast('✅ ' + (result.message || '全部配置已保存'), 'success');
+        } else {
+            statusIndicator.textContent = '❌ ' + (result.detail || '保存失败');
+            statusIndicator.className = 'badge badge-red';
+            showToast('❌ ' + (result.detail || '保存失败'), 'error');
+        }
+    } catch (e) {
+        statusIndicator.textContent = '❌ 网络错误: ' + e.message;
+        statusIndicator.className = 'badge badge-red';
+        showToast('❌ 保存失败: ' + e.message, 'error');
+    } finally {
+        saveBtn.disabled = false;
+        saveBtn.textContent = '💾 保存全部';
+    }
+}
+
+// ── 重置全部 ────────────────────────────────────
+function resetAllConfig() {
+    if (!confirm('确定要重置所有配置项为默认值吗？')) return;
+
+    // 用内置默认值填充（从 fieldMeta 读取 default 值）
+    for (const [section, fields] of Object.entries(configData)) {
+        if (section === 'DEFAULT') continue;
+        const sectionMeta = fieldMeta[section] || {};
+        for (const [key] of Object.entries(fields)) {
+            const meta = sectionMeta[key];
+            if (meta && meta[1] !== undefined && meta[1] !== null) {
+                configData[section][key] = meta[1];
+            }
+        }
+    }
+
+    // 重新渲染
+    renderAllTabs();
+    activateTab(activeTab);
+    // 重新计算脏状态
+    for (const section of Object.keys(configData)) {
+        if (section === 'DEFAULT') continue;
+        markSectionDirty(section);
+    }
+    updateFooter();
+    showToast('↺ 已重置为默认值（尚未保存）', 'info');
+}
+
+// ── 重新加载配置（从服务端） ────────────────────
+async function reloadConfig() {
+    const statusIndicator = document.getElementById('status-indicator');
+    statusIndicator.textContent = '⏳ 重新加载中…';
+    statusIndicator.className = 'badge badge-yellow';
+
+    try {
+        const csrfToken = await ensureCsrfToken();
+        const resp = await fetch('/api/config/reload', {
+            method: 'POST',
+            headers: { 'X-CSRF-Token': csrfToken }
+        });
+        if (resp.ok) {
+            showToast('🔄 配置已从服务端重新加载', 'success');
+            await loadConfig();
+        } else {
+            const result = await resp.json();
+            statusIndicator.textContent = '❌ ' + (result.detail || '重新加载失败');
+            statusIndicator.className = 'badge badge-red';
+        }
+    } catch (e) {
+        statusIndicator.textContent = '❌ 网络错误: ' + e.message;
+        statusIndicator.className = 'badge badge-red';
+    }
+}
+
+
+
+// ── 更新底部状态栏 ──────────────────────────────
+function updateFooter() {
+    const footerStatus = document.getElementById('footer-status');
+    const footerModified = document.getElementById('footer-modified');
+    const footerLastSave = document.getElementById('footer-last-save');
+
+    // 统计修改项
+    let modifiedCount = 0;
+    for (const [section, dirty] of Object.entries(modifiedSections)) {
+        if (dirty && section !== 'DEFAULT') modifiedCount++;
+    }
+
+    if (modifiedCount > 0) {
+        const sections = Object.keys(modifiedSections).filter(s => s !== 'DEFAULT' && modifiedSections[s]);
+        footerStatus.textContent = '✏️ 存在未保存的修改';
+        footerStatus.style.color = 'var(--warning)';
+        footerModified.textContent = '修改项: ' + modifiedCount + ' 段 (' + sections.join(', ') + ')';
+        footerModified.style.display = 'inline';
+        document.getElementById('modified-count').style.display = 'inline';
+        document.getElementById('modified-count').textContent = '修改项: ' + modifiedCount;
+        document.getElementById('modified-count').className = 'badge badge-yellow';
+    } else {
+        footerStatus.textContent = '✅ 全部已保存';
+        footerStatus.style.color = 'var(--success)';
+        footerModified.style.display = 'none';
+        document.getElementById('modified-count').style.display = 'none';
+    }
+
+    // 最近保存时间
+    const times = Object.values(lastSaveTimes).filter(Boolean);
+    if (times.length > 0) {
+        const latest = times.sort().reverse()[0];
+        footerLastSave.textContent = '🕐 最近保存: ' + latest;
+        footerLastSave.style.display = 'inline';
+    } else {
+        footerLastSave.style.display = 'none';
+    }
+}
+
+// ── 密码可见性切换 ──────────────────────────────
+function togglePasswordVisibility(fieldId) {
+    const el = document.getElementById(fieldId);
+    if (!el) return;
+    el.type = (el.type === 'password') ? 'text' : 'password';
+}
+
+// ── GitHub Token 测试 ───────────────────────────
+async function testGitHubToken() {
+    const btn = document.getElementById('btn-test-github-token');
+    const statusEl = document.getElementById('github-token-status');
+    const rateEl = document.getElementById('github-rate-limit');
+    if (!btn || !statusEl) return;
+
+    // 从输入框获取当前 token
+    const tokenInput = document.getElementById('cfg-GitHub-api_token');
+    const token = tokenInput ? tokenInput.value.trim() : '';
+
+    btn.disabled = true;
+    btn.textContent = '⏳ 测试中…';
+    statusEl.textContent = '正在连接 GitHub API…';
+    statusEl.style.color = 'var(--text-light)';
+    rateEl.style.display = 'none';
+
+    try {
+        const csrfToken = await ensureCsrfToken();
+        const resp = await fetch('/api/github/test-token', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': csrfToken
+            },
+            body: JSON.stringify({ token: token })
+        });
+        const result = await resp.json();
+
+        if (result.valid) {
+            btn.textContent = '✅ Token 有效';
+            btn.style.borderColor = 'var(--success)';
+            btn.style.color = 'var(--success)';
+            statusEl.innerHTML = '<span style="color:var(--success)">✅ ' + escapeHtml(result.message) + '</span>';
+        } else {
+            btn.textContent = '❌ Token 无效';
+            btn.style.borderColor = 'var(--error)';
+            btn.style.color = 'var(--error)';
+            statusEl.innerHTML = '<span style="color:var(--error)">❌ ' + escapeHtml(result.message) + '</span>';
+        }
+
+        // 显示速率限制详情
+        const rl = result.rate_limit || {};
+        if (rl.limit > 0) {
+            let resetStr = '未知';
+            if (rl.reset > 0) {
+                const resetDate = new Date(rl.reset * 1000);
+                resetStr = resetDate.toLocaleTimeString('zh-CN', { hour12: false });
+            }
+            const pct = rl.limit > 0 ? Math.round(rl.remaining / rl.limit * 100) : 0;
+            const barColor = pct > 50 ? 'var(--success)' : (pct > 20 ? 'var(--warning)' : 'var(--error)');
+            rateEl.innerHTML =
+                '<div style="font-weight:600;margin-bottom:6px">📊 当前速率限制</div>' +
+                '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">' +
+                '<div style="flex:1;height:8px;background:var(--border);border-radius:4px;overflow:hidden">' +
+                '<div style="width:' + pct + '%;height:100%;background:' + barColor + ';border-radius:4px"></div>' +
+                '</div>' +
+                '<span style="white-space:nowrap"><b>' + rl.remaining + '</b> / ' + rl.limit + ' 次</span>' +
+                '</div>' +
+                '<div style="color:var(--text-light)">重置时间: ' + resetStr + '</div>';
+            rateEl.style.display = 'block';
+        }
+    } catch (e) {
+        btn.textContent = '❌ 请求失败';
+        statusEl.innerHTML = '<span style="color:var(--error)">❌ 网络错误: ' + escapeHtml(e.message) + '</span>';
+    } finally {
+        btn.disabled = false;
+        setTimeout(function() {
+            btn.textContent = '🔌 测试 Token';
+            btn.style.borderColor = '';
+            btn.style.color = '';
+        }, 3000);
+    }
+}
+
+// ══════════════════════════════════════════════════
+// 分类字典管理（CategoryDict Tab）
+// ══════════════════════════════════════════════════
+
+var categoryDictData = { dimensions: [], raw: {} };
+
+async function loadCategoryDictTab() {
+    var container = document.getElementById('category-dict-content');
+    if (!container) return;
+    container.innerHTML = '<div class="loading">加载中...</div>';
+
+    try {
+        var resp = await fetch('/api/category-dictionary');
+        categoryDictData = await resp.json();
+        renderCategoryDict();
+    } catch(e) {
+        container.innerHTML = '<div class="alert alert-error">加载分类字典失败: ' + escapeHtml(String(e)) + '</div>';
+    }
+}
+
+function renderCategoryDict() {
+    var container = document.getElementById('category-dict-content');
+    var dims = categoryDictData.dimensions || [];
+    if (dims.length === 0) {
+        container.innerHTML = '<p class="empty-state">暂无分类字典数据</p>';
+        return;
+    }
+
+    var html = '';
+    for (var i = 0; i < dims.length; i++) {
+        var dim = dims[i];
+        html += '<div class="dict-dim-section" style="margin-bottom:20px;padding:16px;background:var(--card-bg,#f8fafc);border-radius:8px;border:1px solid var(--border,#e2e8f0)">';
+        html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">';
+        html += '<h4 style="margin:0;font-size:15px">' + escapeHtml(dim.label) + ' <code style="font-size:11px;color:var(--text-light)">' + escapeHtml(dim.key) + '</code></h4>';
+        html += '<button class="btn btn-sm btn-outline" onclick="addDictOption(\'' + dim.key + '\')">+ 添加选项</button>';
+        html += '</div>';
+
+        var opts = dim.options || [];
+        if (opts.length === 0) {
+            html += '<p style="font-size:13px;color:var(--text-light);margin:0">暂无选项</p>';
+        } else {
+            html += '<div style="display:flex;flex-wrap:wrap;gap:6px" id="dict-options-' + dim.key + '">';
+            for (var j = 0; j < opts.length; j++) {
+                var opt = opts[j];
+                html += '<span class="dict-tag" id="dict-tag-' + dim.key + '-' + j + '" style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;background:#e0f2fe;color:#0369a1;border-radius:12px;font-size:13px">';
+                html += escapeHtml(opt.label || opt.value);
+                html += '<button onclick="deleteDictOption(\'' + dim.key + '\',\'' + escapeHtmlAttr(opt.value) + '\')" style="background:none;border:none;cursor:pointer;padding:0;font-size:14px;color:#94a3b8;line-height:1" title="删除">×</button>';
+                html += '</span>';
+            }
+            html += '</div>';
+        }
+
+        html += '</div>';
+    }
+
+    container.innerHTML = html;
+}
+
+async function addDictOption(dimKey) {
+    var value = prompt('请输入新选项的值 (dimension: ' + dimKey + '):');
+    if (!value || !value.trim()) return;
+    value = value.trim();
+    var label = prompt('请输入显示名称（留空则与值相同）:', value);
+    label = (label && label.trim()) ? label.trim() : value;
+
+    try {
+        var csrfToken = await ensureCsrfToken();
+        var resp = await fetch('/api/category-dictionary/' + dimKey, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': csrfToken
+            },
+            body: JSON.stringify({ value: value, label: label, sort_order: 99 })
+        });
+        var result = await resp.json();
+        if (resp.ok) {
+            showToast(result.message || '选项已添加', 'success');
+            loadCategoryDictTab();
+        } else {
+            showToast(result.detail || '添加失败', 'error');
+        }
+    } catch(e) {
+        showToast('添加失败: ' + e, 'error');
+    }
+}
+
+async function deleteDictOption(dimKey, value) {
+    if (!confirm('确认删除 "' + value + '" (维度: ' + dimKey + ')？')) return;
+    try {
+        var csrfToken = await ensureCsrfToken();
+        var resp = await fetch('/api/category-dictionary/' + dimKey + '/' + encodeURIComponent(value), {
+            method: 'DELETE',
+            headers: { 'X-CSRF-Token': csrfToken }
+        });
+        var result = await resp.json();
+        if (resp.ok) {
+            showToast(result.message || '已删除', 'success');
+            loadCategoryDictTab();
+        } else {
+            showToast(result.detail || '删除失败', 'error');
+        }
+    } catch(e) {
+        showToast('删除失败: ' + e, 'error');
+    }
+}
+
+// ── Tab 点击事件绑定 ────────────────────────────
+document.addEventListener('DOMContentLoaded', function() {
+    // 绑定 Tab 切换
+    document.querySelectorAll('#config-tabs .tab-btn').forEach(function(btn) {
+        btn.addEventListener('click', function(e) {
+            const tabKey = this.dataset.tab;
+            if (tabKey && tabKey !== activeTab) {
+                activateTab(tabKey);
+            }
+        });
+    });
+
+    // 加载配置
+    loadConfig();
+});
+
+// ── escapeHtml 辅助函数 ─────────────────────────
+function escapeHtml(str) {
+    if (!str) return '';
+    var div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+</script>
+{% endblock %}

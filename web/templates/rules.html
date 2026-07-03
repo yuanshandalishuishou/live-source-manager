@@ -1,0 +1,660 @@
+{% extends "base.html" %}
+{% block title %}分类规则 - 直播源管理器{% endblock %}
+{% block page_title %}🏷️ 分类规则管理{% endblock %}
+
+{% block content %}
+<div class="rules-page">
+
+    {# ── 顶部工具栏 ── #}
+    <div class="toolbar">
+        <div class="toolbar-left">
+            <button class="btn btn-primary btn-sm" onclick="showAddRuleModal()">+ 新增规则</button>
+            {% if user and user.role == 'admin' %}
+            <button class="btn btn-outline btn-sm" onclick="reimportRules()">🔄 从YAML重新导入</button>
+            {% endif %}
+        </div>
+        <div class="toolbar-right">
+            <div style="display:flex;gap:8px;align-items:center">
+                <input type="text" id="test-channel-input" class="form-input form-input-sm" placeholder="输入频道名称测试分类" style="width:240px">
+                <button class="btn btn-outline btn-sm" onclick="testClassification()">🧪 测试</button>
+            </div>
+        </div>
+    </div>
+
+    {# ── 分类测试结果区域 ── #}
+    <div id="test-result" style="display:none;margin-bottom:16px"></div>
+
+    {# ── Tab 导航 ── #}
+    <div id="rules-tabs">
+        <div class="tabs" role="tablist">
+            <button class="tab-btn active" data-tab="tab-category" role="tab" aria-selected="true">
+                📂 主分类
+            </button>
+            <button class="tab-btn" data-tab="tab-channel-type" role="tab" aria-selected="false">
+                📺 频道类型
+            </button>
+            <button class="tab-btn" data-tab="tab-exclusions" role="tab" aria-selected="false">
+                🚫 排除映射
+            </button>
+        </div>
+
+        {# ── Tab 1: 主分类 ── #}
+        <div id="tab-category" class="tab-content active">
+            <div class="card">
+                <div class="card-header"><h3>主分类规则 (内容分类)</h3></div>
+                <div class="card-body" id="rules-category-list">
+                    <div class="loading">加载中...</div>
+                </div>
+            </div>
+        </div>
+
+        {# ── Tab 2: 频道类型 ── #}
+        <div id="tab-channel-type" class="tab-content">
+            <div class="card">
+                <div class="card-header"><h3>频道类型规则 (media类型)</h3></div>
+                <div class="card-body" id="rules-channel-type-list">
+                    <div class="loading">加载中...</div>
+                </div>
+            </div>
+        </div>
+
+        {# ── Tab 3: 排除映射 ── #}
+        <div id="tab-exclusions" class="tab-content">
+            <div class="card" style="margin-bottom:16px">
+                <div class="card-header"><h3>新增排除映射</h3></div>
+                <div class="card-body">
+                    <div class="form-row" style="grid-template-columns:1fr 1fr 1fr auto">
+                        <div class="form-group" style="margin-bottom:0">
+                            <label for="excl-province">省份关键词</label>
+                            <input type="text" id="excl-province" class="form-input" placeholder="如: 北京">
+                        </div>
+                        <div class="form-group" style="margin-bottom:0">
+                            <label for="excl-keyword">排除关键词</label>
+                            <input type="text" id="excl-keyword" class="form-input" placeholder="如: 河北">
+                        </div>
+                        <div class="form-group" style="margin-bottom:0">
+                            <label for="excl-note">备注</label>
+                            <input type="text" id="excl-note" class="form-input" placeholder="可选说明">
+                        </div>
+                        <div style="display:flex;align-items:flex-end">
+                            <button class="btn btn-primary btn-sm" onclick="addExclusion()">添加</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-header"><h3>排除映射列表</h3></div>
+                <div class="card-body" id="rules-exclusions-list">
+                    <div class="loading">加载中...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# ── 新增/编辑规则弹窗 ── #}
+<div id="rule-modal" class="modal" style="display:none">
+    <div class="modal-backdrop" onclick="hideRuleModal()"></div>
+    <div class="modal-content" style="min-width:520px">
+        <div class="modal-header">
+            <h3 id="rule-modal-title">新增规则</h3>
+            <button class="btn btn-icon" onclick="hideRuleModal()">×</button>
+        </div>
+        <form id="rule-form" class="form">
+            <input type="hidden" id="rule-id">
+            <input type="hidden" id="rule-rule-type">
+            <div class="form-group">
+                <label for="rule-name">规则名称</label>
+                <input type="text" id="rule-name" class="form-input" required minlength="1">
+            </div>
+            <div class="form-group">
+                <label for="rule-keywords">关键词（每行一个）</label>
+                <textarea id="rule-keywords" class="form-input form-textarea" rows="5" placeholder="每行一个关键词"></textarea>
+            </div>
+            <div class="form-row" style="grid-template-columns:1fr 1fr">
+                <div class="form-group">
+                    <label for="rule-priority">优先级（越小越优先）</label>
+                    <input type="number" id="rule-priority" class="form-input" value="100">
+                </div>
+                <div class="form-group">
+                    <label for="rule-sort-order">排序序号</label>
+                    <input type="number" id="rule-sort-order" class="form-input" value="0">
+                </div>
+            </div>
+            <div id="rule-form-result"></div>
+            <div class="form-actions">
+                <button type="button" class="btn btn-outline" onclick="hideRuleModal()">取消</button>
+                <button type="submit" class="btn btn-primary" id="rule-save-btn">保存</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block head %}
+<script>
+// ════════════════════════════════════════════════════════
+// 分类规则管理 - 前端逻辑
+// ════════════════════════════════════════════════════════
+
+// ── 页面初始化 ─────────────────────────────────────
+document.addEventListener('DOMContentLoaded', function() {
+    // 初始化 Tab 切换
+    document.querySelectorAll('#rules-tabs .tab-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var tabKey = this.dataset.tab;
+            document.querySelectorAll('#rules-tabs .tab-btn').forEach(function(b) {
+                b.classList.remove('active');
+                b.setAttribute('aria-selected', 'false');
+            });
+            document.querySelectorAll('#rules-tabs .tab-content').forEach(function(p) {
+                p.classList.remove('active');
+            });
+            this.classList.add('active');
+            this.setAttribute('aria-selected', 'true');
+            var panel = document.getElementById(tabKey);
+            if (panel) panel.classList.add('active');
+        });
+    });
+
+    // 绑定规则表单提交
+    document.getElementById('rule-form').addEventListener('submit', function(evt) {
+        evt.preventDefault();
+        saveRule();
+    });
+
+    // 加载各 tab 数据
+    loadRules('content', 'rules-category-list');
+    loadRules('media_type', 'rules-channel-type-list');
+    loadExclusions();
+});
+
+// ── 加载规则列表 ──────────────────────────────────
+function loadRules(ruleType, targetId) {
+    var el = document.getElementById(targetId);
+    if (!el) return;
+    el.innerHTML = '<div class="loading">加载中...</div>';
+
+    fetch('/api/rules?rule_type=' + ruleType)
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (!data.rules || data.rules.length === 0) {
+                el.innerHTML = '<div class="empty-state">暂无规则，点击上方"新增规则"添加</div>';
+                return;
+            }
+            var html = '<table><thead><tr>'
+                + '<th style="width:50px">序号</th>'
+                + '<th>名称</th>'
+                + '<th>关键词</th>'
+                + '<th style="width:80px">优先级</th>'
+                + '<th style="width:80px">状态</th>'
+                + '<th style="width:140px">操作</th>'
+                + '</tr></thead><tbody>';
+
+            data.rules.forEach(function(rule) {
+                var keywords = [];
+                try {
+                    keywords = JSON.parse(rule.keywords || '[]');
+                } catch(e) {
+                    keywords = [];
+                }
+                var kwHtml = keywords.map(function(kw) {
+                    return '<span class="badge badge-blue" style="margin:2px">' + LSM.escapeHtml(kw) + '</span>';
+                }).join('');
+
+                var activeChecked = rule.is_active ? 'checked' : '';
+                var activeLabel = rule.is_active ? '已启用' : '已禁用';
+                var activeClass = rule.is_active ? 'badge-green' : 'badge-gray';
+
+                html += '<tr>';
+                html += '<td>' + (rule.sort_order || 0) + '</td>';
+                html += '<td><strong>' + LSM.escapeHtml(rule.name) + '</strong></td>';
+                html += '<td>' + kwHtml + '</td>';
+                html += '<td><span class="badge badge-yellow" style="font-family:monospace">' + rule.priority + '</span></td>';
+                html += '<td>';
+                html += '<div id="toggle-' + ruleType + '-' + rule.id + '" data-rule-id="' + rule.id + '" data-rule-type="' + ruleType + '" data-active="' + rule.is_active + '"></div>';
+                html += '</td>';
+                html += '<td class="actions" style="white-space:nowrap">';
+                html += '<button class="btn btn-sm btn-outline" onclick="showEditRuleModal(' + rule.id + ',\'' + ruleType + '\')">编辑</button> ';
+                html += '<button class="btn btn-sm btn-outline" onclick="deleteRule(' + rule.id + ',\'' + LSM.escapeHtml(rule.name) + '\',\'' + ruleType + '\')">删除</button> ';
+                html += '<button class="btn btn-sm btn-outline" onclick="moveRule(' + rule.id + ',\'up\',\'' + ruleType + '\')">↑</button>';
+                html += '<button class="btn btn-sm btn-outline" onclick="moveRule(' + rule.id + ',\'down\',\'' + ruleType + '\')">↓</button>';
+                html += '</td>';
+                html += '</tr>';
+                // 延迟初始化 toggle，确保 DOM 渲染完成
+                setTimeout(function() {
+                    var toggleContainer = document.getElementById('toggle-' + ruleType + '-' + rule.id);
+                    if (toggleContainer) {
+                        toggleContainer.innerHTML = '';
+                        var toggle = LSM.createToggle(rule.is_active, function(checked) {
+                            toggleRuleActive(rule.id, checked, ruleType);
+                        });
+                        toggleContainer.appendChild(toggle);
+                        var label = document.createElement('span');
+                        label.className = 'toggle-label';
+                        label.style.marginLeft = '4px';
+                        label.style.fontSize = '12px';
+                        label.textContent = checked ? '已启用' : '已禁用';
+                        toggleContainer.appendChild(label);
+                    }
+                }, 50);
+            });
+
+            html += '</tbody></table>';
+            el.innerHTML = html;
+        })
+        .catch(function(e) {
+            el.innerHTML = '<div class="alert alert-error">加载失败: ' + e.message + '</div>';
+        });
+}
+
+// ── 切换到规则活跃状态 ────────────────────────────
+function toggleRuleActive(ruleId, isActive, ruleType) {
+    var csrfToken = window.__csrf_token || '';
+    fetch('/api/rules/' + ruleId, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+        body: JSON.stringify({ is_active: isActive ? 1 : 0 })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        LSM.showToast(data.message || '状态已更新', 'success');
+        // 重新加载对应列表
+        if (ruleType === 'content') {
+            loadRules('content', 'rules-category-list');
+        } else {
+            loadRules('media_type', 'rules-channel-type-list');
+        }
+    })
+    .catch(function(e) {
+        LSM.showToast('更新失败: ' + e.message, 'error');
+    });
+}
+
+// ── 新增规则弹窗 ──────────────────────────────────
+function showAddRuleModal() {
+    // 检测当前激活的 tab
+    var activeTab = document.querySelector('#rules-tabs .tab-btn.active');
+    var ruleType = 'content';
+    if (activeTab) {
+        var tabId = activeTab.dataset.tab;
+        if (tabId === 'tab-channel-type') ruleType = 'media_type';
+    }
+
+    document.getElementById('rule-modal-title').textContent = '新增规则';
+    document.getElementById('rule-id').value = '';
+    document.getElementById('rule-rule-type').value = ruleType;
+    document.getElementById('rule-name').value = '';
+    document.getElementById('rule-keywords').value = '';
+    document.getElementById('rule-priority').value = '100';
+    document.getElementById('rule-sort-order').value = '0';
+    document.getElementById('rule-form-result').innerHTML = '';
+    document.getElementById('rule-modal').style.display = 'flex';
+}
+
+// ── 编辑规则弹窗 ──────────────────────────────────
+function showEditRuleModal(ruleId, ruleType) {
+    fetch('/api/rules?rule_type=' + ruleType)
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var rule = null;
+            if (data.rules) {
+                for (var i = 0; i < data.rules.length; i++) {
+                    if (data.rules[i].id === ruleId) {
+                        rule = data.rules[i];
+                        break;
+                    }
+                }
+            }
+            if (!rule) {
+                LSM.showToast('未找到规则', 'error');
+                return;
+            }
+
+            document.getElementById('rule-modal-title').textContent = '编辑规则';
+            document.getElementById('rule-id').value = rule.id;
+            document.getElementById('rule-rule-type').value = rule.rule_type;
+            document.getElementById('rule-name').value = rule.name;
+
+            var keywords = [];
+            try {
+                keywords = JSON.parse(rule.keywords || '[]');
+            } catch(e) {}
+            document.getElementById('rule-keywords').value = keywords.join('\n');
+
+            document.getElementById('rule-priority').value = rule.priority;
+            document.getElementById('rule-sort-order').value = rule.sort_order || 0;
+            document.getElementById('rule-form-result').innerHTML = '';
+            document.getElementById('rule-modal').style.display = 'flex';
+        })
+        .catch(function(e) {
+            LSM.showToast('加载规则失败: ' + e.message, 'error');
+        });
+}
+
+// ── 隐藏弹窗 ──────────────────────────────────────
+function hideRuleModal() {
+    document.getElementById('rule-modal').style.display = 'none';
+    document.getElementById('rule-form-result').innerHTML = '';
+}
+
+// ── 保存规则（新增或编辑） ────────────────────────
+function saveRule() {
+    var ruleId = document.getElementById('rule-id').value;
+    var ruleType = document.getElementById('rule-rule-type').value;
+    var name = document.getElementById('rule-name').value.trim();
+    var keywordsRaw = document.getElementById('rule-keywords').value;
+    var priority = parseInt(document.getElementById('rule-priority').value) || 100;
+    var sortOrder = parseInt(document.getElementById('rule-sort-order').value) || 0;
+    var resultEl = document.getElementById('rule-form-result');
+
+    if (!name) {
+        resultEl.innerHTML = '<div class="alert alert-error">请输入规则名称</div>';
+        return;
+    }
+
+    // 按行分割，去除空行
+    var keywords = keywordsRaw.split('\n')
+        .map(function(k) { return k.trim(); })
+        .filter(function(k) { return k.length > 0; });
+
+    var csrfToken = window.__csrf_token || '';
+    var isNew = !ruleId;
+
+    var url = isNew ? '/api/rules' : '/api/rules/' + ruleId;
+    var method = isNew ? 'POST' : 'PUT';
+
+    var body = {
+        rule_type: ruleType,
+        name: name,
+        keywords: keywords,
+        priority: priority,
+        sort_order: sortOrder
+    };
+
+    resultEl.innerHTML = '<div style="color:var(--text-light);font-size:13px">⏳ 保存中...</div>';
+
+    fetch(url, {
+        method: method,
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+        body: JSON.stringify(body)
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.id !== undefined || data.message) {
+            resultEl.innerHTML = '<div class="alert alert-success">' + (data.message || '保存成功') + '</div>';
+            hideRuleModal();
+            LSM.showToast(data.message || '保存成功', 'success');
+            // reload
+            if (ruleType === 'content') {
+                loadRules('content', 'rules-category-list');
+            } else {
+                loadRules('media_type', 'rules-channel-type-list');
+            }
+        } else {
+            resultEl.innerHTML = '<div class="alert alert-error">' + (data.detail || '保存失败') + '</div>';
+        }
+    })
+    .catch(function(e) {
+        resultEl.innerHTML = '<div class="alert alert-error">' + e.message + '</div>';
+    });
+}
+
+// ── 删除规则 ──────────────────────────────────────
+function deleteRule(ruleId, ruleName, ruleType) {
+    LSM.confirm('确定删除规则 "' + ruleName + '" 吗？').then(function(confirmed) {
+        if (!confirmed) return;
+        var csrfToken = window.__csrf_token || '';
+        fetch('/api/rules/' + ruleId, {
+            method: 'DELETE',
+            headers: { 'X-CSRF-Token': csrfToken }
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            LSM.showToast(data.message || '规则已删除', 'success');
+            if (ruleType === 'content') {
+                loadRules('content', 'rules-category-list');
+            } else {
+                loadRules('media_type', 'rules-channel-type-list');
+            }
+        })
+        .catch(function(e) {
+            LSM.showToast('删除失败: ' + e.message, 'error');
+        });
+    });
+}
+
+// ── 移动排序 ──────────────────────────────────────
+function moveRule(ruleId, direction, ruleType) {
+    // 获取当前列表所有规则，算出新的 sort_order
+    var targetEl = ruleType === 'content' ? document.getElementById('rules-category-list') : document.getElementById('rules-channel-type-list');
+    var table = targetEl.querySelector('table');
+    if (!table) return;
+
+    var rows = table.querySelectorAll('tbody tr');
+    var orders = [];
+    var currentIndex = -1;
+
+    rows.forEach(function(row, idx) {
+        // 从第一个 td 获取当前 sort_order
+        var sortCell = row.querySelector('td:first-child');
+        var sortVal = parseInt(sortCell ? sortCell.textContent.trim() : '0');
+        // 从操作按钮获取 rule id
+        var editBtn = row.querySelector('button[onclick*="showEditRuleModal(' + ruleId);
+        if (editBtn) currentIndex = idx;
+        var btnOnclick = row.querySelector('.actions').innerHTML;
+        var idMatch = btnOnclick.match(/showEditRuleModal\((\d+)/);
+        var rid = idMatch ? parseInt(idMatch[1]) : 0;
+        orders.push({id: rid, sort_order: sortVal});
+    });
+
+    if (currentIndex < 0) {
+        LSM.showToast('无法确定当前行位置', 'error');
+        return;
+    }
+
+    var newIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
+    if (newIndex < 0 || newIndex >= orders.length) {
+        LSM.showToast('已在边界', 'info');
+        return;
+    }
+
+    // 交换 sort_order
+    var tmp = orders[currentIndex].sort_order;
+    orders[currentIndex].sort_order = orders[newIndex].sort_order;
+    orders[newIndex].sort_order = tmp;
+
+    // 重新赋新序号（从 0 开始递增）
+    orders.forEach(function(o, idx) {
+        o.sort_order = idx;
+    });
+
+    var csrfToken = window.__csrf_token || '';
+    fetch('/api/rules/batch-order', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+        body: JSON.stringify({ orders: orders })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        LSM.showToast(data.message || '排序已更新', 'success');
+        if (ruleType === 'content') {
+            loadRules('content', 'rules-category-list');
+        } else {
+            loadRules('media_type', 'rules-channel-type-list');
+        }
+    })
+    .catch(function(e) {
+        LSM.showToast('排序失败: ' + e.message, 'error');
+    });
+}
+
+// ── 测试分类 ──────────────────────────────────────
+function testClassification() {
+    var input = document.getElementById('test-channel-input');
+    var channelName = input.value.trim();
+    if (!channelName) {
+        LSM.showToast('请输入频道名称', 'warning');
+        return;
+    }
+
+    var resultEl = document.getElementById('test-result');
+    resultEl.style.display = 'block';
+    resultEl.innerHTML = '<div style="color:var(--text-light)">⏳ 测试中...</div>';
+
+    var csrfToken = window.__csrf_token || '';
+    fetch('/api/rules/test-classification', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+        body: JSON.stringify({ channel_name: channelName })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        var html = '<div class="card" style="border:2px solid var(--primary)">';
+        html += '<div class="card-header"><h3>📊 分类测试结果</h3></div>';
+        html += '<div class="card-body">';
+        html += '<p><strong>频道名称：</strong>' + LSM.escapeHtml(channelName) + '</p>';
+        html += '<p><strong>分类：</strong><span class="badge badge-green" style="font-size:14px;padding:4px 12px">' + LSM.escapeHtml(data.category || '未分类') + '</span></p>';
+        html += '<p><strong>媒体类型：</strong>' + (data.media_type || '-') + '</p>';
+        html += '<p><strong>省份：</strong>' + (data.province || '-') + '</p>';
+
+        if (data.matches && data.matches.length > 0) {
+            html += '<p style="margin-top:12px"><strong>匹配规则：</strong></p>';
+            html += '<table style="font-size:13px"><thead><tr><th>关键词</th><th>规则名称</th><th>优先级</th></tr></thead><tbody>';
+            data.matches.forEach(function(m) {
+                html += '<tr><td><span class="badge badge-blue">' + LSM.escapeHtml(m.keyword) + '</span></td>';
+                html += '<td>' + LSM.escapeHtml(m.rule_name) + '</td>';
+                html += '<td>' + m.priority + '</td></tr>';
+            });
+            html += '</tbody></table>';
+        } else {
+            html += '<p style="margin-top:12px">未匹配到任何规则</p>';
+        }
+
+        html += '</div></div>';
+        resultEl.innerHTML = html;
+    })
+    .catch(function(e) {
+        resultEl.innerHTML = '<div class="alert alert-error">测试失败: ' + e.message + '</div>';
+    });
+}
+
+// ── 从 YAML 重新导入 ──────────────────────────────
+function reimportRules() {
+    LSM.confirm('确定从 YAML 重新导入分类规则吗？\n此操作将清空现有规则并重新导入。', '确认重新导入').then(function(confirmed) {
+        if (!confirmed) return;
+        var csrfToken = window.__csrf_token || '';
+        fetch('/api/rules/reimport', {
+            method: 'POST',
+            headers: { 'X-CSRF-Token': csrfToken }
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            LSM.showToast(data.message || '导入完成', 'success');
+            loadRules('content', 'rules-category-list');
+            loadRules('media_type', 'rules-channel-type-list');
+        })
+        .catch(function(e) {
+            LSM.showToast('导入失败: ' + e.message, 'error');
+        });
+    });
+}
+
+// ════════════════════════════════════════════════════════
+// 排除映射操作
+// ════════════════════════════════════════════════════════
+
+// ── 加载排除映射列表 ──────────────────────────────
+function loadExclusions() {
+    var el = document.getElementById('rules-exclusions-list');
+    if (!el) return;
+    el.innerHTML = '<div class="loading">加载中...</div>';
+
+    fetch('/api/rules/exclusions')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (!data.exclusions || data.exclusions.length === 0) {
+                el.innerHTML = '<div class="empty-state">暂无排除映射</div>';
+                return;
+            }
+            var html = '<table><thead><tr>'
+                + '<th style="width:60px">ID</th>'
+                + '<th>省份关键词</th>'
+                + '<th>排除关键词</th>'
+                + '<th>备注</th>'
+                + '<th style="width:80px">操作</th>'
+                + '</tr></thead><tbody>';
+
+            data.exclusions.forEach(function(excl) {
+                html += '<tr>';
+                html += '<td>' + excl.id + '</td>';
+                html += '<td><span class="badge badge-blue">' + LSM.escapeHtml(excl.province_keyword) + '</span></td>';
+                html += '<td><span class="badge badge-yellow">🚫 ' + LSM.escapeHtml(excl.excluded_keyword) + '</span></td>';
+                html += '<td>' + (excl.note ? LSM.escapeHtml(excl.note) : '-') + '</td>';
+                html += '<td><button class="btn btn-sm btn-outline" onclick="deleteExclusion(' + excl.id + ')">删除</button></td>';
+                html += '</tr>';
+            });
+
+            html += '</tbody></table>';
+            el.innerHTML = html;
+        })
+        .catch(function(e) {
+            el.innerHTML = '<div class="alert alert-error">加载失败: ' + e.message + '</div>';
+        });
+}
+
+// ── 添加排除映射 ──────────────────────────────────
+function addExclusion() {
+    var province = document.getElementById('excl-province').value.trim();
+    var keyword = document.getElementById('excl-keyword').value.trim();
+    var note = document.getElementById('excl-note').value.trim();
+
+    if (!province || !keyword) {
+        LSM.showToast('请填写省份关键词和排除关键词', 'warning');
+        return;
+    }
+
+    var csrfToken = window.__csrf_token || '';
+    fetch('/api/rules/exclusions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+        body: JSON.stringify({ province_keyword: province, excluded_keyword: keyword, note: note })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.id) {
+            LSM.showToast(data.message || '排除映射已添加', 'success');
+            document.getElementById('excl-province').value = '';
+            document.getElementById('excl-keyword').value = '';
+            document.getElementById('excl-note').value = '';
+            loadExclusions();
+        } else {
+            LSM.showToast(data.detail || '添加失败', 'error');
+        }
+    })
+    .catch(function(e) {
+        LSM.showToast('添加失败: ' + e.message, 'error');
+    });
+}
+
+// ── 删除排除映射 ──────────────────────────────────
+function deleteExclusion(exclusionId) {
+    LSM.confirm('确定删除此排除映射吗？').then(function(confirmed) {
+        if (!confirmed) return;
+        var csrfToken = window.__csrf_token || '';
+        fetch('/api/rules/exclusions/' + exclusionId, {
+            method: 'DELETE',
+            headers: { 'X-CSRF-Token': csrfToken }
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            LSM.showToast(data.message || '排除映射已删除', 'success');
+            loadExclusions();
+        })
+        .catch(function(e) {
+            LSM.showToast('删除失败: ' + e.message, 'error');
+        });
+    });
+}
+</script>
+{% endblock %}

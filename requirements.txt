@@ -1,0 +1,26 @@
+# 核心HTTP/异步框架
+aiohttp>=3.8
+aiohttp_socks>=0.8.0
+aiofiles>=0.8.0
+
+# 配置解析
+PyYAML>=6.0
+
+# 工具库
+tqdm>=4.60.0
+python-dateutil>=2.8.0
+requests>=2.25.0
+
+# Web管理界面
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+jinja2>=3.1.2
+bcrypt>=4.1.2
+python-multipart>=0.0.6
+websockets>=12.0
+
+# 系统监控
+psutil>=5.9.0
+
+# 加密模块（crypto_utils）
+cryptography>=41.0.0
