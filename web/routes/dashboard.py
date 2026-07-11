@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Dashboard 统计 API"""
 
+import asyncio
 import json
 import os
 
@@ -12,6 +13,7 @@ from web.core import (
     _get_system_info,
     _load_source_manager,
     get_current_user,
+    parse_all_files_cached,
     require_admin,
 )
 
@@ -59,7 +61,8 @@ async def api_dashboard_channel_stats(current_user: dict = Depends(get_current_u
     try:
         sm = _load_source_manager()
         if sm:
-            sources = sm.parse_all_files()
+            # D-1 修复：重 IO 解析在 worker 线程执行，避免阻塞事件循环
+            sources = await asyncio.to_thread(parse_all_files_cached, sm)
             from collections import Counter
 
             groups = Counter()

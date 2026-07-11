@@ -9,6 +9,7 @@
   - Logger — 日志管理类（文件轮转 + 控制台输出）
 """
 
+import contextlib
 import logging
 import logging.handlers
 import os
@@ -101,10 +102,7 @@ class Logger:
             basic_handler.setFormatter(formatter)
             logger.addHandler(basic_handler)
 
-        try:
+        with contextlib.suppress(Exception):
             logger.info('日志系统初始化完成')
-        except Exception:
-            # 日志系统初始化中记录INFO异常可忽略
-            pass
 
         return logger

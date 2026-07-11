@@ -85,12 +85,19 @@ let activeTab = 'Testing';
 let validationErrors = {}; // { 'section.key': 'error message' }
 
 // ── Tab → 字段映射（用于配置段展示） ─────────────
+// 注意：一个 Tab 可渲染多个后端配置段（见 Network：同时展示旧「网络与代理」段与新增「文件发布服务」段）
 const TAB_SECTIONS = {
     Testing:  { section: 'Testing',  icon: '🧪', label: '测试' },
     Output:   { section: 'Output',   icon: '📤', label: '输出' },
-    Network:  { section: 'Network',  icon: '🌐', label: '网络' },
+    Network:  { sections: ['Network', 'HTTPServer'],  icon: '🌐', label: '网络' },
     GitHub:   { section: 'GitHub',   icon: '🐙', label: 'GitHub' },
     Filter:   { section: 'Filter',   icon: '🔍', label: '筛选' },
+};
+
+// 各配置段在卡片上的展示标题（一个 Tab 渲染多个段时区分用）
+const SECTION_TITLES = {
+    'Network': '🌐 网络与代理',
+    'HTTPServer': '📡 文件发布服务',
 };
 
 // ── 密码字段白名单（用于 `<input type="password">`）─
@@ -146,7 +153,9 @@ function renderAllTabs() {
     let html = '';
 
     for (const [tabKey, info] of Object.entries(TAB_SECTIONS)) {
-        const section = info.section;
+        // 支持一个 Tab 渲染多个配置段（如网络 Tab 同时展示 Network + HTTPServer）
+        const sections = info.sections || (info.section ? [info.section] : []);
+        for (const section of sections) {
         const fields = configData[section];
         if (!fields) {
             html += '<div class="tab-content" id="tab-panel-' + section + '" data-tab="' + tabKey + '">';
@@ -155,9 +164,10 @@ function renderAllTabs() {
             continue;
         }
 
+        const cardTitle = SECTION_TITLES[section] || (info.icon + ' ' + info.label);
         html += '<div class="tab-content" id="tab-panel-' + section + '" data-tab="' + tabKey + '">';
         html += '<div class="card config-section">';
-        html += '<div class="card-header"><h3>' + info.icon + ' ' + info.label + '</h3></div>';
+        html += '<div class="card-header"><h3>' + cardTitle + '</h3></div>';
         html += '<div class="card-body">';
 
         // ── GitHub Tab 特殊信息栏 ──
@@ -232,6 +242,15 @@ function renderAllTabs() {
             html += '</div>';
         }
 
+        // ── 网络(HTTPServer) Tab 重启提示 ──
+        if (section === 'HTTPServer') {
+            html += '<div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;padding:12px 16px;margin-bottom:20px;font-size:13px;line-height:1.7">';
+            html += '<div style="font-weight:600;margin-bottom:6px">🌐 文件发布服务说明</div>';
+            html += '<div style="color:var(--text-light)">本段配置 <b>文件共享端口</b>（默认 12345）与文档根目录，用于对外发布生成的 M3U/TXT 播放列表。</div>';
+            html += '<div style="color:var(--text-light);margin-top:4px">⚠️ <b>修改「文件共享端口 / 监听地址」后需重启 Web 服务才能生效</b>（端口在启动时绑定）。「文档根目录」修改后同样需重启以重新挂载。</div>';
+            html += '</div>';
+        }
+
         // 独立保存按钮
         html += '<div class="form-actions">';
         html += '<span class="section-save-status" id="ss-' + section + '" style="font-size:13px;flex:1;align-self:center"></span>';
@@ -241,6 +260,7 @@ function renderAllTabs() {
         html += '</div>'; // card-body
         html += '</div>'; // card
         html += '</div>'; // tab-content
+        } // end for section (支持单 Tab 多段)
     }
 
     // ── 分类字典 Tab ─────────────────────────────
@@ -846,6 +866,11 @@ function escapeHtml(str) {
     var div = document.createElement('div');
     div.textContent = str;
     return div.innerHTML;
+}
+
+function escapeHtmlAttr(str) {
+    if (!str) return '';
+    return String(str).replace(/&/g, '&amp;').replace(/'/g, '&#39;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 </script>
 {% endblock %}

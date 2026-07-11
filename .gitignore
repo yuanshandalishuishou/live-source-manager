@@ -37,3 +37,18 @@ web/data/web.db
 # Environment
 .env
 *.env.local
+
+# Tool caches (regenerable)
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# FFmpeg binaries — downloaded by setup scripts / Docker build, never committed
+tools/ffmpeg/
+
+# Runtime-generated artifacts (regenerable)
+data/status/
+
+# Logs
+*.log
+web_start.log

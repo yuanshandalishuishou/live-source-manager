@@ -148,6 +148,7 @@ tr.status-disabled { opacity: .55; }
 .status-failed { background: #fee2e2; color: #991b1b; }
 .status-testing { background: #dbeafe; color: #1e40af; }
 .status-waiting { background: #fef9c3; color: #854d0e; }
+.status-cancelled { background: #e5e7eb; color: #6b7280; }
 .status-disabled { background: #f1f5f9; color: #64748b; }
 
 /* Logs */

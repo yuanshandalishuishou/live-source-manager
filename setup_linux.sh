@@ -70,13 +70,24 @@ fi
 # 初始化数据库
 log_info "初始化 SQLite 数据库..."
 cd "$PROJECT_DIR"
-"$PROJECT_DIR/.venv/bin/python" -c "
+DB_INIT_OUTPUT=$("$PROJECT_DIR/.venv/bin/python" -c "
 from web.models import init_db
-init_db('admin123')
+init_db(None)  # 传 None：未设置自定义密码时自动生成强随机密码（零配置首启）
 print('DB_INIT_OK')
-" 2>&1 | grep -q "DB_INIT_OK" && {
+" 2>&1 || true)
+echo "$DB_INIT_OUTPUT" | grep -q "DB_INIT_OK" && {
     log_info "✓ 数据库初始化成功"
-    log_info "  默认管理员账号: admin / admin123"
+    # 捕获自动生成的密码并提示
+    GEN_PW=$(echo "$DB_INIT_OUTPUT" | grep '^ADMIN_PASSWORD_INITIALIZED=' | head -1 | cut -d= -f2-)
+    if [ -n "$GEN_PW" ]; then
+        log_warn "============================================================"
+        log_warn "⚠️  已自动生成管理员密码，请立即记录并尽快在「配置中心」修改！"
+        log_warn "    管理员账号: admin"
+        log_warn "    管理员密码: $GEN_PW"
+        log_warn "============================================================"
+    else
+        log_info "  管理员账号: admin（使用既有密码或自定义环境变量 WEB_ADMIN_PASSWORD）"
+    fi
 } || {
     log_error "✗ 数据库初始化失败"
     exit 1
@@ -117,6 +128,16 @@ RestartSec=10
 [Install]
 WantedBy=multi-user.target
 EOF
+
+# 运行时可写目录归属 www-data（避免 systemd 以 www-data 用户运行、首启写库/下载源/生成播放列表时 PermissionError）
+log_info "修复运行时目录权限 (www-data)..."
+mkdir -p "$PROJECT_DIR/web/data" "$PROJECT_DIR/config/online" "$PROJECT_DIR/www/output"
+chown -R www-data:www-data \
+    "$PROJECT_DIR/web/data" \
+    "$PROJECT_DIR/config/online" \
+    "$PROJECT_DIR/www/output" 2>/dev/null || {
+    log_warn "无法 chown 运行时目录，请确认 www-data 用户对 web/data、config/online、www/output 有写权限"
+}
 
 systemctl daemon-reload
 systemctl enable live-source-web.service

@@ -6,6 +6,7 @@
 原子写入、安全读取、备份等文件操作工具。
 """
 
+import contextlib
 import logging
 import os
 import shutil
@@ -37,7 +38,7 @@ def atomic_write(
             suggestion='请检查文件系统权限',
             details={'dirpath': dirpath},
             original=e,
-        )
+        ) from e
     if backup and os.path.exists(filepath):
         _backup_file(filepath, backup_dir, _log)
     for attempt in range(1, retries + 1):
@@ -57,7 +58,7 @@ def atomic_write(
                     suggestion=f'请检查目录权限: {os.path.dirname(filepath)}',
                     details={'filepath': filepath, 'attempts': retries, 'last_error': str(e)},
                     original=e,
-                )
+                ) from e
 
 
 def _do_atomic_write(filepath: str, content: str, encoding: str, logger: logging.Logger):
@@ -72,10 +73,8 @@ def _do_atomic_write(filepath: str, content: str, encoding: str, logger: logging
         logger.debug('临时文件 %s -> %s 替换完成', tmp_path, filepath)
     except Exception:
         if os.path.exists(tmp_path):
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(tmp_path)
-            except OSError:
-                pass
         raise
 
 
@@ -140,7 +139,7 @@ def safe_read_file(
             suggestion='请检查文件是否存在且可读',
             details={'filepath': filepath},
             original=e,
-        )
+        ) from e
 
 
 def _get_fallback_logger() -> logging.Logger:

@@ -6,9 +6,10 @@
  * 组件已在 app.js 中以 LSM 命名空间提供，本文件作为兼容性占位。
  * ================================================================ */
 
-// 如果 LSM 尚未定义（例如 app.js 未加载），则在此定义
-if (typeof LSM === 'undefined') {
-    var LSM = (function() {
+// 如果 LSM 尚未定义（例如 app.js 未加载或初始化失败），则在此兜底定义。
+// 使用 window.LSM 而非裸 var/const，避免与 app.js 的 LSM 声明产生全局标识符冲突。
+if (typeof window.LSM === 'undefined') {
+    window.LSM = (function() {
         'use strict';
 
         // ── Toast 通知 ───────────────────────────────
@@ -70,10 +71,13 @@ if (typeof LSM === 'undefined') {
 
         // ── escapeHtml ──────────────────────────────
         function escapeHtml(str) {
-            if (!str) return '';
-            var div = document.createElement('div');
-            div.textContent = str;
-            return div.innerHTML;
+            if (str == null) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
         }
 
         return {

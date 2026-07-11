@@ -57,7 +57,7 @@ async def api_config_history(
         if total > 0:
             rows = conn.execute(
                 f'SELECT * FROM audit_logs WHERE action IN ({placeholders}) ORDER BY created_at DESC LIMIT ? OFFSET ?',
-                config_actions + (size, offset),
+                (*config_actions, size, offset),
             ).fetchall()
             result['history'] = [dict(r) for r in rows]
             result['total'] = total
@@ -88,7 +88,7 @@ async def api_update_config(data: dict, request: Request, current_user: dict = D
         user_id=current_user['user_id'],
         username=current_user['username'],
         action='config_update',
-        target='config.ini',
+        target='SQLite',
         detail=json.dumps(sanitize_config_data(data), ensure_ascii=False),
         ip_address=request.client.host if request.client else '',
     )
@@ -101,7 +101,7 @@ async def api_update_section(section: str, request: Request, current_user: dict 
     try:
         data = await request.json()
     except Exception:
-        raise HTTPException(status_code=400, detail='请求体必须为JSON格式（Content-Type: application/json）')
+        raise HTTPException(status_code=400, detail='请求体必须为JSON格式（Content-Type: application/json）') from None
 
     # 校验请求体必须是键值对（非嵌套字典）
     if not isinstance(data, dict):
@@ -145,7 +145,7 @@ async def api_validate_config(request: Request, current_user: dict = Depends(get
     try:
         data = await request.json()
     except Exception:
-        raise HTTPException(status_code=400, detail='请求体必须为JSON格式（Content-Type: application/json）')
+        raise HTTPException(status_code=400, detail='请求体必须为JSON格式（Content-Type: application/json）') from None
 
     section = data.get('section', '').strip()
     key = data.get('key', '').strip()
@@ -207,7 +207,7 @@ async def api_reload_config(request: Request, current_user: dict = Depends(requi
             user_id=current_user['user_id'],
             username=current_user['username'],
             action='config_reload',
-            target='config.ini',
+            target='SQLite',
             detail=f'重载失败: {e}',
             ip_address=request.client.host if request.client else '',
         )
@@ -220,7 +220,7 @@ async def api_reload_config(request: Request, current_user: dict = Depends(requi
         user_id=current_user['user_id'],
         username=current_user['username'],
         action='config_reload',
-        target='config.ini',
+        target='SQLite',
         ip_address=request.client.host if request.client else '',
     )
     return {'status': 'ok', 'message': f'配置重载完成，共 {reloaded_items} 项', 'reloaded': reloaded_items}

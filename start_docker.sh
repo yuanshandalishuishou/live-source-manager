@@ -466,8 +466,10 @@ OUTPUT_FILENAME="${OUTPUT_FILENAME:-live.m3u}"    # 输出文件名
 NGINX_PORT="${NGINX_PORT:-12345}"                 # Nginx端口
 WEB_PORT="${WEB_PORT:-23456}"                        # Web管理界面端口（HTTPServer.manager_port）
 
-# SQLite 数据库路径
-DB_PATH="/app/web/data/web.db"
+# SQLite 数据库路径：持久化到 /data 卷（docker-compose 将宿主机 ./data 挂载到容器 /data），容器重建不丢库
+export WEB_DATA_DIR="/data"
+mkdir -p "$WEB_DATA_DIR"
+DB_PATH="$WEB_DATA_DIR/web.db"
 
 # 日志函数
 log() {
@@ -558,8 +560,8 @@ init_sqlite_db() {
     log_info "开始检查 SQLite 数据库..."
 
     # 确保 data 目录存在
-    mkdir -p "/app/web/data" 2>/dev/null || {
-        log_error "无法创建 SQLite 数据目录 /app/web/data"
+    mkdir -p "$WEB_DATA_DIR" 2>/dev/null || {
+        log_error "无法创建 SQLite 数据目录 $WEB_DATA_DIR"
         return 1
     }
 
@@ -606,27 +608,28 @@ except Exception as e:
     # 初始化数据库：建表 + 创建默认用户
     log_info "正在初始化 SQLite 数据库表结构..."
     local init_output
-    # 从环境变量读取密码，未设置时使用随机密码
+    # 从环境变量读取管理员密码；未设置时由 init_db 自动生成强随机密码（零配置首次部署）
     local ADMIN_PW="${WEB_ADMIN_PASSWORD:-}"
-    local VIEWER_PW="${WEB_VIEWER_PASSWORD:-}"
 
     if [ -z "$ADMIN_PW" ]; then
-        ADMIN_PW=$(/app/.venv/bin/python -c "import secrets, string; print(''.join(secrets.choice(string.ascii_letters+string.digits) for _ in range(16)))" 2>/dev/null || python3 -c "import secrets, string; print(''.join(secrets.choice(string.ascii_letters+string.digits) for _ in range(16)))")
-        log_warn "⚠️  环境变量 WEB_ADMIN_PASSWORD 未设置，已生成随机管理员密码: $ADMIN_PW"
-        log_warn "    请通过 docker run -e WEB_ADMIN_PASSWORD=密码 设置自定义密码"
-    fi
-    if [ -z "$VIEWER_PW" ]; then
-        VIEWER_PW=$(/app/.venv/bin/python -c "import secrets, string; print(''.join(secrets.choice(string.ascii_letters+string.digits) for _ in range(12)))" 2>/dev/null || python3 -c "import secrets, string; print(''.join(secrets.choice(string.ascii_letters+string.digits) for _ in range(12)))")
-        log_warn "⚠️  环境变量 WEB_VIEWER_PASSWORD 未设置，已生成随机查看者密码: $VIEWER_PW"
-        log_warn "    请通过 docker run -e WEB_VIEWER_PASSWORD=密码 设置自定义密码"
+        log_info "环境变量 WEB_ADMIN_PASSWORD 未设置，首次部署将由 init_db 自动生成强随机管理员密码"
+    else
+        log_info "使用环境变量 WEB_ADMIN_PASSWORD 作为管理员密码"
+        # 复杂度提示（不强制阻断，兼容历史部署；建议 ≥8 位且含字母与数字）
+        if ! printf '%s' "$ADMIN_PW" | grep -qE '^.{8,}$' \
+            || ! printf '%s' "$ADMIN_PW" | grep -qE '[A-Za-z]' \
+            || ! printf '%s' "$ADMIN_PW" | grep -qE '[0-9]'; then
+            log_warn "⚠️  WEB_ADMIN_PASSWORD 长度不足 8 位或缺少字母/数字，建议设置为更强的密码"
+        fi
     fi
 
-    init_output=$(cd /app && /app/.venv/bin/python <<PYEOF
+    init_output=$(cd /app && /app/.venv/bin/python <<PYEOF 2>&1
 from web.models import init_db
-init_db('$ADMIN_PW', '$VIEWER_PW')
+# 留空则传 None，由 init_db 自动生成强密码（项目仅保留 admin 用户，无 viewer）
+init_db('$ADMIN_PW' if '$ADMIN_PW' else None)
 print('DB_INIT_OK')
 PYEOF
- 2>&1) || {
+    ) || {
         log_error "SQLite 数据库初始化失败: $init_output"
         return 1
     }
@@ -634,7 +637,18 @@ PYEOF
     if echo "$init_output" | grep -q "DB_INIT_OK"; then
         log_info "✓ SQLite 数据库初始化成功"
 
-        # 将环境变量配置写入 SQLite app_config 表（替代原来写入 config.ini）
+        # 捕获首次部署自动生成的密码并醒目提示（init_db 仅在创建用户时打印该行）
+        local gen_pw
+        gen_pw=$(echo "$init_output" | grep '^ADMIN_PASSWORD_INITIALIZED=' | head -1 | cut -d= -f2-) || true
+        if [ -n "$gen_pw" ]; then
+            log_warn "============================================================"
+            log_warn "⚠️  首次部署已自动生成管理员密码，请立即记录并尽快修改！"
+            log_warn "    管理员账号: admin"
+            log_warn "    管理员密码: $gen_pw"
+            log_warn "============================================================"
+        fi
+
+        # 将环境变量配置写入 SQLite app_config 表
         log_info "将环境变量配置写入 SQLite..."
         cd /app && /app/.venv/bin/python -c "
 from web.models import set_app_config_raw
@@ -655,7 +669,7 @@ print('ENV_CONFIG_IMPORTED')
 setup_config_files() {
     log_info "开始初始化配置文件..."
 
-    # 1. SQLite 数据库初始化（替代 config.ini）
+    # 1. SQLite 数据库初始化
     if ! init_sqlite_db; then
         log_error "SQLite 数据库初始化失败，启动中止"
         return 1

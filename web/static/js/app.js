@@ -107,7 +107,7 @@ function formatSourceList(container) {
                 if (document.querySelector('.user-role')?.textContent === '管理员') {
                     html += '<button class="btn btn-sm btn-outline" onclick="showSourceCategories(\'' + sid + '\')">🏷️ 分类</button> ';
                     html += '<a href="/sources/' + sid + '/edit" class="btn btn-sm btn-outline">编辑</a> ';
-                    html += '<button class="btn btn-sm btn-outline" onclick="deleteSource(\'' + sid + '\',\'' + escapeHtml(name) + '\')">删除</button>';
+                    html += '<button class="btn btn-sm btn-outline" onclick="deleteSource(\'' + sid + '\',\'' + escapeJs(name) + '\')">删除</button>';
                 }
                 html += '</td>';
                 html += '</tr>';
@@ -153,10 +153,10 @@ function formatUserList(container) {
             html += '<td><span class="status-badge status-' + (u.is_active ? 'passed' : 'failed') + '">' + statusText + '</span></td>';
             if (document.querySelector('.user-role')?.textContent === '管理员') {
                 html += '<td class="actions" style="white-space:nowrap">';
-                html += '<button class="btn btn-sm btn-outline" onclick="showEditUserForm(' + u.id + ',\'' + escapeHtml(u.username) + '\',\'' + escapeHtml(u.display_name || '') + '\',\'' + u.role + '\')">编辑</button> ';
-                html += '<button class="btn btn-sm btn-outline" onclick="toggleUser(' + u.id + ',\'' + escapeHtml(u.username) + '\',' + (u.is_active ? 'true' : 'false') + ')">' + (u.is_active ? '禁用' : '启用') + '</button> ';
-                html += '<button class="btn btn-sm btn-outline" onclick="resetUserPassword(' + u.id + ',\'' + escapeHtml(u.username) + '\')">🔑 重置密码</button> ';
-                html += '<button class="btn btn-sm btn-outline" onclick="deleteUser(' + u.id + ',\'' + escapeHtml(u.username) + '\')">删除</button>';
+                html += '<button class="btn btn-sm btn-outline" onclick="showEditUserForm(' + u.id + ',\'' + escapeJs(u.username) + '\',\'' + escapeJs(u.display_name || '') + '\',\'' + u.role + '\')">编辑</button> ';
+                html += '<button class="btn btn-sm btn-outline" onclick="toggleUser(' + u.id + ',\'' + escapeJs(u.username) + '\',' + (u.is_active ? 'true' : 'false') + ')">' + (u.is_active ? '禁用' : '启用') + '</button> ';
+                html += '<button class="btn btn-sm btn-outline" onclick="resetUserPassword(' + u.id + ',\'' + escapeJs(u.username) + '\')">🔑 重置密码</button> ';
+                html += '<button class="btn btn-sm btn-outline" onclick="deleteUser(' + u.id + ',\'' + escapeJs(u.username) + '\')">删除</button>';
                 html += '</td>';
             }
             html += '</tr>';
@@ -187,10 +187,26 @@ function deleteSource(sid, name) {
 
 // ── 工具函数 ────────────────────────────────
 function escapeHtml(str) {
-    if (!str) return '';
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
+    if (str == null) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+// 用于把数据安全地嵌入单引号 JS 字符串字面量，如 onclick="f('"+escapeJs(x)+"')"
+// 同时做 HTML 转义，确保外层双引号 HTML 属性不被破坏
+function escapeJs(str) {
+    if (str == null) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, "\\'")
+        .replace(/\\/g, '\\\\')
+        .replace(/\n/g, '\\n')
+        .replace(/\r/g, '\\r');
 }
 
 console.log('LSM Web UI loaded');
@@ -398,7 +414,7 @@ function saveSourceCategories() {
  * 使用 IIFE 模式，所有公共 API 暴露在 LSM 命名空间下
  * ================================================================ */
 
-const LSM = (function() {
+window.LSM = (function() {
     'use strict';
 
     // ── Toast 通知系统 ───────────────────────────────
@@ -555,10 +571,13 @@ const LSM = (function() {
 
     // ── 工具函数 ──────────────────────────────────
     function escapeHtml(str) {
-        if (!str) return '';
-        var div = document.createElement('div');
-        div.textContent = str;
-        return div.innerHTML;
+        if (str == null) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
     }
 
     function formatDate(ts) {
@@ -575,6 +594,7 @@ const LSM = (function() {
         createToggle: createToggle,
         confirm:     confirm,
         escapeHtml:  escapeHtml,
+        escapeJs:    escapeJs,
         formatDate:  formatDate
     };
 })();

@@ -50,7 +50,10 @@
             <button class="btn btn-icon" onclick="closeChannels()">×</button>
         </div>
         <div class="card-body">
-            <div id="channels-info" style="margin-bottom:12px;font-size:13px;color:var(--text-light)"></div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+                <div id="channels-info" style="font-size:13px;color:var(--text-light)"></div>
+                <input type="text" id="channels-search" class="form-input" style="width:200px;font-size:12px" placeholder="搜索频道名/URL/分组..." oninput="channelsSearchDebounced()">
+            </div>
             <div style="overflow-x:auto">
                 <table class="data-table" id="channels-table">
                     <thead>
@@ -337,8 +340,10 @@ async function collectAllSources() {
 
 var channelsCurrentPage = 1;
 var channelsPageSize = 100;
-var channelsAllData = [];
+var channelsPageData = [];   // 当前页数据（服务端分页，最多 size 条）
+var channelsTotalCount = 0;  // 服务端返回的总数
 var currentExpandedId = null;
+var channelsSearchTimer = null;
 
 function expandChannels(fileId) {
     if (currentExpandedId === fileId) {
@@ -346,6 +351,9 @@ function expandChannels(fileId) {
         return;
     }
     currentExpandedId = fileId;
+    channelsCurrentPage = 1;
+    var searchInput = document.getElementById('channels-search');
+    if (searchInput) searchInput.value = '';
 
     var rows = document.querySelectorAll('#source-files-tbody tr');
     rows.forEach(function(r) { r.style.background = ''; });
@@ -365,21 +373,47 @@ function expandChannels(fileId) {
     }
     document.getElementById('channels-title').textContent = '频道列表 - ' + (fileObj ? fileObj.name : '');
 
-    fetch('/api/source-files/' + fileId + '/channels')
+    fetchChannelsPage();
+}
+
+function fetchChannelsPage() {
+    var fileId = currentExpandedId;
+    if (!fileId) return;
+    var search = document.getElementById('channels-search') ? document.getElementById('channels-search').value.trim() : '';
+    var url = '/api/source-files/' + fileId + '/channels?page=' + channelsCurrentPage + '&size=' + channelsPageSize;
+    if (search) url += '&search=' + encodeURIComponent(search);
+
+    var tbody = document.getElementById('channels-tbody');
+    tbody.innerHTML = '<tr><td colspan="6" class="loading">加载中...</td></tr>';
+
+    fetch(url)
         .then(function(r) { return r.json(); })
         .then(function(data) {
-            channelsAllData = data.channels || [];
-            channelsCurrentPage = 1;
+            channelsPageData = data.channels || [];
+            channelsTotalCount = data.total || 0;
             if (data.message) {
                 document.getElementById('channels-info').textContent = data.message;
             } else {
-                document.getElementById('channels-info').textContent = '共 ' + data.total + ' 个频道';
+                var infoText = '共 ' + data.total + ' 个频道';
+                if (data.unfiltered_total && data.unfiltered_total !== data.total) {
+                    infoText += '（筛选自 ' + data.unfiltered_total + ' 个）';
+                }
+                infoText += '，第 ' + data.page + '/' + (Math.ceil(data.total / channelsPageSize) || 1) + ' 页';
+                document.getElementById('channels-info').textContent = infoText;
             }
             renderChannelsPage();
         })
         .catch(function(e) {
             tbody.innerHTML = '<tr><td colspan="6" class="alert alert-error">加载失败: ' + escapeHtml(String(e)) + '</td></tr>';
         });
+}
+
+function channelsSearchDebounced() {
+    if (channelsSearchTimer) clearTimeout(channelsSearchTimer);
+    channelsSearchTimer = setTimeout(function() {
+        channelsCurrentPage = 1;
+        fetchChannelsPage();
+    }, 400);
 }
 
 function closeChannels() {
@@ -390,11 +424,9 @@ function closeChannels() {
 }
 
 function renderChannelsPage() {
-    var total = channelsAllData.length;
+    var pageData = channelsPageData;
+    var total = channelsTotalCount;
     var totalPages = Math.ceil(total / channelsPageSize) || 1;
-    var start = (channelsCurrentPage - 1) * channelsPageSize;
-    var end = start + channelsPageSize;
-    var pageData = channelsAllData.slice(start, end);
 
     var tbody = document.getElementById('channels-tbody');
     if (pageData.length === 0) {
@@ -404,7 +436,7 @@ function renderChannelsPage() {
         for (var i = 0; i < pageData.length; i++) {
             var ch = pageData[i];
             var chName = ch.name || '';
-            var chIdx = start + i;
+            var chIdx = i;  // 页内索引
 
             // 判断是否有手动分类
             var mapping = ch.existing_mapping;
@@ -480,7 +512,7 @@ function renderChannelsPage() {
 
 function channelsGoPage(page) {
     channelsCurrentPage = page;
-    renderChannelsPage();
+    fetchChannelsPage();
 }
 
 // ══════════════════════════════════════════════════
@@ -500,7 +532,7 @@ function showCategoryEditor(chIdx, chName) {
     editingChannelIdx = parseInt(chIdx);
     editingChannelName = chName;
 
-    var ch = channelsAllData[editingChannelIdx];
+    var ch = channelsPageData[editingChannelIdx];
     if (!ch) return;
 
     var currentMapping = ch.existing_mapping || {};
@@ -605,8 +637,8 @@ async function saveChannelCategory() {
         if (resp.ok) {
             showToast('分类已保存: ' + editingChannelName, 'success');
             // 更新本地缓存
-            if (channelsAllData[editingChannelIdx]) {
-                channelsAllData[editingChannelIdx].existing_mapping = Object.assign(
+            if (channelsPageData[editingChannelIdx]) {
+                channelsPageData[editingChannelIdx].existing_mapping = Object.assign(
                     {is_manual: 1}, result.categories || categories
                 );
             }
@@ -634,8 +666,8 @@ async function clearChannelCategory() {
 
         if (resp.ok) {
             showToast('手动分类已清除', 'success');
-            if (channelsAllData[editingChannelIdx]) {
-                channelsAllData[editingChannelIdx].existing_mapping = null;
+            if (channelsPageData[editingChannelIdx]) {
+                channelsPageData[editingChannelIdx].existing_mapping = null;
             }
             hideCategoryEditor();
             renderChannelsPage();
@@ -952,7 +984,7 @@ function showChannelUaEditor(chIdx) {
     if (uaChannelPopover) { uaChannelPopover.remove(); uaChannelPopover = null; }
     if (activePopover) { activePopover.remove(); activePopover = null; }
 
-    var ch = channelsAllData[chIdx];
+    var ch = channelsPageData[chIdx];
     if (!ch) return;
 
     var rowEl = document.getElementById('ch-row-' + chIdx);
@@ -1022,7 +1054,7 @@ function hideChannelUaEditor() {
 }
 
 async function saveChannelUa(chIdx) {
-    var ch = channelsAllData[chIdx];
+    var ch = channelsPageData[chIdx];
     if (!ch) return;
     var uaValue = document.getElementById('ch-ua-value').value.trim();
     var uaPosition = document.getElementById('ch-ua-position').value;
@@ -1049,9 +1081,9 @@ async function saveChannelUa(chIdx) {
         if (resp.ok) {
             showToast(result.message || '频道 UA 已保存', 'success');
             // 更新本地缓存
-            channelsAllData[chIdx].user_agent = uaValue;
-            channelsAllData[chIdx].ua_position = uaPosition;
-            channelsAllData[chIdx].ua_override = true;
+            channelsPageData[chIdx].user_agent = uaValue;
+            channelsPageData[chIdx].ua_position = uaPosition;
+            channelsPageData[chIdx].ua_override = true;
             hideChannelUaEditor();
             renderChannelsPage();
         } else {
@@ -1063,7 +1095,7 @@ async function saveChannelUa(chIdx) {
 }
 
 async function clearChannelUa(chIdx) {
-    var ch = channelsAllData[chIdx];
+    var ch = channelsPageData[chIdx];
     if (!ch) return;
     var csrfToken = await ensureCsrfToken();
     var fileId = currentExpandedId;

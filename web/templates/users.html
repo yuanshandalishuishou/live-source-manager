@@ -242,10 +242,10 @@ function loadUsers() {
                 html += '<td><span class="' + statusCls + '">' + statusText + '</span></td>';
                 html += '<td>' + (u.created_at || '') + '</td>';
                 html += '<td class="actions">';
-                html += '<button class="btn btn-sm btn-outline" onclick="showEditUserForm(' + u.id + ', \'' + escapeHtml(u.username) + '\', \'' + escapeHtml(u.display_name || '') + '\', \'' + u.role + '\')">编辑</button>';
-                html += '<button class="btn btn-sm btn-outline" onclick="resetUserPassword(' + u.id + ', \'' + escapeHtml(u.username) + '\')">重置密码</button>';
-                html += '<button class="btn btn-sm btn-outline" onclick="toggleUser(' + u.id + ', \'' + escapeHtml(u.username) + '\', ' + (u.is_active ? 'true' : 'false') + ')">' + (u.is_active ? '禁用' : '启用') + '</button>';
-                html += '<button class="btn btn-sm btn-danger" onclick="deleteUser(' + u.id + ', \'' + escapeHtml(u.username) + '\')">删除</button>';
+                html += '<button class="btn btn-sm btn-outline" onclick="showEditUserForm(' + u.id + ', \'' + escapeJs(u.username) + '\', \'' + escapeJs(u.display_name || '') + '\', \'' + u.role + '\')">编辑</button>';
+                html += '<button class="btn btn-sm btn-outline" onclick="resetUserPassword(' + u.id + ', \'' + escapeJs(u.username) + '\')">重置密码</button>';
+                html += '<button class="btn btn-sm btn-outline" onclick="toggleUser(' + u.id + ', \'' + escapeJs(u.username) + '\', ' + (u.is_active ? 'true' : 'false') + ')">' + (u.is_active ? '禁用' : '启用') + '</button>';
+                html += '<button class="btn btn-sm btn-danger" onclick="deleteUser(' + u.id + ', \'' + escapeJs(u.username) + '\')">删除</button>';
                 html += '</td></tr>';
             }
             html += '</tbody></table>';

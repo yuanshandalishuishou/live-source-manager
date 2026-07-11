@@ -3,31 +3,31 @@
 配置管理模块
 ============
 
-Config 类 — 全 SQLite 版配置管理，INI 文件作为回退。
-接口完全兼容旧版 Config。
+Config 类 — 纯 SQLite 版配置管理。
+所有配置读写直接走 SQLite app_config 表，无 INI 文件依赖。
 """
 
-import configparser
 import logging
 import os
-import time
-from typing import Any
+from typing import Any, ClassVar
 
 from app.exceptions import ConfigError
 
 
 class Config:
-    """配置管理类 — 全SQLite版
+    """配置管理类 — 纯 SQLite 版
 
-    接口完全兼容旧版 Config:
-    - __init__(config_path, reload_interval) — 默认走 SQLite
-    - get(section, key, default=None) — 读取配置
-    - get_xxx() 便捷方法 — 返回格式与前版完全一致
-    - create_default_config() — 保留（首次导入使用）
+    所有配置读写直接走 SQLite app_config 表，无 INI 文件依赖。
+    对外接口:
+    - __init__() — 初始化（无需路径参数）
+    - get(section, key, default=None) — 从 SQLite 读取配置
+    - set(section, key, value) — 写入 SQLite
+    - get_xxx() 便捷方法 — 覆盖常用配置段
     """
 
-    # 统一默认值 — 与 web/webapp.py 中的 SECTION_SCHEMA 保持权威一致。
-    _DEFAULT_VALUES = {
+    # 统一默认值 — 与 web/core.py 中的 SECTION_SCHEMA 保持权威一致。
+    # 同时也是 seed_app_config_defaults() 的种子来源。
+    _DEFAULT_VALUES: ClassVar[dict[str, str]] = {
         # [Sources]
         'Sources.local_dirs': './config/sources',
         'Sources.online_urls': (
@@ -88,15 +88,34 @@ class Config:
         # [Testing]
         'Testing.timeout': '10',
         'Testing.concurrent_threads': '40',
+        'Testing.max_concurrent_ffprobe': '16',
         'Testing.cache_ttl': '120',
         'Testing.enable_speed_test': 'True',
         'Testing.speed_test_duration': '6',
+        'Testing.auto_scan_enabled': 'False',
+        'Testing.auto_scan_mode': 'interval',
+        'Testing.auto_scan_interval_hours': '24',
+        'Testing.auto_scan_daily_time': '03:00',
+        # 性能优化（对标 Guovin/iptv-api P0）
+        'Testing.enable_host_speed_share': 'True',  # 同 Host 测速复用：同 CDN 只 ffprobe 一次
+        'Testing.enable_source_freeze': 'True',  # 失败源指数退避冻结：死源拉黑冷却省资源
+        'Testing.freeze_fail_threshold': '3',  # 连续失败几次后开始冻结
+        'Testing.freeze_base_seconds': '60',  # 退避基数：2^n × base 秒
+        'Testing.freeze_max_hours': '24',  # 冻结上限小时
+        # 质量与过滤增强（对标 Guovin/iptv-api P1/P2）
+        'Testing.enable_ad_detect': 'True',  # 广告/循环占位源检测：拉 playlist 查关键字+循环标志
+        'Testing.ad_keywords': 'no_signal,/ad/,advertisement,测试卡,无信号,test_pattern,colorbar,broadcast_test,signal_lost',
+        'Testing.ad_max_duration': '90',  # 含 #EXT-X-ENDLIST 且累计时长<=该值(秒)判为循环占位
+        'Testing.global_blacklist': '',  # 全局黑名单：URL/host，逗号或换行分隔，命中则跳过测试
+        'Testing.global_whitelist': '',  # 全局白名单：URL/host，逗号或换行分隔（豁免黑名单）
+        'Testing.output_sort_by': 'speed',  # 输出排序方式：speed(默认,快源在前)/name/resolution
         # [Output]
         'Output.filename': 'live.m3u',
         'Output.group_by': 'category',
         'Output.include_failed': 'False',
         'Output.max_sources_per_channel': '8',
         'Output.enable_filter': 'False',
+        'Output.whitelist_force_keep': 'False',  # 白名单源即使未通过质量过滤也强制保留到输出
         # [Logging]
         'Logging.level': 'INFO',
         'Logging.file': './log/app.log',
@@ -116,85 +135,35 @@ class Config:
         'UserAgents.ua_enabled': 'False',
     }
 
-    def __init__(self, config_path: str = None, reload_interval: int = 60):
-        self.config_path = config_path or os.environ.get('CONFIG_PATH', '/config/config.ini')
-        self.config = configparser.ConfigParser()
-        self.reload_interval = reload_interval
-        self._last_mtime = 0.0
-        self._last_check_time = 0.0
-        self._from_sqlite = True
+    def __init__(self):
+        """初始化 Config（纯 SQLite 版，配置读写直接走 SQLite app_config 表）。"""
+        self._models = None
         self._loaded = False
 
-        try:
-            from web import models as _m
-
-            self._models = _m
-        except ImportError:
-            self._models = None
-            self._from_sqlite = False
-
-        self._ensure_ini_loaded()
-
     def _get_models(self):
+        """懒加载 web.models 模块"""
         if self._models is not None:
             return self._models
         try:
             from web import models as _m
 
             self._models = _m
-            self._from_sqlite = True
             return self._models
         except ImportError:
-            self._from_sqlite = False
-            raise
-
-    def _ensure_ini_loaded(self):
-        if os.path.exists(self.config_path):
-            encodings = ['utf-8', 'gbk', 'gb2312', 'latin1', 'utf-8-sig']
-            for encoding in encodings:
-                try:
-                    with open(self.config_path, encoding=encoding) as f:
-                        content = f.read()
-                        if content.startswith('\ufeff'):
-                            content = content[1:]
-                        self.config.read_string(content)
-                    return
-                except (UnicodeDecodeError, configparser.Error):
-                    continue
-            try:
-                self.config.read(self.config_path)
-            except configparser.Error as e:
-                raise ConfigError(f'配置文件格式错误: {e}') from e
-        else:
-            self.create_default_config()
+            raise ConfigError('无法加载 web.models 模块，SQLite 配置不可用')
 
     def _get_config_dict(self) -> dict[str, dict[str, str]]:
-        try:
-            return self._get_models().get_all_config()
-        except Exception as e:
-            logging.warning(f'SQLite读取失败，回退到INI: {e}')
-            return self._load_from_ini()
-
-    def _load_from_ini(self) -> dict[str, dict[str, str]]:
-        if os.path.exists(self.config_path):
-            cp = configparser.ConfigParser()
-            cp.read(self.config_path, encoding='utf-8')
-            result = {}
-            for section in cp.sections():
-                result[section] = dict(cp.items(section))
-            return result
-        return {}
+        """从 SQLite 读取全量配置"""
+        return self._get_models().get_all_config()
 
     def get(self, section: str, key: str, default: Any = None) -> str | None:
-        if self._from_sqlite and self._models:
-            try:
-                val = self._get_models().get_app_config(f'{section}.{key}')
-                if val is not None:
-                    return val
-            except Exception:
-                logging.warning(f'Config.get 从SQLite读取失败({section}.{key})，回退到INI')
-        if self.config.has_section(section):
-            return self.config.get(section, key, fallback=default)
+        """从 SQLite 读取单个配置值"""
+        try:
+            val = self._get_models().get_app_config(f'{section}.{key}')
+            if val is not None:
+                return val
+        except Exception as e:
+            logging.warning(f'Config.get SQLite 读取失败 ({section}.{key}): {e}')
         return default
 
     def getint(self, section: str, key: str, default: int = 0) -> int:
@@ -224,45 +193,18 @@ class Config:
         return list(config_dict.keys())
 
     def set(self, section: str, key: str, value: str):
+        """写入配置到 SQLite"""
         try:
             self._get_models().set_app_config(f'{section}.{key}', value)
-            self._sync_to_ini(section, key, value)
         except Exception as e:
-            logging.warning(f'Config.set 写入SQLite失败: {e}')
-
-    def _sync_to_ini(self, section: str, key: str, value: str):
-        if not os.path.exists(self.config_path):
-            return
-        try:
-            cp = configparser.ConfigParser()
-            cp.read(self.config_path, encoding='utf-8')
-            if section not in cp:
-                cp[section] = {}
-            cp[section][key] = value
-            with open(self.config_path, 'w', encoding='utf-8') as f:
-                cp.write(f)
-        except Exception as _:
-            logging.warning(f'INI备份写入失败(不阻塞主流程): {_}')
+            logging.warning(f'Config.set SQLite 写入失败: {e}')
 
     def save(self):
+        """保留兼容（原用于 INI 保存），SQLite 模式无操作"""
         pass
 
     def check_reload(self) -> bool:
-        now = time.time()
-        if now - self._last_check_time < self.reload_interval:
-            return False
-        self._last_check_time = now
-        if not os.path.exists(self.config_path):
-            logging.warning(f'INI文件不存在 ({self.config_path})，check_reload 跳过')
-            return False
-        try:
-            current_mtime = os.path.getmtime(self.config_path)
-            if current_mtime != self._last_mtime:
-                self._last_mtime = current_mtime
-                self._ensure_ini_loaded()
-                return True
-        except OSError:
-            pass
+        """保留兼容（原用于 INI mtime 检查），SQLite 模式始终返回 False"""
         return False
 
     def load_config(self):
@@ -323,6 +265,33 @@ class Config:
             'speed_test_duration': self.getint(
                 'Testing', 'speed_test_duration', self._default_int('Testing', 'speed_test_duration')
             ),
+            # 性能优化（对标 Guovin/iptv-api P0）
+            'enable_host_speed_share': self.getboolean(
+                'Testing', 'enable_host_speed_share', self._default_bool('Testing', 'enable_host_speed_share')
+            ),
+            'enable_source_freeze': self.getboolean(
+                'Testing', 'enable_source_freeze', self._default_bool('Testing', 'enable_source_freeze')
+            ),
+            'freeze_fail_threshold': self.getint(
+                'Testing', 'freeze_fail_threshold', self._default_int('Testing', 'freeze_fail_threshold')
+            ),
+            'freeze_base_seconds': self.getint(
+                'Testing', 'freeze_base_seconds', self._default_int('Testing', 'freeze_base_seconds')
+            ),
+            'freeze_max_hours': self.getint(
+                'Testing', 'freeze_max_hours', self._default_int('Testing', 'freeze_max_hours')
+            ),
+            # 质量与过滤增强（对标 Guovin/iptv-api P1/P2）
+            'enable_ad_detect': self.getboolean(
+                'Testing', 'enable_ad_detect', self._default_bool('Testing', 'enable_ad_detect')
+            ),
+            'ad_keywords': self.get('Testing', 'ad_keywords', self._default('Testing', 'ad_keywords')),
+            'ad_max_duration': self.getint(
+                'Testing', 'ad_max_duration', self._default_int('Testing', 'ad_max_duration')
+            ),
+            'global_blacklist': self.get('Testing', 'global_blacklist', self._default('Testing', 'global_blacklist')),
+            'global_whitelist': self.get('Testing', 'global_whitelist', self._default('Testing', 'global_whitelist')),
+            'output_sort_by': self.get('Testing', 'output_sort_by', self._default('Testing', 'output_sort_by')),
             'max_workers': 50,
         }
 
@@ -354,6 +323,9 @@ class Config:
                 'Output', 'max_sources_per_channel', self._default_int('Output', 'max_sources_per_channel')
             ),
             'enable_filter': self.getboolean('Output', 'enable_filter', self._default_bool('Output', 'enable_filter')),
+            'whitelist_force_keep': self.getboolean(
+                'Output', 'whitelist_force_keep', self._default_bool('Output', 'whitelist_force_keep')
+            ),
             'output_dir': output_dir,
         }
 
@@ -378,21 +350,16 @@ class Config:
         return self.getboolean('UserAgents', 'ua_enabled', self._default_bool('UserAgents', 'ua_enabled'))
 
     def get_user_agents(self) -> dict:
-        ua_config = {}
-        if self._from_sqlite and self._models:
-            try:
-                all_cfg = self._get_models().get_all_config()
-                section_data = all_cfg.get('UserAgents', {})
-                for key, value in section_data.items():
-                    if key not in ('ua_position', 'ua_enabled'):
-                        ua_config[key] = str(value)
-                return ua_config
-            except Exception:
-                logging.warning('get_user_agents 从SQLite读取失败，回退到INI')
-        if self.config.has_section('UserAgents'):
-            for key, value in self.config.items('UserAgents'):
-                if key not in ['ua_position', 'ua_enabled']:
-                    ua_config[key] = value
+        """从 SQLite 读取 UserAgents 段的所有 UA 配置"""
+        ua_config: dict[str, str] = {}
+        try:
+            all_cfg = self._get_models().get_all_config()
+            section_data = all_cfg.get('UserAgents', {})
+            for key, value in section_data.items():
+                if key not in ('ua_position', 'ua_enabled'):
+                    ua_config[key] = str(value)
+        except Exception:
+            logging.warning('get_user_agents 从 SQLite 读取失败')
         return ua_config
 
     def get_source_file_ua_settings(self) -> dict:
@@ -435,78 +402,3 @@ class Config:
             github_sources = []
 
         return {'local_dirs': local_dirs, 'online_urls': online_urls, 'github_sources': github_sources}
-
-    def create_default_config(self):
-        self.config['Sources'] = {
-            'local_dirs': self._DEFAULT_VALUES.get('Sources.local_dirs', '/config/sources'),
-            'online_urls': self._DEFAULT_VALUES.get('Sources.online_urls', ''),
-        }
-        self.config['Network'] = {
-            'proxy_enabled': self._DEFAULT_VALUES.get('Network.proxy_enabled', 'False'),
-            'proxy_type': self._DEFAULT_VALUES.get('Network.proxy_type', 'socks5'),
-            'proxy_host': self._DEFAULT_VALUES.get('Network.proxy_host', ''),
-            'proxy_port': self._DEFAULT_VALUES.get('Network.proxy_port', '1800'),
-            'proxy_username': self._DEFAULT_VALUES.get('Network.proxy_username', ''),
-            'proxy_password': self._DEFAULT_VALUES.get('Network.proxy_password', ''),
-            'ipv6_enabled': self._DEFAULT_VALUES.get('Network.ipv6_enabled', 'False'),
-        }
-        self.config['HTTPServer'] = {
-            'enabled': self._DEFAULT_VALUES.get('HTTPServer.enabled', 'False'),
-            'host': self._DEFAULT_VALUES.get('HTTPServer.host', '0.0.0.0'),
-            'fileshare_port': self._DEFAULT_VALUES.get('HTTPServer.fileshare_port', '12345'),
-            'manager_port': self._DEFAULT_VALUES.get('HTTPServer.manager_port', '23456'),
-            'document_root': self._DEFAULT_VALUES.get('HTTPServer.document_root', './www/output'),
-        }
-        self.config['GitHub'] = {
-            'api_url': self._DEFAULT_VALUES.get('GitHub.api_url', 'https://api.github.com'),
-            'api_token': self._DEFAULT_VALUES.get('GitHub.api_token', ''),
-            'rate_limit': self._DEFAULT_VALUES.get('GitHub.rate_limit', '5000'),
-        }
-        self.config['Testing'] = {
-            'timeout': self._DEFAULT_VALUES.get('Testing.timeout', '10'),
-            'concurrent_threads': self._DEFAULT_VALUES.get('Testing.concurrent_threads', '40'),
-            'cache_ttl': self._DEFAULT_VALUES.get('Testing.cache_ttl', '120'),
-            'enable_speed_test': self._DEFAULT_VALUES.get('Testing.enable_speed_test', 'True'),
-            'speed_test_duration': self._DEFAULT_VALUES.get('Testing.speed_test_duration', '6'),
-        }
-        self.config['Output'] = {
-            'filename': self._DEFAULT_VALUES.get('Output.filename', 'live.m3u'),
-            'group_by': self._DEFAULT_VALUES.get('Output.group_by', 'category'),
-            'include_failed': self._DEFAULT_VALUES.get('Output.include_failed', 'False'),
-            'max_sources_per_channel': self._DEFAULT_VALUES.get('Output.max_sources_per_channel', '8'),
-            'enable_filter': self._DEFAULT_VALUES.get('Output.enable_filter', 'False'),
-        }
-        self.config['Logging'] = {
-            'level': self._DEFAULT_VALUES.get('Logging.level', 'INFO'),
-            'file': self._DEFAULT_VALUES.get('Logging.file', '/log/app.log'),
-            'max_size': self._DEFAULT_VALUES.get('Logging.max_size', '10'),
-            'backup_count': self._DEFAULT_VALUES.get('Logging.backup_count', '5'),
-        }
-        self.config['Filter'] = {
-            'max_latency': self._DEFAULT_VALUES.get('Filter.max_latency', '4000'),
-            'min_bitrate': self._DEFAULT_VALUES.get('Filter.min_bitrate', '80'),
-            'must_hd': self._DEFAULT_VALUES.get('Filter.must_hd', 'False'),
-            'must_4k': self._DEFAULT_VALUES.get('Filter.must_4k', 'False'),
-            'min_speed': self._DEFAULT_VALUES.get('Filter.min_speed', '50'),
-            'min_resolution': self._DEFAULT_VALUES.get('Filter.min_resolution', '360p'),
-            'max_resolution': self._DEFAULT_VALUES.get('Filter.max_resolution', '4k'),
-            'resolution_filter_mode': self._DEFAULT_VALUES.get('Filter.resolution_filter_mode', 'range'),
-        }
-        self.config['UserAgents'] = {
-            'ua_position': self._DEFAULT_VALUES.get('UserAgents.ua_position', 'extinf'),
-            'ua_enabled': self._DEFAULT_VALUES.get('UserAgents.ua_enabled', 'True'),
-        }
-
-        os.makedirs(os.path.dirname(self.config_path), exist_ok=True)
-        with open(self.config_path, 'w', encoding='utf-8') as f:
-            self.config.write(f)
-
-    @staticmethod
-    def create_default_at(config_path: str):
-        config = Config.__new__(Config)
-        config.config_path = config_path
-        config.config = configparser.ConfigParser()
-        config.create_default_config()
-        os.makedirs(os.path.dirname(config_path), exist_ok=True)
-        with open(config_path, 'w', encoding='utf-8') as f:
-            config.config.write(f)

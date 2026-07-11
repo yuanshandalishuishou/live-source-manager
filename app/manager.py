@@ -16,10 +16,12 @@
 """
 
 import asyncio
+import contextlib
 import os
 import sys
 import time
 import traceback
+from typing import ClassVar
 
 from app.config import Config
 from app.exceptions import (
@@ -50,7 +52,7 @@ class EnhancedLiveSourceManager:
 
     # 频道分类优先级（数值越小优先级越高，用于 _should_override_category）
     # 分组：核心频道 < 广播/音频 < 港澳台 < 卫视频道 < 内容频道 < 地区频道 < 国际 < 兜底
-    CATEGORY_PRIORITY: dict[str, int] = {
+    CATEGORY_PRIORITY: ClassVar[dict[str, int]] = {
         # Tier 0 — 核心频道（不可被覆盖）
         '央视频道': 1,
         # Tier 1 — 广播/在线
@@ -111,13 +113,8 @@ class EnhancedLiveSourceManager:
         '其他频道': 100,
     }
 
-    def __init__(self, config_path: str = None):
-        """初始化管理器实例
-
-        Args:
-            config_path: 配置文件路径（默认从环境变量 CONFIG_PATH 读取）
-        """
-        self.config_path = config_path or os.environ.get('CONFIG_PATH', '/config/config.ini')
+    def __init__(self):
+        """初始化管理器实例（纯 SQLite 配置，无需路径参数）。"""
         self.config = None
         self.logger = None
         self.channel_rules = None
@@ -145,7 +142,7 @@ class EnhancedLiveSourceManager:
             self.start_time = time.time()
 
             # 第一步：初始化配置管理器
-            self.config = Config(self.config_path)
+            self.config = Config()
             self.logger_info('开始初始化增强版直播源管理工具...')
 
             # 第二步：初始化日志系统
@@ -462,10 +459,7 @@ class EnhancedLiveSourceManager:
             return True
 
         # 特殊规则：如果频道名称包含CCTV但原分类不是央视频道，则覆盖
-        if 'CCTV' in channel_name.upper() and old_cat != '央视频道' and new_cat == '央视频道':
-            return True
-
-        return False
+        return bool('CCTV' in channel_name.upper() and old_cat != '央视频道' and new_cat == '央视频道')
 
     def hierarchical_filtering(self, sources: list[dict]) -> tuple[list[dict], list[dict], list[dict]]:
         """分层筛选机制 - 核心处理流程
@@ -1035,10 +1029,8 @@ class EnhancedLiveSourceManager:
                     asyncio.set_event_loop(loop)
                 # 释放SourceManager的aiohttp连接池
                 if hasattr(self, 'source_manager') and self.source_manager is not None:
-                    try:
+                    with contextlib.suppress(Exception):
                         loop.run_until_complete(self.source_manager.close())
-                    except Exception:
-                        pass
             finally:
                 if loop is not None and not loop.is_closed():
                     loop.close()
@@ -1164,10 +1156,8 @@ def main():
     try:
         locale.setlocale(locale.LC_ALL, 'C.UTF-8')
     except locale.Error:
-        try:
+        with contextlib.suppress(locale.Error):
             locale.setlocale(locale.LC_ALL, 'en_US.UTF-8')
-        except locale.Error:
-            pass  # 使用系统默认编码
     print('直播源管理工具（增强分层筛选修复版）启动中...')
 
     # 创建增强版管理器实例
@@ -1184,10 +1174,8 @@ def main():
         # 支持 --interval 参数
         for i, arg in enumerate(sys.argv):
             if arg == '--interval' and i + 1 < len(sys.argv):
-                try:
+                with contextlib.suppress(ValueError):
                     interval = int(sys.argv[i + 1])
-                except ValueError:
-                    pass
         print(f'定时模式启动，间隔 {interval} 秒')
         asyncio.run(manager.run_periodic(interval))
         return 0

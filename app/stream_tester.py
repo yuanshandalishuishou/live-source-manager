@@ -11,9 +11,11 @@
 """
 
 import concurrent.futures
+import contextlib
 import json
 import multiprocessing
 import os
+import re
 import socket
 import subprocess
 import threading
@@ -148,13 +150,94 @@ class StreamTester:
 
         # ffprobe可用性标志（初始化为True，_verify_ffprobe失败时设为False）
         self.ffprobe_available = True
+        # 是否支持 -rw_timeout（细化 read 超时，_verify_ffprobe 探测）
+        self._ffprobe_supports_rw_timeout = False
 
         # ---- 纪枢方案 F-8: Semaphore 限制 ffprobe 子进程并发数 ----
         max_ffprobe = int(self._get_config_timeout('max_concurrent_ffprobe', 4))
         self._ffprobe_semaphore = threading.Semaphore(max_ffprobe)
 
+        # ---- 实时测试中断机制：供 Web 层「暂停/取消」立即终止正在运行的子进程 ----
+        self._abort = threading.Event()
+        self._proc_lock = threading.Lock()
+        self._active_procs = []
+
+        # ---- P0（对标 Guovin/iptv-api）：同 Host 测速复用 ----
+        # 同 CDN/Host 仅 ffprobe 一次，其余同 Host 源直接复用结果，ffprobe 调用可降一个数量级
+        self._host_speed_share = bool(self.testing_params.get('enable_host_speed_share', True))
+        self._host_speed_cache = {}  # host -> {status, response_time, metadata, timestamp}
+        self._host_cache_lock = threading.Lock()
+
+        # ---- P0（对标 Guovin/iptv-api）：失败源指数退避冻结 ----
+        # 连续失败的源按 2^n × base 秒指数退避拉黑冷却，避免每次全量重测所有死源浪费资源
+        self._source_freeze = bool(self.testing_params.get('enable_source_freeze', True))
+        self._freeze_fail_threshold = int(self.testing_params.get('freeze_fail_threshold', 3))
+        self._freeze_base_seconds = int(self.testing_params.get('freeze_base_seconds', 60))
+        self._freeze_max_seconds = int(self.testing_params.get('freeze_max_hours', 24)) * 3600
+        self._status_dir = self._resolve_status_dir()
+        self._frozen_map = self._load_frozen_map()  # norm_url -> {fail_count, frozen_until}
+        self._frozen_map_lock = threading.Lock()
+
+        # ---- P1/P2（对标 Guovin/iptv-api）：广告检测 + 全局黑白名单 ----
+        # 广告/循环占位源检测：成功 ffprobe 后额外拉取 m3u8 头部检查关键字与循环标志
+        self._ad_enabled = bool(self.testing_params.get('enable_ad_detect', True))
+        self._ad_keywords = self._parse_filter_list(self.testing_params.get('ad_keywords', ''))
+        self._ad_max_duration = int(self.testing_params.get('ad_max_duration', 90))
+        # 全局黑白名单：URL 或 host 命中
+        self._blacklist = self._parse_filter_list(self.testing_params.get('global_blacklist', ''))
+        self._whitelist = self._parse_filter_list(self.testing_params.get('global_whitelist', ''))
+
         # 验证ffprobe可用性
         self._verify_ffprobe()
+
+    # ────────────────────────────────────────────────
+    # 实时测试中断控制（供 Web 层暂停/取消立即生效）
+    # ────────────────────────────────────────────────
+    def abort(self) -> None:
+        """立即终止当前所有正在运行的 ffprobe/ffmpeg 子进程。"""
+        self._abort.set()
+        self.terminate_active_procs()
+
+    def clear_abort(self) -> None:
+        """清除中断标志，允许后续测试正常进行（恢复测试时调用）。"""
+        self._abort.clear()
+
+    def terminate_active_procs(self) -> None:
+        """终止所有已记录的活跃子进程（幂等，对已结束进程无副作用）。
+
+        关键点：ffprobe/ffmpeg 可能派生子进程（实际解码/I/O 进程）并继承管道。
+        仅 terminate 父进程时，子进程仍持有 stdout/stderr 管道，会导致调用方
+        proc.communicate() 阻塞直到超时——这正是「暂停/取消不立即生效」的根因。
+        因此优先杀掉整个进程树（父+子），确保管道立即关闭、communicate 立即返回。
+        """
+        with self._proc_lock:
+            procs = list(self._active_procs)
+        for p in procs:
+            self._kill_proc_tree(p)
+
+    @staticmethod
+    def _kill_proc_tree(proc) -> None:
+        """递归杀掉 subprocess.Popen 进程及其所有子进程。"""
+        # 先杀子进程（若 ffprobe 派生子进程持有管道），再杀父进程
+        try:
+            import psutil
+
+            try:
+                parent = psutil.Process(proc.pid)
+                children = parent.children(recursive=True)
+            except Exception:
+                children = []
+            for c in children:
+                with contextlib.suppress(Exception):
+                    c.kill()
+        except Exception:
+            pass
+        # 父进程：优先 terminate（SIGTERM/TerminateProcess），失败再 kill
+        try:
+            proc.terminate()
+        except Exception:
+            with contextlib.suppress(Exception):
+                proc.kill()
 
     def _verify_ffprobe(self):
         """验证ffprobe工具是否可用（N-5: 类级缓存避免重复子进程）
@@ -184,6 +267,20 @@ class StreamTester:
                     self.logger.info(f'✓ FFprobe工具验证成功: {StreamTester._ffprobe_path}')
                     StreamTester._ffprobe_verified = True
                     self.ffprobe_available = True
+                    # 探测 -rw_timeout 支持（用于细化 read 超时）
+                    try:
+                        h = subprocess.run(
+                            [StreamTester._ffprobe_path, '-h', 'full'],
+                            capture_output=True,
+                            text=True,
+                            timeout=5,
+                        )
+                        out = f'{h.stdout or ""}{h.stderr or ""}'
+                        self._ffprobe_supports_rw_timeout = 'rw_timeout' in out
+                    except Exception:
+                        self._ffprobe_supports_rw_timeout = False
+                    if self._ffprobe_supports_rw_timeout:
+                        self.logger.info('✓ FFprobe 支持 -rw_timeout（细化 read 超时生效）')
                 else:
                     self.logger.warning(f'⚠ FFprobe执行返回非零: {result.stderr}')
                     StreamTester._ffprobe_verified = False
@@ -299,6 +396,10 @@ class StreamTester:
                     if result.get('status') == 'success':
                         successful_count += 1
                         log_level = 'info' if is_qualified else 'warning'
+                    elif result.get('status') == 'frozen':
+                        # 冻结属预期冷却，计入失败但不刷 error 日志
+                        failed_count += 1
+                        log_level = 'info'
                     else:
                         failed_count += 1
                         log_level = 'error'
@@ -347,6 +448,10 @@ class StreamTester:
         self.logger.info(f'  - 成功数: {successful_count} ({successful_count / total_pct * 100:.1f}%)')
         self.logger.info(f'  - 合格数: {qualified_count} ({qualified_count / total_pct * 100:.1f}%)')
         self.logger.info(f'  - 失败数: {failed_count} ({failed_count / total_pct * 100:.1f}%)')
+
+        # ---- P0-②：持久化冻结状态（跨进程保留）----
+        if self._source_freeze:
+            self._save_frozen_map()
 
         # ---- 纪码增强：停止看门狗 ----
         self._stop_watchdog()
@@ -404,10 +509,40 @@ class StreamTester:
         """
         url = source['url']
         user_agent = source.get('user_agent')
+        url_norm = self.normalize_url(url)
+        host = self._extract_host(url)
+
+        # ---- P2-⑥：全局黑白名单（测试最优先拦截）----
+        # 用原始 url 匹配（normalize_url 会编码查询参数，子串黑名单可能漏匹配）
+        if self._whitelist and self._url_in_list(url, self._whitelist):
+            pass  # 白名单：不跳过
+        elif self._blacklist and self._url_in_list(url, self._blacklist):
+            self.logger.info(f'源命中全局黑名单，跳过测试: {source.get("name", "")}')
+            return {
+                **source,
+                'status': 'blacklisted',
+                'response_time': None,
+                'is_qualified': False,
+                'error_reason': 'global_blacklist',
+            }
 
         try:
+            # ---- P0-②：失败源冻结检查（一切测试前，跳过冷却中的死源省资源）----
+            if self._source_freeze:
+                frozen_until = self._check_frozen(url_norm)
+                if frozen_until and frozen_until > time.time():
+                    self.logger.info(f'源已冻结冷却中，跳过测试: {source.get("name", "")}')
+                    return {
+                        **source,
+                        'status': 'frozen',
+                        'response_time': None,
+                        'is_qualified': False,
+                        'error_reason': f'frozen until {datetime.fromtimestamp(frozen_until):%Y-%m-%d %H:%M:%S}',
+                        'frozen_until': frozen_until,
+                    }
+
             # 生成缓存键(规范化URL)
-            cache_key = self.normalize_url(url)
+            cache_key = url_norm
 
             # 检查缓存命中
             cache_result = self._get_cached_result(cache_key)
@@ -424,6 +559,13 @@ class StreamTester:
                     'is_qualified': False,
                     'error_reason': 'network_incompatible',
                 }
+
+            # ---- P0-①：同 Host 测速复用（同 CDN 只 ffprobe 一次）----
+            if self._host_speed_share:
+                host_cached = self._get_host_cached_result(host)
+                if host_cached is not None:
+                    self.logger.debug(f'同 Host 复用测速结果 [{host}]: {source.get("name", "")}')
+                    return {**source, **host_cached, 'host_shared': True}
 
             # ---- 纪码增强：指数退避重试 ----
             last_error_reason = ''
@@ -447,6 +589,10 @@ class StreamTester:
                 )
                 response_time = round((time.time() - start_time) * 1000)
 
+                # 被 Web 层中断（暂停/取消）：立即返回，不重试
+                if test_status == 'interrupted':
+                    return {**source, 'status': 'interrupted', 'response_time': None}
+
                 # 成功则跳出重试循环
                 if test_status == 'success':
                     # 速度测试(如果启用)
@@ -456,7 +602,26 @@ class StreamTester:
                     metadata['media_type'] = self._determine_media_type(metadata)
 
                     test_result = {'status': test_status, 'response_time': response_time, **metadata}
+
+                    # ---- P1：广告/循环占位源检测（成功连接但可能是假活源）----
+                    # 命中则降级为 failed 并标记 is_ad，既不解除冻结也不计入死源失败
+                    if self._ad_enabled:
+                        try:
+                            if self._detect_ad_playlist(url, user_agent, metadata):
+                                test_result['status'] = 'failed'
+                                test_result['is_ad'] = True
+                                test_result['error_reason'] = 'ad_playlist'
+                                self.logger.info(f'检测到广告/循环占位源，剔除: {source.get("name", "")}')
+                        except Exception as e:
+                            self.logger.debug(f'广告检测异常（忽略，按正常源处理）: {e}')
+
                     self._cache_result(cache_key, test_result)
+                    # ---- P0-①：写入同 Host 复用缓存（仅成功态，避免死 host 复用扩散）----
+                    if self._host_speed_share:
+                        self._cache_host_result(host, test_result)
+                    # ---- P0-②：成功则解除该源冻结（广告源不解除，因其非真活源）----
+                    if test_result['status'] == 'success' and self._source_freeze:
+                        self._record_success(url_norm)
                     return {**source, **test_result}
                 else:
                     last_error_reason = metadata.get('error_reason', 'unknown')
@@ -475,6 +640,9 @@ class StreamTester:
                 'response_time': None,
                 'error_reason': f'after_{self.max_retries}_retries: {last_error_reason}',
             }
+            # ---- P0-②：记录失败，连续失败达阈值则冻结冷却 ----
+            if self._source_freeze:
+                self._record_failure(url_norm)
             return {**source, **test_result}
 
         except Exception:
@@ -508,7 +676,11 @@ class StreamTester:
         try:
             # ---- 纪码增强：使用细化超时 ----
             actual_probe_timeout = probe_timeout or self.testing_params['timeout']
-            timeout_ms = actual_probe_timeout * 1000000
+            # 细化超时层级落地：
+            #   connect_timeout → ffprobe -timeout（socket 超时，微秒，控制连接与单次 I/O）
+            #   read_timeout    → ffprobe -rw_timeout（读等待，微秒，需版本支持）
+            connect_us = int((connect_timeout if connect_timeout is not None else self.connect_timeout) * 1_000_000)
+            read_us = int((read_timeout if read_timeout is not None else self.read_timeout) * 1_000_000)
 
             if StreamTester._ffprobe_path:
                 # 优先使用 ffprobe（完整元数据）
@@ -522,9 +694,12 @@ class StreamTester:
                     '-show_streams',  # 显示流信息
                     '-show_format',  # 显示格式信息
                     '-timeout',
-                    str(timeout_ms),  # 超时设置
+                    str(connect_us),  # 连接超时（微秒）
                     url,
                 ]
+                if self._ffprobe_supports_rw_timeout:
+                    # 在 url 前插入 -rw_timeout（读超时，微秒）
+                    cmd = [*cmd[:-1], '-rw_timeout', str(read_us), cmd[-1]]
 
                 # 添加User-Agent头(如果提供)
                 if user_agent:
@@ -533,24 +708,51 @@ class StreamTester:
                 # 执行ffprobe命令
                 # ---- F-8: Semaphore 限流 ffprobe 子进程 ----
                 with self._ffprobe_semaphore:
+                    if self._abort.is_set():
+                        return 'interrupted', {'error_reason': 'aborted'}
                     self.logger.debug(f'执行ffprobe命令: {" ".join(cmd)}')
-                    result = subprocess.run(
+                    proc = subprocess.Popen(
                         cmd,
-                        capture_output=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
                         text=True,
-                        timeout=actual_probe_timeout + 2,  # 额外2秒缓冲
                     )
+                    with self._proc_lock:
+                        self._active_procs.append(proc)
+                    try:
+                        stdout, stderr = proc.communicate(timeout=actual_probe_timeout + 2)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                        try:
+                            stdout, stderr = proc.communicate()
+                        except Exception:
+                            stdout, stderr = '', ''
+                        if self._abort.is_set():
+                            return 'interrupted', {'error_reason': 'aborted'}
+                        return 'timeout', {'error_reason': 'timeout'}
+                    except Exception:
+                        if self._abort.is_set():
+                            return 'interrupted', {'error_reason': 'aborted'}
+                        raise
+                    finally:
+                        with self._proc_lock:
+                            if proc in self._active_procs:
+                                self._active_procs.remove(proc)
 
                 # 分析命令执行结果
-                if result.returncode == 0:
-                    data = json.loads(result.stdout)
+                if proc.returncode == 0:
+                    data = json.loads(stdout)
                     if data.get('streams') and len(data['streams']) > 0:
                         metadata = self.extract_metadata(data)
                         return 'success', metadata
                     else:
+                        if self._abort.is_set():
+                            return 'interrupted', {'error_reason': 'aborted'}
                         return 'failed', {'error_reason': 'no_valid_streams'}
                 else:
-                    error_msg = result.stderr.strip() if result.stderr else 'Unknown error'
+                    if self._abort.is_set():
+                        return 'interrupted', {'error_reason': 'aborted'}
+                    error_msg = stderr.strip() if stderr else 'Unknown error'
                     self.logger.debug(f'FFprobe执行失败: {error_msg}')
                     return 'failed', {'error_reason': f'ffprobe_error: {error_msg}'}
 
@@ -574,14 +776,44 @@ class StreamTester:
                     cmd.extend(['-user_agent', user_agent])
 
                 with self._ffprobe_semaphore:
+                    if self._abort.is_set():
+                        return 'interrupted', {'error_reason': 'aborted'}
                     self.logger.debug(f'降级使用ffmpeg测试: {" ".join(cmd)}')
-                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=actual_probe_timeout + 2)
+                    proc = subprocess.Popen(
+                        cmd,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                    )
+                    with self._proc_lock:
+                        self._active_procs.append(proc)
+                    try:
+                        stdout, stderr = proc.communicate(timeout=actual_probe_timeout + 2)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                        try:
+                            stdout, stderr = proc.communicate()
+                        except Exception:
+                            stdout, stderr = '', ''
+                        if self._abort.is_set():
+                            return 'interrupted', {'error_reason': 'aborted'}
+                        return 'timeout', {'error_reason': 'timeout'}
+                    except Exception:
+                        if self._abort.is_set():
+                            return 'interrupted', {'error_reason': 'aborted'}
+                        raise
+                    finally:
+                        with self._proc_lock:
+                            if proc in self._active_procs:
+                                self._active_procs.remove(proc)
 
-                if result.returncode == 0:
+                if proc.returncode == 0:
                     # ffmpeg 成功连接流，返回基本元数据
                     return 'success', {'probe_mode': 'ffmpeg_fallback'}
                 else:
-                    error_msg = result.stderr.strip() if result.stderr else 'Unknown error'
+                    if self._abort.is_set():
+                        return 'interrupted', {'error_reason': 'aborted'}
+                    error_msg = stderr.strip() if stderr else 'Unknown error'
                     self.logger.debug(f'FFmpeg降级测试失败: {error_msg}')
                     return 'failed', {'error_reason': f'ffmpeg_error: {error_msg}'}
 
@@ -633,10 +865,8 @@ class StreamTester:
                 if cancelled:
                     self._active_futures.discard(future)
                     # 释放 Semaphore：每个取消的 future 对应一个 acquire()
-                    try:
+                    with contextlib.suppress(ValueError):
                         self._ffprobe_semaphore.release()
-                    except ValueError:
-                        pass  # Semaphore 释放过多可能抛 ValueError
                     self.logger.debug(f'看门狗取消了 future ({cancelled})')
 
     def _stop_watchdog(self):
@@ -700,17 +930,13 @@ class StreamTester:
 
             # 比特率(转换为kbps)
             if 'bit_rate' in format_info:
-                try:
+                with contextlib.suppress(ValueError, TypeError):
                     metadata['bitrate'] = int(format_info['bit_rate']) // 1000
-                except (ValueError, TypeError):
-                    pass
 
             # 时长(秒)
             if 'duration' in format_info:
-                try:
+                with contextlib.suppress(ValueError, TypeError):
                     metadata['duration'] = float(format_info['duration'])
-                except (ValueError, TypeError):
-                    pass
 
             # 格式名称
             if 'format_name' in format_info:
@@ -795,10 +1021,8 @@ class StreamTester:
 
         # 编码级别
         if 'level' in stream:
-            try:
+            with contextlib.suppress(ValueError, TypeError):
                 info['video_level'] = int(stream['level'])
-            except (ValueError, TypeError):
-                pass
 
         # 帧率
         if 'avg_frame_rate' in stream:
@@ -834,24 +1058,18 @@ class StreamTester:
 
         # 采样率
         if 'sample_rate' in stream:
-            try:
+            with contextlib.suppress(ValueError, TypeError):
                 info['audio_sample_rate'] = int(stream['sample_rate'])
-            except (ValueError, TypeError):
-                pass
 
         # 声道数
         if 'channels' in stream:
-            try:
+            with contextlib.suppress(ValueError, TypeError):
                 info['audio_channels'] = int(stream['channels'])
-            except (ValueError, TypeError):
-                pass
 
         # 音频比特率
         if 'bit_rate' in stream:
-            try:
+            with contextlib.suppress(ValueError, TypeError):
                 info['audio_bitrate'] = int(stream['bit_rate']) // 1000
-            except (ValueError, TypeError):
-                pass
 
         return info
 
@@ -903,18 +1121,17 @@ class StreamTester:
 
             # 开始下载测试
             start_time = time.time()
-            response = requests.get(url, stream=True, timeout=self.testing_params['timeout'], headers=headers)
+            with requests.get(url, stream=True, timeout=self.testing_params['timeout'], headers=headers) as response:
+                total_downloaded = 0
+                test_duration = self.testing_params['speed_test_duration']
+                chunk_size = 64 * 1024  # 64KB chunks
 
-            total_downloaded = 0
-            test_duration = self.testing_params['speed_test_duration']
-            chunk_size = 64 * 1024  # 64KB chunks
-
-            # 下载数据直到达到测试时长
-            for chunk in response.iter_content(chunk_size=chunk_size):
-                if time.time() - start_time >= test_duration:
-                    break
-                if chunk:
-                    total_downloaded += len(chunk)
+                # 下载数据直到达到测试时长
+                for chunk in response.iter_content(chunk_size=chunk_size):
+                    if time.time() - start_time >= test_duration:
+                        break
+                    if chunk:
+                        total_downloaded += len(chunk)
 
             # 计算平均速度(KB/s)
             elapsed = time.time() - start_time
@@ -1000,10 +1217,7 @@ class StreamTester:
 
         # 下载速度检查
         speed = result.get('download_speed', 0)
-        if speed > 0 and speed < self.filter_params['min_speed']:
-            return False
-
-        return True
+        return not (speed > 0 and speed < self.filter_params['min_speed'])
 
     def is_resolution_meet_min(self, resolution: str, min_resolution: str) -> bool:
         """检查分辨率是否满足最低要求
@@ -1166,11 +1380,10 @@ class StreamTester:
             bool: 是否兼容当前网络环境
         """
         # 检查是否是IPv6地址
-        if '[' in url and ']' in url:
-            # 包含IPv6地址标记
-            if not self.check_ipv6_support():
-                self.logger.debug(f'跳过IPv6地址(系统不支持): {url}')
-                return False
+        if '[' in url and ']' in url and not self.check_ipv6_support():
+            # 包含IPv6地址标记且系统不支持IPv6
+            self.logger.debug(f'跳过IPv6地址(系统不支持): {url}')
+            return False
 
         return True
 
@@ -1255,3 +1468,207 @@ class StreamTester:
                 self.logger.debug(f'缓存清理: 移除了 {len(expired_keys)} 个过期项')
 
             self._last_cache_cleanup = now
+
+    # ============================================================
+    # 性能优化（对标 Guovin/iptv-api P0）
+    # ============================================================
+
+    # ---- P0-①：同 Host 测速复用 ----
+    def _extract_host(self, url: str) -> str:
+        """从 URL 提取 host（含端口），作为同 Host 测速复用分组键。
+
+        同 CDN/Host 下数十个频道只需 ffprobe 一次，其余复用结果，
+        ffprobe 子进程调用量可降一个数量级。
+        """
+        try:
+            from urllib.parse import urlparse
+
+            netloc = urlparse(url).netloc
+            return netloc.lower() or url
+        except Exception:
+            return url
+
+    def _get_host_cached_result(self, host: str) -> dict | None:
+        """获取同 Host 已缓存的测速结果（TTL 内有效，仅成功态）。"""
+        if not host:
+            return None
+        with self._host_cache_lock:
+            data = self._host_speed_cache.get(host)
+            if not data:
+                return None
+            age = datetime.now() - data['timestamp']
+            if age < timedelta(minutes=self.testing_params.get('cache_ttl', 120)):
+                return {
+                    'status': data['status'],
+                    'response_time': data['response_time'],
+                    **data.get('metadata', {}),
+                }
+            # 过期移除
+            self._host_speed_cache.pop(host, None)
+        return None
+
+    def _cache_host_result(self, host: str, result: dict):
+        """缓存同 Host 测速结果（仅成功态，避免死 host 复用扩散误伤）。"""
+        if not host or result.get('status') != 'success':
+            return
+        with self._host_cache_lock:
+            self._host_speed_cache[host] = {
+                'status': result['status'],
+                'response_time': result['response_time'],
+                'metadata': {k: v for k, v in result.items() if k not in ('status', 'response_time')},
+                'timestamp': datetime.now(),
+            }
+
+    # ---- P0-②：失败源指数退避冻结 ----
+    def _resolve_status_dir(self) -> str:
+        """定位 data/status 目录（与 web.models.DATA_DIR 同级），用于跨进程持久化冻结状态。"""
+        base = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'web', 'data', 'status')
+        with contextlib.suppress(Exception):
+            os.makedirs(base, exist_ok=True)
+        return base
+
+    def _frozen_path(self) -> str:
+        return os.path.join(self._status_dir, 'frozen_sources.json')
+
+    def _load_frozen_map(self) -> dict:
+        """从磁盘加载冻结状态（进程重启后保持），仅保留合法条目。"""
+        try:
+            p = self._frozen_path()
+            if os.path.exists(p):
+                with open(p, encoding='utf-8') as f:
+                    data = json.load(f)
+                return {k: v for k, v in data.items() if isinstance(v, dict) and 'frozen_until' in v}
+        except Exception as e:
+            self.logger.warning(f'加载冻结状态失败（忽略）: {e}')
+        return {}
+
+    def _save_frozen_map(self):
+        """持久化冻结状态到磁盘（test_all_sources 结束时调用一次，避免频繁 IO）。"""
+        try:
+            with self._frozen_map_lock:
+                data = dict(self._frozen_map)
+            with open(self._frozen_path(), 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            self.logger.warning(f'保存冻结状态失败（忽略）: {e}')
+
+    def _check_frozen(self, url_norm: str) -> float | None:
+        """返回冻结到期时间戳（epoch 秒），未冻结或已解冻返回 None。
+
+        注意：frozen_until=0 表示「未冻结但已有失败计数」，此时仅返回 None，
+        不删除条目，以免丢失连续失败计数导致永远达不到冻结阈值。
+        """
+        with self._frozen_map_lock:
+            fr = self._frozen_map.get(url_norm)
+        if not fr:
+            return None
+        frozen_until = fr.get('frozen_until', 0)
+        if frozen_until:
+            if frozen_until <= time.time():
+                # 曾冻结且已过期：清理并解除
+                with self._frozen_map_lock:
+                    self._frozen_map.pop(url_norm, None)
+                return None
+            return frozen_until
+        return None
+
+    def _record_failure(self, url_norm: str):
+        """记录一次失败；连续失败达到阈值后对源做指数退避冻结。
+
+        冻结时长 = min(2^fail_count × base, max_seconds)，与 Guovin 退避策略一致。
+        """
+        with self._frozen_map_lock:
+            fr = self._frozen_map.get(url_norm, {'fail_count': 0, 'frozen_until': 0})
+            fr['fail_count'] = fr.get('fail_count', 0) + 1
+            if fr['fail_count'] >= self._freeze_fail_threshold:
+                delay = min((2 ** fr['fail_count']) * self._freeze_base_seconds, self._freeze_max_seconds)
+                fr['frozen_until'] = time.time() + delay
+                self.logger.info(f'源连续失败 {fr["fail_count"]} 次，冻结冷却 {delay:.0f}s: {url_norm[:80]}')
+            self._frozen_map[url_norm] = fr
+
+    def _record_success(self, url_norm: str):
+        """源测试成功：重置失败计数并解除冻结。"""
+        with self._frozen_map_lock:
+            if url_norm in self._frozen_map:
+                self.logger.debug(f'源恢复，解除冻结: {url_norm[:80]}')
+                self._frozen_map.pop(url_norm, None)
+
+    # ────────────────────────────────────────────────
+    # P1/P2（对标 Guovin/iptv-api）：广告检测 + 全局黑白名单
+    # ────────────────────────────────────────────────
+    @staticmethod
+    def _parse_filter_list(raw: str) -> list[str]:
+        """解析逗号/换行/分号分隔的列表（去空、去首尾空白、保持原大小写）。"""
+        if not raw:
+            return []
+        items = []
+        for part in re.split(r'[\n,;]', raw):
+            p = part.strip()
+            if p:
+                items.append(p)
+        return items
+
+    def _url_in_list(self, url_norm: str, entries: list[str]) -> bool:
+        """判断归一化 URL 是否命中名单：host 精确匹配 或 URL 含名单条目子串（大小写不敏感）。"""
+        if not entries:
+            return False
+        u = (url_norm or '').lower()
+        host = self._extract_host(url_norm).lower()
+        for e in entries:
+            el = (e or '').lower()
+            if not el:
+                continue
+            if el == host or el in u:
+                return True
+        return False
+
+    def _detect_ad_playlist(self, url: str, user_agent: str | None, metadata: dict) -> bool:
+        """检测广告/循环占位源（对标 Guovin is_ad_playlist）。
+
+        仅对 HLS（m3u8）源生效：成功 ffprobe 连接后，拉取 playlist 头部检查：
+          1) 广告关键字（ad_keywords，如 no_signal、/ad/、advertisement、测试卡等）；
+          2) 含 #EXT-X-ENDLIST（点播/VOD 而非直播）且累计分片时长 <= ad_max_duration
+             → 判定为循环占位（机顶盒广告卡/测试卡）。
+        直播源 playlist 通常无 ENDLIST，属正常，不误判。
+        网络拉取失败/超时均返回 False（不误杀真实源）。
+        """
+        # 仅 HLS 源有意义
+        if '.m3u8' not in url and 'm3u' not in url.lower():
+            return False
+        try:
+            from urllib.request import Request, urlopen
+
+            req = Request(url)
+            if user_agent:
+                req.add_header('User-Agent', user_agent)
+            # 仅读取前 64KB 足够检测关键字与 ENDLIST，避免大 playlist 全量下载
+            with urlopen(req, timeout=5) as resp:
+                raw = resp.read(64 * 1024).decode('utf-8', errors='ignore')
+        except Exception:
+            return False
+
+        if not raw:
+            return False
+
+        lowered = raw.lower()
+        # 1) 广告关键字命中
+        for kw in self._ad_keywords:
+            if kw and kw.lower() in lowered:
+                return True
+
+        # 2) 循环占位：VOD（有 ENDLIST）且累计时长 <= 阈值
+        if '#ext-x-endlist' in lowered:
+            total = 0.0
+            for line in raw.splitlines():
+                line = line.strip()
+                if line.startswith('#EXTINF'):
+                    # #EXTINF:<duration>[,<title>]
+                    try:
+                        dur_part = line.split(':', 1)[1].split(',', 1)[0].strip()
+                        total += float(dur_part)
+                    except (ValueError, IndexError):
+                        pass
+            if 0 < total <= self._ad_max_duration:
+                return True
+
+        return False

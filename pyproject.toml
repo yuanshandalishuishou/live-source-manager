@@ -75,6 +75,11 @@ strict = true
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
+markers = [
+    # 集成/端到端测试：需要隔离数据库、模拟真实部署流程（如首启建库+默认值）
+    # 可用 `pytest -m integration` 单独跑，`pytest -m "not integration"` 跳过做快速单元反馈
+    "integration: 集成/端到端测试，需要隔离数据库，模拟真实部署流程",
+]
 filterwarnings = [
     "ignore::DeprecationWarning:starlette.testclient",
     "ignore::pytest.PytestReturnNotNoneWarning",

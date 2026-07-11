@@ -35,20 +35,29 @@
     <!-- 工具栏 -->
     <div class="toolbar">
         <div class="toolbar-left">
-            <select id="test-category-filter" class="form-select form-select-sm"
-                    onchange="applyTestFilter()">
-                <option value="all">全部类型</option>
-                <option value="央视">央视</option>
-                <option value="卫视">卫视</option>
-                <option value="其他">其他</option>
+            <select id="test-limit-select" class="form-select form-select-sm" title="测试范围" onchange="onTestScopeChange()">
+                <option value="all">全部源</option>
+                <option value="file">按文件测试…</option>
+            </select>
+            <select id="test-file-select" class="form-select form-select-sm"
+                    style="display:none;max-width:280px" title="选择要测试的源文件（在线/本地）">
+                <option value="">— 请选择文件 —</option>
             </select>
             <span class="test-details" id="test-status-badge" style="font-size:13px">空闲</span>
         </div>
         <div class="toolbar-right">
             {% if user and user.role == 'admin' %}
-            <button class="btn btn-primary btn-sm"
-                    onclick="triggerTest()">
-                ▶ 开始测试
+            <button class="btn btn-primary btn-sm" id="btn-start" onclick="triggerTest()">
+                ▶ 立即测试
+            </button>
+            <button class="btn btn-warning btn-sm" id="btn-pause" style="display:none" onclick="pauseTest()">
+                ⏸ 暂停测试
+            </button>
+            <button class="btn btn-primary btn-sm" id="btn-resume" style="display:none" onclick="resumeTest()">
+                ▶ 继续测试
+            </button>
+            <button class="btn btn-danger btn-sm" id="btn-cancel" style="display:none" onclick="cancelTest()">
+                ⏹ 取消测试
             </button>
             {% endif %}
         </div>
@@ -79,6 +88,18 @@
 {% endblock %}
 
 {% block head %}
+<style>
+.test-results-wrap { overflow-x: auto; }
+table.test-table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 780px; }
+table.test-table th, table.test-table td { padding: 8px 10px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--border, #eee); }
+table.test-table th { position: sticky; top: 0; background: var(--card-bg, #fff); font-weight: 600; color: var(--text-light); white-space: nowrap; z-index: 1; }
+.url-main { word-break: break-all; max-width: 480px; line-height: 1.45; }
+.url-ua { margin-top: 4px; font-size: 11px; color: var(--text-light); word-break: break-all; }
+.src-tag { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 11px; font-weight: 600; margin-bottom: 4px; }
+.tag-online { background: rgba(34,197,94,.15); color: #16a34a; }
+.tag-local { background: rgba(59,130,246,.15); color: #2563eb; }
+.src-path { word-break: break-all; max-width: 420px; line-height: 1.45; font-size: 12px; color: var(--text-light); white-space: normal; }
+</style>
 <script>
 let testWS = null;
 let testData = null;
@@ -139,26 +160,46 @@ function renderTestUI() {
 
     // Status
     const status = testData.status || 'idle';
-    const statusMap = {
-        'running': '⏳ 测试进行中...',
-        'completed': '✅ 测试已完成',
-        'idle': '等待测试...'
-    };
-    statusText.textContent = statusMap[status] || status;
+    let statusLabel;
+    if (status === 'running') {
+        if (completed === 0) {
+            statusLabel = '⏳ 正在连接首批源（单源测试可能耗时数秒~数十秒）...';
+        } else {
+            statusLabel = '⏳ 测试进行中... (' + completed + '/' + total + ')';
+        }
+    } else if (status === 'paused') {
+        statusLabel = '⏸ 测试已暂停（完成 ' + completed + '/' + total + '）';
+    } else if (status === 'cancelled') {
+        statusLabel = '⏹ 测试已取消（完成 ' + completed + '/' + total + '）';
+    } else if (status === 'completed') {
+        statusLabel = '✅ 测试已完成';
+    } else if (status === 'error') {
+        statusLabel = '❌ 测试出错: ' + (testData.message || '');
+    } else {
+        statusLabel = '等待测试...';
+    }
+    statusText.textContent = statusLabel;
     statusBadge.textContent = status;
+    document.getElementById('test-details').textContent = testData.note || '';
 
     // Update stats
     updateStats(total, completed, passed, failed);
 
     // Results list
     renderResults();
+
+    // 切换控制按钮（立即测试 / 暂停 / 继续 / 取消）
+    updateControlButtons(status);
+}
+
+function truncateStr(s, n) {
+    s = s || '';
+    return s.length > n ? s.substring(0, n) + '…' : s;
 }
 
 function renderResults() {
     const container = document.getElementById('test-results');
     const results = (testData && testData.results) || [];
-    const filter = document.getElementById('test-category-filter').value;
-
     document.getElementById('result-count').textContent = '(' + results.length + ')';
 
     if (results.length === 0) {
@@ -166,14 +207,8 @@ function renderResults() {
         return;
     }
 
-    // Filter
+    // 类别筛选已移除，直接展示全部结果
     let filtered = results;
-    if (filter !== 'all') {
-        filtered = results.filter(function(r) {
-            var name = r.name || '';
-            return name.indexOf(filter) !== -1;
-        });
-    }
 
     // Sort: testing first, then failed, then passed
     var order = {'testing': 0, 'failed': 1, 'passed': 2, 'waiting': 3};
@@ -181,18 +216,21 @@ function renderResults() {
         return (order[a.status] || 99) - (order[b.status] || 99);
     });
 
-    let html = '<table><thead><tr><th>频道</th><th>状态</th><th>详情</th></tr></thead><tbody>';
+    let html = '<div class="test-results-wrap"><table class="test-table"><thead><tr>'
+        + '<th>频道</th><th>状态</th><th>真实地址</th><th>所在源</th><th>详情</th>'
+        + '</tr></thead><tbody>';
     filtered.forEach(function(r) {
         var statusClass = r.status;
         var statusLabel = r.status === 'passed' ? '通过' :
                           r.status === 'failed' ? '失败' :
-                          r.status === 'testing' ? '测试中' : '等待';
+                          r.status === 'testing' ? '测试中' :
+                          r.status === 'cancelled' ? '已取消' : '等待';
         var detail = '';
         if (r.retry_info) {
             detail += '<div class="retry-info">重试: ' + r.retry_info + '</div>';
         }
         if (r.reason) {
-            detail += '<div class="failure-reason">原因: ' + r.reason + '</div>';
+            detail += '<div class="failure-reason">原因: ' + escapeHtml(r.reason) + '</div>';
         }
         if (r.response_time !== undefined) {
             detail += '<span class="test-meta">响应: ' + r.response_time + 's</span>';
@@ -200,38 +238,188 @@ function renderResults() {
         if (r.resolution) {
             detail += '<span class="test-meta"> | 分辨率: ' + r.resolution + '</span>';
         }
+        var url = r.url || '';
+        var ua = r.user_agent || '';
+        var src = r.source || '';
+        var srcType = r.source_type || '';
         html += '<tr>';
         html += '<td><strong>' + escapeHtml(r.name || '未知') + '</strong></td>';
         html += '<td><span class="status-badge status-' + statusClass + '">' + statusLabel + '</span></td>';
+        html += '<td><div class="url-main">' + escapeHtml(url) + '</div>'
+              + '<div class="url-ua">UA: ' + escapeHtml(ua || '(默认)') + '</div></td>';
+        if (srcType) {
+            var tagCls = srcType === 'online' ? 'tag-online' : 'tag-local';
+            var tagTxt = srcType === 'online' ? '在线' : '本地';
+            html += '<td><span class="src-tag ' + tagCls + '">' + tagTxt + '</span>'
+                  + '<div class="src-path">' + escapeHtml(src) + '</div></td>';
+        } else {
+            html += '<td><div class="src-path">' + escapeHtml(src) + '</div></td>';
+        }
         html += '<td>' + detail + '</td>';
         html += '</tr>';
     });
-    html += '</tbody></table>';
+    html += '</tbody></table></div>';
     container.innerHTML = html;
 }
 
-function applyTestFilter() {
-    renderResults();
+function pollTestStatus() {
+    fetch('/api/test/status')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            testData = data;
+            renderTestUI();
+            // 测试完成 / 出错 / 取消则停止轮询（暂停与进行中继续轮询；WS 推送仍可持续刷新）
+            if (data.status === 'completed' || data.status === 'error' || data.status === 'cancelled') {
+                if (window.__testPoll) {
+                    clearInterval(window.__testPoll);
+                    window.__testPoll = null;
+                }
+            }
+        })
+        .catch(function() {});
 }
 
 function triggerTest() {
+    var csrfToken = window.__csrf_token || '';
+    var limitSel = document.getElementById('test-limit-select');
+    var limitVal = limitSel ? limitSel.value : 'all';
+
+    // 组装请求体：按文件测试 vs 规模测试
+    var payload;
+    var scopeLabel;
+    if (limitVal === 'file') {
+        var fileSel = document.getElementById('test-file-select');
+        var fileId = fileSel ? fileSel.value : '';
+        if (!fileId) {
+            document.getElementById('test-status-text').textContent = '⚠️ 请先在下拉中选择一个源文件';
+            return;
+        }
+        payload = { file_id: fileId };
+        scopeLabel = '所选文件';
+    } else {
+        payload = { limit: limitVal };
+        scopeLabel = (limitVal === 'all' ? '全部源' : (limitVal + ' 个源'));
+    }
+
     // Show immediate feedback
     document.getElementById('test-status-text').textContent = '⏳ 正在触发测试...';
     document.getElementById('progress-fill').style.width = '0%';
 
-    fetch('/api/test/trigger', {method: 'POST'})
+    fetch('/api/test/trigger', {
+        method: 'POST',
+        headers: {
+            'X-CSRF-Token': csrfToken,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+    })
         .then(function(r) { return r.json(); })
         .then(function(data) {
             if (data.status === 'triggered') {
-                document.getElementById('test-status-text').textContent = '✅ 测试已触发，等待采集进程上报...';
+                var total = data.total || 0;
+                var label = data.mode === 'file' ? '所选文件' : scopeLabel;
+                document.getElementById('test-status-text').textContent =
+                    '✅ 测试已触发，正在测试 ' + label + ' 内的 ' + total + ' 个源...';
+                // 启动轮询兜底（WS 优先实时推送，轮询保证 UI 持续更新直到完成）
+                if (window.__testPoll) clearInterval(window.__testPoll);
+                window.__testPoll = setInterval(pollTestStatus, 1200);
+                pollTestStatus();
+                updateControlButtons('running');
+            } else if (data.status === 'running') {
+                document.getElementById('test-status-text').textContent =
+                    '⏳ ' + (data.message || '测试已在进行中');
+                if (window.__testPoll) clearInterval(window.__testPoll);
+                window.__testPoll = setInterval(pollTestStatus, 1200);
+                pollTestStatus();
+                updateControlButtons('running');
+            } else {
+                document.getElementById('test-status-text').textContent =
+                    '⚠️ 触发返回: ' + (data.detail || JSON.stringify(data));
             }
         })
         .catch(function(err) {
             document.getElementById('test-status-text').textContent = '❌ 触发失败: ' + err;
         });
+}
 
-    // Also load status after a short delay
-    setTimeout(loadTestStatus, 1000);
+// 控制按钮可见性：根据测试状态切换 立即测试 / 暂停 / 继续 / 取消
+function updateControlButtons(status) {
+    var btnStart = document.getElementById('btn-start');
+    var btnPause = document.getElementById('btn-pause');
+    var btnResume = document.getElementById('btn-resume');
+    var btnCancel = document.getElementById('btn-cancel');
+    if (!btnStart) return;
+    var showStart = (status === 'idle' || status === 'completed' || status === 'error' || status === 'cancelled');
+    var showPause = (status === 'running');
+    var showResume = (status === 'paused');
+    var showCancel = (status === 'running' || status === 'paused');
+    btnStart.style.display = showStart ? '' : 'none';
+    btnPause.style.display = showPause ? '' : 'none';
+    btnResume.style.display = showResume ? '' : 'none';
+    btnCancel.style.display = showCancel ? '' : 'none';
+}
+
+// 通用控制请求（暂停 / 继续 / 取消）
+function postTestControl(url) {
+    var csrfToken = window.__csrf_token || '';
+    fetch(url, {
+        method: 'POST',
+        headers: { 'X-CSRF-Token': csrfToken }
+    })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.status === 'error') {
+                document.getElementById('test-status-text').textContent = '⚠️ ' + (data.detail || '操作失败');
+            }
+            // 立即拉取最新状态刷新按钮与进度
+            pollTestStatus();
+        })
+        .catch(function(err) {
+            document.getElementById('test-status-text').textContent = '❌ 操作失败: ' + err;
+        });
+}
+
+function pauseTest() { postTestControl('/api/test/pause'); }
+function resumeTest() { postTestControl('/api/test/resume'); }
+function cancelTest() { postTestControl('/api/test/cancel'); }
+
+// 切换测试范围：选「按文件测试」时显示文件选择器并加载可选文件
+function onTestScopeChange() {
+    var sel = document.getElementById('test-limit-select');
+    var fileSel = document.getElementById('test-file-select');
+    if (!sel || !fileSel) return;
+    if (sel.value === 'file') {
+        fileSel.style.display = '';
+        if (fileSel.options.length <= 1) {
+            loadSourceFileOptions();
+        }
+    } else {
+        fileSel.style.display = 'none';
+    }
+}
+
+// 拉取源文件列表，填充文件选择器（在线/本地/GitHub 均可选，未下载的选了后端会提示）
+function loadSourceFileOptions() {
+    var fileSel = document.getElementById('test-file-select');
+    if (!fileSel) return;
+    fetch('/api/source-files')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var files = (data.files || []);
+            fileSel.innerHTML = '<option value="">— 请选择文件 —</option>';
+            files.forEach(function(f) {
+                var typeLabel = f.type === 'online' ? '在线' : (f.type === 'local' ? '本地' : 'GitHub');
+                var label = f.name + ' [' + typeLabel + ']';
+                if (f.channel_count) label += ' · ' + f.channel_count + ' 频道';
+                var opt = document.createElement('option');
+                opt.value = f.id;
+                opt.textContent = label;
+                fileSel.appendChild(opt);
+            });
+        })
+        .catch(function() {
+            fileSel.innerHTML = '<option value="">加载文件列表失败</option>';
+        });
 }
 
 function loadTestStatus() {

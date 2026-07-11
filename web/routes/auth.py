@@ -79,9 +79,9 @@ async def api_auth_me(current_user: dict = Depends(get_current_user)):
 
 
 @router.get('/api/auth/csrf-token')
-async def api_csrf_token(current_user: dict = Depends(get_current_user)):
+async def api_csrf_token(request: Request, current_user: dict = Depends(get_current_user)):
     """获取 CSRF token——前端所有写操作必须在 X-CSRF-Token header 中带上此值"""
-    token = _get_csrf_token(current_user['session_id'])
+    token = _get_csrf_token(current_user['session_id'], request.headers.get('user-agent', ''))
     return {'csrf_token': token}
 
 
@@ -91,7 +91,7 @@ async def api_update_password(request: Request, current_user: dict = Depends(get
     try:
         data = await request.json()
     except Exception:
-        raise HTTPException(status_code=400, detail='请求体必须为JSON格式（Content-Type: application/json）')
+        raise HTTPException(status_code=400, detail='请求体必须为JSON格式（Content-Type: application/json）') from None
     old_password = data.get('old_password', '')
     new_password = data.get('new_password', '')
 
@@ -131,7 +131,7 @@ async def api_update_user_password(user_id: int, request: Request, current_user:
     try:
         data = await request.json()
     except Exception:
-        raise HTTPException(status_code=400, detail='请求体必须为JSON格式（Content-Type: application/json）')
+        raise HTTPException(status_code=400, detail='请求体必须为JSON格式（Content-Type: application/json）') from None
     new_password = data.get('new_password', '')
 
     if not new_password:
@@ -177,7 +177,7 @@ async def api_update_encrypt_key(request: Request, current_user: dict = Depends(
     try:
         data = await request.json()
     except Exception:
-        raise HTTPException(status_code=400, detail='请求体必须为JSON格式（Content-Type: application/json）')
+        raise HTTPException(status_code=400, detail='请求体必须为JSON格式（Content-Type: application/json）') from None
     new_key = data.get('new_key', '').strip()
     if not new_key:
         raise HTTPException(status_code=400, detail='新密钥不能为空')
@@ -224,7 +224,7 @@ async def api_create_user(data: dict, request: Request, current_user: dict = Dep
     try:
         user_id = models.create_user(username, password, role, display_name)
     except Exception as e:
-        raise HTTPException(status_code=409, detail=f'创建用户失败（可能已存在）: {e}')
+        raise HTTPException(status_code=409, detail=f'创建用户失败（可能已存在）: {e}') from e
 
     models.add_audit_log(
         user_id=current_user['user_id'],

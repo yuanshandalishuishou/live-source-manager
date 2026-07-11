@@ -47,7 +47,6 @@ ENV TZ=Asia/Shanghai \
     DEBIAN_FRONTEND=noninteractive \
     NGINX_PORT=12345 \
     WEB_PORT=23456 \
-    CONFIG_PATH=/config/config.ini \
     TEST_TIMEOUT=30 \
     CONCURRENT_THREADS=10 \
     OUTPUT_FILENAME=live.m3u \
@@ -101,7 +100,7 @@ COPY --from=builder /opt/pylib /usr/local/lib/python3.13/site-packages/
 COPY app/ /app/app/
 # 分类规则种子 SQL 脚本（替代 YAML）
 COPY app/data/seed_classification_rules.sql /app/data/seed_classification_rules.sql
-# config.ini 已弃用，所有配置走 SQLite
+# 所有配置走 SQLite app_config 表（无 config.ini 依赖）
 COPY config/channel_rules.yml /config/channel_rules.yml
 COPY web/ /app/web/
 COPY start_docker.sh /start_docker.sh

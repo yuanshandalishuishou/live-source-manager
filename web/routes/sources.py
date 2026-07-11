@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """源管理 API — /api/sources/*, /api/source-files/*, /api/sources/{id}/categories"""
 
+import asyncio
 import hashlib
 import json
 import os
 import re
+import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
@@ -13,16 +15,51 @@ from web.core import (
     PROJECT_ROOT,
     _load_source_manager,
     get_current_user,
+    get_file_channel_counts,
     get_source_by_id,
     logger,
+    parse_all_files_cached,
     require_admin,
     reset_source_manager_cache,
 )
 
 router = APIRouter()
 
+# 后台任务集合（防止 asyncio.create_task 被垃圾回收）
+_background_tasks: set = set()
+
 # GitHub 源下载状态缓存：{github_entry: {status, discovered, matched, channels, checked_at}}
 _github_status_cache: dict = {}
+
+# D-3 修复：GitHub 已发现文件 URL 列表缓存（{entry: (timestamp, discovered_list)}），TTL 5 分钟
+# 避免每次展开 GitHub 源都重复打 GitHub API（suxuang/myIPTV 实测可叠加到 60s+）
+_github_discover_cache: dict[str, tuple] = {}
+_GITHUB_DISCOVER_TTL: float = 300.0  # 5 分钟
+
+
+async def _discover_github_cached(sm, entry: str, methods: dict):
+    """带缓存与总超时的 GitHub 源发现（D-3 修复）。
+
+    - 命中缓存（5 分钟内）→ 直接返回已发现 URL 列表，不打 GitHub API。
+    - 未命中 → 加总超时（20s）调用 SourceManager 的发现逻辑，失败快速返回空列表。
+    """
+    now = time.time()
+    cached = _github_discover_cache.get(entry)
+    if cached and (now - cached[0]) < _GITHUB_DISCOVER_TTL:
+        return cached[1]
+    try:
+        discovered = await asyncio.wait_for(
+            sm._discover_github_source_urls([entry], methods=methods),
+            timeout=20,
+        )
+    except TimeoutError:
+        logger.warning(f'GitHub 源发现超时（20s）: {entry}，返回空结果')
+        return []
+    except Exception as e:
+        logger.warning(f'GitHub 源发现失败: {entry}: {e}')
+        return []
+    _github_discover_cache[entry] = (now, discovered)
+    return discovered
 
 
 # ══════════════════════════════════════════════════
@@ -341,11 +378,8 @@ async def api_list_sources(
     sm = _load_source_manager()
     if not sm:
         return {'sources': [], 'total': 0, 'page': page}
-    try:
-        sources = sm.parse_all_files()
-    except Exception as e:
-        logger.error(f'解析源文件失败: {e}')
-        return {'sources': [], 'total': 0, 'page': page}
+    # D-1 修复：重 IO 解析在 worker 线程执行，避免阻塞事件循环
+    sources = await asyncio.to_thread(parse_all_files_cached, sm)
 
     # 类型筛选
     if src_type == 'online':
@@ -437,7 +471,7 @@ async def api_create_source(data: dict, request: Request, current_user: dict = D
         try:
             sm2 = _load_source_manager()
             if sm2:
-                sources = sm2.parse_all_files()
+                sources = await asyncio.to_thread(parse_all_files_cached, sm2)
                 msg += f'，已解析 {len(sources)} 个频道'
         except Exception:
             pass
@@ -585,6 +619,9 @@ async def api_list_source_files(current_user: dict = Depends(get_current_user)):
 
     合并三种来源：online_urls（在线URL）、github_sources（GitHub仓库）、local_dirs（本地文件/目录）
     """
+    # ── 从预构建缓存读取文件→频道数映射（零遍历）──
+    file_channel_counts = get_file_channel_counts()
+
     files = []
 
     # 1. 在线 URL 源
@@ -593,8 +630,9 @@ async def api_list_source_files(current_user: dict = Depends(get_current_user)):
         file_id = _make_source_file_id('online', url)
         file_path = _get_online_file_path(url)
         file_exists = os.path.isfile(file_path)
+        norm = os.path.normpath(os.path.abspath(file_path)) if file_exists else ''
+        channel_count = file_channel_counts.get(norm, 0) if file_exists else 0
         file_size = os.path.getsize(file_path) if file_exists else 0
-        channel_count = _count_file_channels(file_path) if file_exists else 0
         files.append(
             {
                 'id': file_id,
@@ -680,8 +718,9 @@ async def api_list_source_files(current_user: dict = Depends(get_current_user)):
         abs_path = _resolve_local_path(path)
         if os.path.isfile(abs_path):
             file_exists = True
+            norm = os.path.normpath(os.path.abspath(abs_path))
+            channel_count = file_channel_counts.get(norm, 0)
             file_size = os.path.getsize(abs_path)
-            channel_count = _count_file_channels(abs_path)
         elif os.path.isdir(abs_path):
             file_exists = True
             file_size = 0
@@ -689,8 +728,9 @@ async def api_list_source_files(current_user: dict = Depends(get_current_user)):
             for f in os.listdir(abs_path):
                 if f.endswith(('.m3u', '.m3u8', '.txt')):
                     fp = os.path.join(abs_path, f)
+                    norm = os.path.normpath(os.path.abspath(fp))
                     file_size += os.path.getsize(fp)
-                    channel_count += _count_file_channels(fp)
+                    channel_count += file_channel_counts.get(norm, 0)
         else:
             file_exists = False
             file_size = 0
@@ -955,12 +995,49 @@ async def api_update_source_file(
     raise HTTPException(status_code=404, detail='源文件不存在')
 
 
+def _paginate_channels(channels: list, page: int, size: int, search: str = '') -> dict:
+    """对频道列表进行搜索过滤 + 服务端分页，返回标准响应结构。"""
+    total = len(channels)
+    # 搜索过滤
+    if search:
+        sl = search.lower()
+        channels = [
+            ch
+            for ch in channels
+            if sl in ch.get('name', '').lower()
+            or sl in ch.get('url', '').lower()
+            or sl in ch.get('group', '').lower()
+            or sl in ch.get('tvg_group', '').lower()
+        ]
+    filtered_total = len(channels)
+    # 分页切片
+    start = (page - 1) * size
+    end = start + size
+    page_channels = channels[start:end]
+    return {
+        'channels': page_channels,
+        'total': filtered_total,
+        'page': page,
+        'size': size,
+        'unfiltered_total': total,
+    }
+
+
 @router.get('/api/source-files/{file_id}/channels')
-async def api_get_source_file_channels(file_id: str, current_user: dict = Depends(get_current_user)):
-    """获取某源文件解析出的频道列表（第二步：展开文件查看视频源）"""
+async def api_get_source_file_channels(
+    file_id: str,
+    page: int = 1,
+    size: int = 100,
+    search: str = '',
+    current_user: dict = Depends(get_current_user),
+):
+    """获取某源文件解析出的频道列表（第二步：展开文件查看视频源）
+
+    支持服务端分页（page/size）和搜索过滤（search），避免全量传输万级频道。
+    """
     sm = _load_source_manager()
     if not sm:
-        return {'channels': [], 'total': 0, 'message': 'SourceManager 加载失败'}
+        return {'channels': [], 'total': 0, 'page': page, 'size': size, 'message': 'SourceManager 加载失败'}
 
     # 1. 在线 URL 源
     online_urls = _read_online_urls_from_db()
@@ -969,18 +1046,19 @@ async def api_get_source_file_channels(file_id: str, current_user: dict = Depend
             file_path = _get_online_file_path(url)
             file_ua = _get_source_file_ua('online', url)
             if os.path.isfile(file_path):
-                channels = sm.parse_file(file_path, file_ua=file_ua if file_ua else None)
+                # D-1 修复：parse_file 在 worker 线程执行
+                channels = await asyncio.to_thread(sm.parse_file, file_path, file_ua=file_ua if file_ua else None)
                 channels = _enrich_channels_with_mappings(channels)
                 channels = _apply_channel_ua_overrides(channels)
-                return {
-                    'channels': channels,
-                    'total': len(channels),
-                    'file_name': os.path.basename(file_path),
-                    'file_ua': file_ua,
-                }
+                result = _paginate_channels(channels, page, size, search)
+                result['file_name'] = os.path.basename(file_path)
+                result['file_ua'] = file_ua
+                return result
             return {
                 'channels': [],
                 'total': 0,
+                'page': page,
+                'size': size,
                 'file_name': os.path.basename(file_path),
                 'message': '文件尚未下载，请先点击"采集所有源"',
                 'file_ua': file_ua,
@@ -992,7 +1070,8 @@ async def api_get_source_file_channels(file_id: str, current_user: dict = Depend
         if _make_source_file_id('github', entry) == file_id:
             try:
                 download_methods = {entry: _get_github_download_method(entry)}
-                discovered = await sm._discover_github_source_urls([entry], methods=download_methods)
+                # D-3 修复：带缓存 + 总超时（20s）的 GitHub 源发现
+                discovered = await _discover_github_cached(sm, entry, download_methods)
             except Exception as e:
                 return {'channels': [], 'total': 0, 'file_name': entry, 'message': f'GitHub API 调用失败: {e}'}
 
@@ -1004,7 +1083,8 @@ async def api_get_source_file_channels(file_id: str, current_user: dict = Depend
                 filename = sm.get_filename_from_url(d_url)
                 file_path = os.path.join(sm.online_dir, filename)
                 if os.path.isfile(file_path):
-                    channels = sm.parse_file(file_path, file_ua=file_ua if file_ua else None)
+                    # D-1 修复：parse_file 在 worker 线程执行
+                    channels = await asyncio.to_thread(sm.parse_file, file_path, file_ua=file_ua if file_ua else None)
                     all_channels.extend(channels)
                     matched_files += 1
 
@@ -1055,15 +1135,13 @@ async def api_get_source_file_channels(file_id: str, current_user: dict = Depend
             models.clear_github_download_cache(entry)
             models.upsert_github_download_cache(entry, db_files)
 
-            return {
-                'channels': all_channels,
-                'total': len(all_channels),
-                'file_name': entry,
-                'message': msg,
-                'discovered_files': len(discovered),
-                'matched_files': matched_files,
-                'file_ua': file_ua,
-            }
+            result = _paginate_channels(all_channels, page, size, search)
+            result['file_name'] = entry
+            result['message'] = msg
+            result['discovered_files'] = len(discovered)
+            result['matched_files'] = matched_files
+            result['file_ua'] = file_ua
+            return result
 
     # 3. 本地源
     local_dirs = _read_local_dirs_from_db()
@@ -1073,7 +1151,8 @@ async def api_get_source_file_channels(file_id: str, current_user: dict = Depend
             file_ua = _get_source_file_ua('local', path)
             all_channels = []
             if os.path.isfile(abs_path):
-                all_channels = sm.parse_file(abs_path, file_ua=file_ua if file_ua else None)
+                # D-1 修复：parse_file 在 worker 线程执行
+                all_channels = await asyncio.to_thread(sm.parse_file, abs_path, file_ua=file_ua if file_ua else None)
             elif os.path.isdir(abs_path):
                 all_channels = sm.parse_local_files(abs_path)
                 # 对本地目录也应用文件级 UA
@@ -1084,12 +1163,10 @@ async def api_get_source_file_channels(file_id: str, current_user: dict = Depend
                         ch['ua_position'] = file_ua.get('ua_position', 'extinf')
             all_channels = _enrich_channels_with_mappings(all_channels)
             all_channels = _apply_channel_ua_overrides(all_channels)
-            return {
-                'channels': all_channels,
-                'total': len(all_channels),
-                'file_name': os.path.basename(path),
-                'file_ua': file_ua,
-            }
+            result = _paginate_channels(all_channels, page, size, search)
+            result['file_name'] = os.path.basename(path)
+            result['file_ua'] = file_ua
+            return result
 
     raise HTTPException(status_code=404, detail='源文件不存在')
 
@@ -1259,7 +1336,15 @@ async def api_collect_sources(request: Request, current_user: dict = Depends(req
             for entry in github_sources:
                 try:
                     methods = {entry: _get_github_download_method(entry)}
-                    discovered = await sm._discover_github_source_urls([entry], methods=methods)
+                    # D-3 修复：采集时强制发现最新 + 总超时（20s）避免无限挂起
+                    try:
+                        discovered = await asyncio.wait_for(
+                            sm._discover_github_source_urls([entry], methods=methods),
+                            timeout=20,
+                        )
+                    except TimeoutError:
+                        logger.warning(f'GitHub 源发现超时（20s），跳过采集: {entry}')
+                        continue
                     db_files = []
                     for d_info in discovered:
                         d_url = d_info['url'] if isinstance(d_info, dict) else d_info
@@ -1282,7 +1367,9 @@ async def api_collect_sources(request: Request, current_user: dict = Depends(req
             logger.error(f'源采集失败: {e}')
             reset_source_manager_cache()
 
-    _asyncio.create_task(_do_collect())
+    _collect_task = _asyncio.create_task(_do_collect())
+    _background_tasks.add(_collect_task)
+    _collect_task.add_done_callback(_background_tasks.discard)
     return {'status': 'collecting', 'message': '源采集已启动，请稍后刷新查看'}
 
 
@@ -1306,7 +1393,8 @@ async def api_get_source_categories(
     sm = _load_source_manager()
     if sm:
         try:
-            sources = sm.parse_all_files()
+            # D-1 修复：重 IO 解析在 worker 线程执行，避免阻塞事件循环
+            sources = await asyncio.to_thread(parse_all_files_cached, sm)
             for s in sources:
                 sid = hashlib.md5(f'{s.get("name", "")}|{s.get("url", "")}'.encode()).hexdigest()[:12]
                 if sid == source_id:
@@ -1355,7 +1443,7 @@ async def api_update_source_category(
     try:
         data = await request.json()
     except Exception:
-        raise HTTPException(status_code=400, detail='请求体必须为JSON格式')
+        raise HTTPException(status_code=400, detail='请求体必须为JSON格式') from None
 
     dim_value = data.get('dim_value', '').strip()
     if not dim_value:
@@ -1366,7 +1454,8 @@ async def api_update_source_category(
     sm = _load_source_manager()
     if sm:
         try:
-            sources = sm.parse_all_files()
+            # D-1 修复：重 IO 解析在 worker 线程执行，避免阻塞事件循环
+            sources = await asyncio.to_thread(parse_all_files_cached, sm)
             for s in sources:
                 sid = hashlib.md5(f'{s.get("name", "")}|{s.get("url", "")}'.encode()).hexdigest()[:12]
                 if sid == source_id:

@@ -1,69 +1,115 @@
 """
-app.config 模块单元测试
+app.config 模块单元测试（纯 SQLite 版）
 
-覆盖：Config 类初始化、配置读写、默认值、类型转换、配置文件解析。
+覆盖：Config 类初始化、配置读写、默认值、类型转换。
+不再依赖 config.ini，所有配置读写直接走 SQLite app_config 表。
 """
 
+import datetime
 import os
+import sys
 
 import pytest
-from app.config import Config
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, PROJECT_ROOT)
+
+
+def _setup_temp_db(tmpdir: str) -> None:
+    """在临时目录创建最小化的测试数据库。
+
+    覆写 models.DATA_DIR 和 models.DB_PATH，然后调用 init_db 建表。
+    需要先设置 WEB_ADMIN_PASSWORD 环境变量。
+    """
+    import web.models as _m
+
+    _m.DATA_DIR = tmpdir
+    _m.DB_PATH = os.path.join(tmpdir, 'web.db')
+    if 'WEB_ADMIN_PASSWORD' not in os.environ:
+        os.environ['WEB_ADMIN_PASSWORD'] = 'TestAdminPw1!'
+    _m.init_db(admin_password=os.environ['WEB_ADMIN_PASSWORD'])
+
+
+def _seed_app_config(entries: dict[str, str]) -> None:
+    """将配置键值对写入 app_config 表"""
+    import web.models as _m
+
+    conn = _m.get_conn()
+    now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    for key, value in entries.items():
+        conn.execute(
+            'INSERT OR REPLACE INTO app_config (key, value, updated_at) VALUES (?, ?, ?)',
+            (key, value, now),
+        )
+    conn.commit()
+    conn.close()
 
 
 @pytest.fixture
-def temp_config_file(tmp_path):
-    """创建临时配置文件"""
-    config_path = str(tmp_path / 'test_config.ini')
-    content = """
-[Sources]
-local_dirs = ./config/sources
-online_urls = 
-github_sources = 
-max_concurrent = 20
+def temp_db(tmp_path):
+    """创建临时数据库并种子测试配置"""
+    tmpdir = str(tmp_path)
+    _setup_temp_db(tmpdir)
 
-[Logging]
-level = INFO
-file = ./logs/app.log
-max_size_mb = 10
-backup_count = 5
-
-[Network]
-proxy_enabled = False
-proxy_url = 
-proxy_username = 
-proxy_password = 
-
-[Test]
-timeout = 10
-max_connections = 50
-ffmpeg_path = ffprobe
-
-[Output]
-output_dir = ./www/output
-m3u_filename = playlist.m3u
-txt_filename = playlist.txt
-generate_m3u = True
-generate_txt = True
-ua_position = m3u
-
-[UserAgents]
-list = Mozilla/5.0
-"""
-    with open(config_path, 'w', encoding='utf-8') as f:
-        f.write(content)
-    return config_path
+    # 种子测试配置数据
+    _seed_app_config(
+        {
+            'Sources.local_dirs': './config/sources',
+            'Sources.online_urls': '',
+            'Sources.github_sources': '',
+            'Sources.max_concurrent': '20',
+            'Logging.level': 'INFO',
+            'Logging.file': './logs/app.log',
+            'Logging.max_size_mb': '10',
+            'Logging.backup_count': '5',
+            'Network.proxy_enabled': 'False',
+            'Network.proxy_url': '',
+            'Network.proxy_username': '',
+            'Network.proxy_password': '',
+            'Test.timeout': '10',
+            'Test.max_connections': '50',
+            'Test.ffmpeg_path': 'ffprobe',
+            'Output.output_dir': './www/output',
+            'Output.m3u_filename': 'playlist.m3u',
+            'Output.txt_filename': 'playlist.txt',
+            'Output.generate_m3u': 'True',
+            'Output.generate_txt': 'True',
+            'Output.ua_position': 'm3u',
+            'UserAgents.list': 'Mozilla/5.0',
+            'UserAgents.ua_position': 'extinf',
+            'UserAgents.ua_enabled': 'False',
+            'Testing.timeout': '10',
+            'Testing.concurrent_threads': '40',
+            'Testing.cache_ttl': '120',
+            'Testing.enable_speed_test': 'True',
+            'Testing.speed_test_duration': '6',
+            'Filter.max_latency': '4000',
+            'Filter.min_bitrate': '80',
+            'Filter.must_hd': 'False',
+            'Filter.must_4k': 'False',
+            'Filter.min_speed': '50',
+            'Filter.min_resolution': '360p',
+            'Filter.max_resolution': '4k',
+            'Filter.resolution_filter_mode': 'range',
+            'HTTPServer.enabled': 'True',
+            'HTTPServer.host': '0.0.0.0',
+            'HTTPServer.fileshare_port': '12345',
+            'HTTPServer.manager_port': '23456',
+            'HTTPServer.document_root': './www/output',
+            'GitHub.api_url': 'https://api.github.com',
+            'GitHub.api_token': '',
+            'GitHub.rate_limit': '5000',
+        }
+    )
+    return tmpdir
 
 
 @pytest.fixture
-def config_instance(temp_config_file):
-    """创建 Config 实例（禁用 SQLite，直接从 INI 读取）"""
-    cfg = Config(config_path=temp_config_file)
-    # 测试环境禁用 SQLite，确保从 INI 文件读取
-    cfg._from_sqlite = False
-    cfg._models = None
-    # 覆盖 _get_config_dict，跳过 SQLite 直接读 INI
-    cfg._get_config_dict = cfg._load_from_ini
-    return cfg
+def config_instance(temp_db):
+    """创建 Config 实例（纯 SQLite 模式）"""
+    from app.config import Config
+
+    return Config()
 
 
 # ── Config 初始化 ──────────────────────────────
@@ -72,20 +118,12 @@ def config_instance(temp_config_file):
 class TestConfigInit:
     """Config 类初始化"""
 
-    def test_init_with_config_file(self, temp_config_file):
-        cfg = Config(config_path=temp_config_file)
+    def test_init_without_path(self):
+        """Config() 不需参数（纯 SQLite）"""
+        from app.config import Config
+
+        cfg = Config()
         assert cfg is not None
-
-    def test_init_creates_default_if_missing(self, tmp_path):
-        """配置文件不存在时创建默认配置"""
-        config_path = str(tmp_path / 'nonexistent.ini')
-        cfg = Config(config_path=config_path)
-        # 应该创建了默认配置文件
-        assert os.path.exists(config_path)
-
-    def test_config_path_stored(self, temp_config_file):
-        cfg = Config(config_path=temp_config_file)
-        assert cfg.config_path == temp_config_file
 
 
 # ── 配置读取 ──────────────────────────────────
@@ -95,7 +133,7 @@ class TestConfigRead:
     """配置读取"""
 
     def test_get_string_value(self, config_instance):
-        val = config_instance.get('Sources', 'local_dirs', './config/sources')
+        val = config_instance.get('Sources', 'local_dirs', './fallback')
         assert val == './config/sources'
 
     def test_getint_value(self, config_instance):
@@ -106,11 +144,11 @@ class TestConfigRead:
         val = config_instance.getboolean('Network', 'proxy_enabled', True)
         assert val is False
 
-    def test_getboolean_true(self, tmp_path):
-        config_path = str(tmp_path / 'bool_test.ini')
-        with open(config_path, 'w') as f:
-            f.write('[Test]\nenabled = True\n')
-        cfg = Config(config_path=config_path)
+    def test_getboolean_true(self, temp_db):
+        _seed_app_config({'Test.enabled': 'True'})
+        from app.config import Config
+
+        cfg = Config()
         assert cfg.getboolean('Test', 'enabled', False) is True
 
     def test_get_with_default(self, config_instance):
@@ -140,22 +178,25 @@ class TestConfigRead:
 class TestConfigWrite:
     """配置写入"""
 
-    def test_set_value(self, config_instance, temp_config_file):
+    def test_set_value(self, config_instance):
         config_instance.set('Sources', 'max_concurrent', '50')
         # 重新读取确认
-        cfg2 = Config(config_path=temp_config_file)
+        from app.config import Config
+
+        cfg2 = Config()
         assert cfg2.getint('Sources', 'max_concurrent', 10) == 50
 
-    def test_set_creates_section(self, config_instance):
-        """设置不存在的 section 时自动创建"""
+    def test_set_creates_key(self, config_instance):
+        """设置不存在的 key 时自动创建"""
         config_instance.set('NewSection', 'key', 'value')
         val = config_instance.get('NewSection', 'key', '')
         assert val == 'value'
 
-    def test_set_persists_to_file(self, config_instance, temp_config_file):
+    def test_set_persists(self, config_instance):
         config_instance.set('Test', 'timeout', '30')
-        # 文件中应该有更新后的值
-        cfg2 = Config(config_path=temp_config_file)
+        from app.config import Config
+
+        cfg2 = Config()
         assert cfg2.getint('Test', 'timeout', 10) == 30
 
 
@@ -165,25 +206,34 @@ class TestConfigWrite:
 class TestConfigTypeConversion:
     """配置值类型转换"""
 
-    def test_getint_from_string(self, tmp_path):
-        config_path = str(tmp_path / 'types.ini')
-        with open(config_path, 'w') as f:
-            f.write('[Test]\nvalue = 123\n')
-        cfg = Config(config_path=config_path)
+    def test_getint_from_string(self, temp_db):
+        _seed_app_config({'Test.value': '123'})
+        from app.config import Config
+
+        cfg = Config()
         assert cfg.getint('Test', 'value', 0) == 123
 
-    def test_getint_invalid_returns_default(self, tmp_path):
-        config_path = str(tmp_path / 'types.ini')
-        with open(config_path, 'w') as f:
-            f.write('[Test]\nvalue = not_a_number\n')
-        cfg = Config(config_path=config_path)
+    def test_getint_invalid_returns_default(self, temp_db):
+        _seed_app_config({'Test.value': 'not_a_number'})
+        from app.config import Config
+
+        cfg = Config()
         assert cfg.getint('Test', 'value', 99) == 99
 
-    def test_getboolean_various_values(self, tmp_path):
-        config_path = str(tmp_path / 'bools.ini')
-        with open(config_path, 'w') as f:
-            f.write('[Test]\nv_true = True\nv_false = False\nv_1 = 1\nv_0 = 0\nv_yes = yes\nv_no = no\n')
-        cfg = Config(config_path=config_path)
+    def test_getboolean_various_values(self, temp_db):
+        _seed_app_config(
+            {
+                'Test.v_true': 'True',
+                'Test.v_false': 'False',
+                'Test.v_1': '1',
+                'Test.v_0': '0',
+                'Test.v_yes': 'yes',
+                'Test.v_no': 'no',
+            }
+        )
+        from app.config import Config
+
+        cfg = Config()
         assert cfg.getboolean('Test', 'v_true', False) is True
         assert cfg.getboolean('Test', 'v_false', True) is False
         assert cfg.getboolean('Test', 'v_1', False) is True
@@ -198,7 +248,6 @@ class TestConfigUserAgents:
 
     def test_get_user_agents(self, config_instance):
         uas = config_instance.get_user_agents()
-        # get_user_agents 返回 dict（键为 UA 名称/索引，值为 UA 字符串）
         assert isinstance(uas, (dict, list))
         if isinstance(uas, dict):
             assert len(uas) >= 1

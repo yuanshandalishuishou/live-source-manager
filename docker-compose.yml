@@ -58,8 +58,8 @@ services:
       - OUTPUT_FILENAME=${OUTPUT_FILENAME:-live.m3u}
       # 定时任务 Cron 表达式
       - UPDATE_CRON=${UPDATE_CRON:-"0 6,12,18,22 * * *"}
-      # Web 管理员密码（务必修改！）
-      - WEB_ADMIN_PASSWORD=${WEB_ADMIN_PASSWORD:-admin123}
+      # Web 管理员密码（留空则首次启动时自动生成强随机密码，并打印到日志）
+      - WEB_ADMIN_PASSWORD=${WEB_ADMIN_PASSWORD:-}
       # 配置加密密钥（务必修改！）
       - CONFIG_ENCRYPT_KEY=${CONFIG_ENCRYPT_KEY:-}
     

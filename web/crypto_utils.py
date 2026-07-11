@@ -316,7 +316,7 @@ def re_encrypt_all(new_key: str) -> int:
                 plain = old_cipher.decrypt(enc_val[4:].encode()).decode()
             except Exception as e:
                 logger.error(f'解密 {key} 失败: {e}')
-                raise RuntimeError(f'解密 {key} 失败（密钥不匹配）: {e}')
+                raise RuntimeError(f'解密 {key} 失败（密钥不匹配）: {e}') from e
         else:
             plain = enc_val
         plain_values[key] = plain

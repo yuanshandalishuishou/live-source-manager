@@ -81,11 +81,11 @@ class TestBaseAppException:
         assert '请重试' in s
 
     def test_to_dict(self):
-        exc = ConfigError('配置错误', suggestion='检查config.ini', details={'line': 42})
+        exc = ConfigError('配置错误', suggestion='检查配置文件', details={'line': 42})
         d = exc.to_dict()
         assert d['error_code'] == 1001
         assert d['message'] == '配置错误'
-        assert d['suggestion'] == '检查config.ini'
+        assert d['suggestion'] == '检查配置文件'
         assert d['details'] == {'line': 42}
 
     def test_details_defaults_empty(self):

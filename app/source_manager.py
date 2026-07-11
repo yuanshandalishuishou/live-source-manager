@@ -12,6 +12,7 @@
 """
 
 import asyncio
+import json
 import os
 import re
 import socket
@@ -70,11 +71,16 @@ class SourceManager:
         self.user_agents = config.get_user_agents()
         self.ua_enabled = config.is_ua_enabled()
         # 从 local_dirs 配置派生 online_dir（同级 online 目录），兼容 Docker/本地
+        # 规范化：过滤空字符串/空白项（DB 中可能存为 ['']），否则会被视为「有值」而误把
+        # online_dir 解析到错误的根 online/ 目录，与 source-files API 使用的 config/online 不一致。
         _local_dirs = config.get_sources().get('local_dirs', [])
+        _local_dirs = [d for d in (_local_dirs or []) if isinstance(d, str) and d.strip()]
         if _local_dirs:
-            self.online_dir = os.path.join(os.path.dirname(_local_dirs[0]), 'online')
+            self.online_dir = os.path.join(os.path.dirname(os.path.abspath(_local_dirs[0])), 'online')
         else:
-            self.online_dir = os.path.join('.', 'config', 'online')
+            # 默认使用项目根下的 config/online（与 web.routes.sources 的 _get_online_file_path 一致）
+            _project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            self.online_dir = os.path.join(_project_root, 'config', 'online')
         # M4: 共享session生命周期管理
         self._session = None
         self._session_lock = threading.Lock()
@@ -88,6 +94,35 @@ class SourceManager:
 
         # 确保在线源目录存在
         os.makedirs(self.online_dir, exist_ok=True)
+
+        # GitHub 仓库条目 → 下载文件名 映射（供文件级 UA 精确匹配，采集时落盘）
+        self._github_entry_map: dict[str, list[str]] = {}
+        self._github_entry_map_path = os.path.join(self.online_dir, '.github_entry_map.json')
+        self._load_github_entry_map()
+
+    def _load_github_entry_map(self) -> None:
+        """加载 GitHub 条目→文件名 映射（采集时落盘，重启后可恢复，供文件级 UA 精确匹配）"""
+        try:
+            if os.path.exists(self._github_entry_map_path):
+                with open(self._github_entry_map_path, encoding='utf-8') as f:
+                    data = json.load(f)
+                if isinstance(data, dict):
+                    self._github_entry_map = {
+                        k: v for k, v in data.items() if isinstance(k, str) and isinstance(v, list)
+                    }
+                self.logger.debug(f'已加载 GitHub 条目映射: {len(self._github_entry_map)} 条')
+        except Exception as e:
+            self.logger.warning(f'加载 GitHub 条目映射失败(忽略): {e}')
+            self._github_entry_map = {}
+
+    def _save_github_entry_map(self) -> None:
+        """持久化 GitHub 条目→文件名 映射"""
+        try:
+            os.makedirs(os.path.dirname(self._github_entry_map_path), exist_ok=True)
+            with open(self._github_entry_map_path, 'w', encoding='utf-8') as f:
+                json.dump(self._github_entry_map, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            self.logger.warning(f'保存 GitHub 条目映射失败(忽略): {e}')
 
     async def create_session(self, use_proxy: bool = False) -> aiohttp.ClientSession:
         # M4: 当前调用create_session的地方改为使用get_session
@@ -156,7 +191,7 @@ class SourceManager:
             self._session = aiohttp.ClientSession(connector=connector, timeout=timeout)
             return self._session
 
-    async def download_all_sources(self, github_download_methods: dict = None) -> list[str]:
+    async def download_all_sources(self, github_download_methods: dict | None = None) -> list[str]:
         """
         下载所有源文件 - 增强容错版（含 GitHub 仓库源发现）
 
@@ -219,14 +254,23 @@ class SourceManager:
                 elif result:
                     downloaded_files.append(result)
                     self.logger.info(f'下载成功: {url}')
+                    # 记录 GitHub 条目 → 文件名 映射（供文件级 UA 精确匹配）
+                    if isinstance(item, dict) and item.get('entry'):
+                        fname = os.path.basename(result)
+                        self._github_entry_map.setdefault(item['entry'], [])
+                        if fname not in self._github_entry_map[item['entry']]:
+                            self._github_entry_map[item['entry']].append(fname)
 
             # 批次之间短暂暂停,避免过于频繁的请求
             await asyncio.sleep(1)
 
+        # 持久化 GitHub 条目映射（供文件级 UA 精确匹配）
+        self._save_github_entry_map()
+
         self.logger.info(f'成功下载 {len(downloaded_files)} 个源文件')
         return downloaded_files
 
-    async def _discover_github_source_urls(self, github_sources: list[str], methods: dict = None) -> list[dict]:
+    async def _discover_github_source_urls(self, github_sources: list[str], methods: dict | None = None) -> list[dict]:
         """从 GitHub 仓库条目发现可下载的源文件 URL
 
         支持的条目格式:
@@ -493,7 +537,7 @@ class SourceManager:
                     raise SourceDownloadError(f'HTTP错误 {response.status}: {url}')
 
         except TimeoutError:
-            raise SourceDownloadError(f'请求超时: {url}')
+            raise SourceDownloadError(f'请求超时: {url}') from None
         except SourceDownloadError:
             raise
         except Exception as e:
@@ -591,16 +635,18 @@ class SourceManager:
                 if ua.get('enabled') and ua.get('ua_value'):
                     path_ua_map[path] = ua
                     path_ua_map[os.path.basename(path)] = ua
-        # GitHub 源：文件在 online_dir，通过发现逻辑匹配
+        # GitHub 源：文件下载到 online_dir，其 source_path 为文件名。
+        # 通过「条目→文件名」映射（采集时记录，见 download_all_sources）将文件级 UA
+        # 应用到实际下载的文件名，使 GitHub 文件级 UA 精确生效。
         for entry in sources_config.get('github_sources', []):
             key = f'github:{entry}'
             if key in file_ua_settings:
                 ua = file_ua_settings[key]
                 if ua.get('enabled') and ua.get('ua_value'):
-                    # GitHub 源的文件已在 online_dir 中，通过 repo name 匹配
-                    # 简化处理：将 UA 关联到 repo key 的路径片段
-                    repo_part = entry.split('/')[1] if '/' in entry else entry
                     path_ua_map[f'__github__{entry}'] = ua
+                    for fname in self._github_entry_map.get(entry, []):
+                        path_ua_map[fname] = ua
+                        path_ua_map[os.path.basename(fname)] = ua
 
         for source in sources:
             url = source.get('url', '')

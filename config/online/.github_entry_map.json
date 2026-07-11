@@ -1,0 +1,81 @@
+{
+  "joevess/IPTV/main": [
+    "extra.txt",
+    "home.m3u8",
+    "iptv.m3u8",
+    "home.m3u",
+    "iptv.m3u",
+    "home_sources.m3u",
+    "home_sources.m3u8",
+    "iptv_sources.m3u",
+    "iptv_sources.m3u8"
+  ],
+  "suxuang/myIPTV/main": [
+    "boxTV.m3u",
+    "epg.txt",
+    "feiyang.m3u",
+    "feiyang2.m3u",
+    "ipv4_0214.m3u",
+    "ipv4_0221.m3u",
+    "ipv4_0226.m3u",
+    "ipv4_0228.m3u",
+    "ipv4_0315.m3u",
+    "ipv4_0429.m3u",
+    "ipv4_0512.m3u",
+    "ipv4_0520.m3u",
+    "ipv4_0526.m3u",
+    "ipv4_0807.m3u",
+    "ipv4_20260327.m3u",
+    "ipv4全网通.m3u",
+    "ipv6.txt",
+    "ipv6_0210.m3u",
+    "ipv6_0211.m3u",
+    "ipv6_0212.m3u",
+    "ipv6_20241231.m3u",
+    "ipv6_20250103.m3u",
+    "ipv6_20250114.m3u",
+    "ipv6_20250117.m3u",
+    "ipv6_20250129.m3u",
+    "ipv6_20250131.m3u",
+    "ipv6_20250204.m3u",
+    "itv.m3u",
+    "陕西.m3u",
+    "ipv4.m3u",
+    "ipv6.m3u",
+    "咪咕直播.txt",
+    "小肥羊.m3u",
+    "广东电信.txt",
+    "移动IPTV.m3u",
+    "移动IPV6.txt",
+    "虎牙影视.txt"
+  ],
+  "YueChan/Live": [
+    "CUTV.txt",
+    "GNTV.m3u",
+    "Global.m3u",
+    "Hunan.txt",
+    "IPTV.m3u",
+    "Radio.m3u"
+  ],
+  "YanG-1989/m3u": [
+    "Gather.m3u",
+    "Migu.m3u",
+    "hosts.txt"
+  ],
+  "joevess/IPTV": [
+    "extra.txt",
+    "home.m3u8",
+    "iptv.m3u8",
+    "home.m3u",
+    "iptv.m3u",
+    "home_sources.m3u",
+    "home_sources.m3u8",
+    "iptv_sources.m3u",
+    "iptv_sources.m3u8"
+  ],
+  "Rivens7/Livelist": [
+    "CCTV.m3u",
+    "CNTV.m3u",
+    "IPTV.m3u"
+  ]
+}

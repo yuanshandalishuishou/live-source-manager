@@ -17,7 +17,7 @@ Web 管理服务 — 精简入口
   2. 从各路由模块导入 router 并挂载到 app
   3. 保留 uvicorn 启动代码
   4. 确保 from web.webapp import app 仍然可用（向后兼容）
-  5. 保留 conftest.py 需要的 CONFIG_PATH / CSRF_EXEMPT_PATHS / _auth_sessions / _auth_csrf_tokens
+  5. 保留 conftest.py 需要的 CSRF_EXEMPT_PATHS / _auth_sessions / _auth_csrf_tokens
 """
 
 import os
@@ -55,7 +55,7 @@ app.include_router(system_router)
 # ══════════════════════════════════════════════════
 
 
-def check_port(host: str = '0.0.0.0', port: int = 23455) -> bool:
+def check_port(host: str = '0.0.0.0', port: int = 23456) -> bool:
     """检查端口是否可用"""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         try:
@@ -73,7 +73,7 @@ def check_port(host: str = '0.0.0.0', port: int = 23455) -> bool:
 def main():
     """独立入口"""
     host = os.environ.get('WEB_HOST', '0.0.0.0')
-    port = int(os.environ.get('WEB_PORT', '23455'))
+    port = int(os.environ.get('WEB_PORT', '23456'))
 
     if not check_port(host, port):
         logger.error(f'错误: 端口 {port} 已被占用，无法启动 Web 服务')

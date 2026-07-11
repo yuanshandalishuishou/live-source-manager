@@ -27,6 +27,26 @@ class M3UGenerator:
         self.filter_params = config.get_filter_params()
         self.ua_position = config.get_ua_position()
         self.ua_enabled = config.is_ua_enabled()
+        # P2-⑥：白名单强制保留（白名单源即使未过质量过滤也保留到输出）
+        self.whitelist_force_keep = self.output_params.get('whitelist_force_keep', False)
+        self._whitelist_entries = self._parse_list(
+            config.get('Testing', 'global_whitelist', '') if hasattr(config, 'get') else ''
+        )
+
+    def _resolve_ua_position(self, source: dict) -> str:
+        """校验并归一化 ua_position：非法值（非 extinf/url）回退默认并告警，避免 UA 静默丢失。
+
+        Returns:
+            str: 合法的 ua_position（'extinf' 或 'url'）
+        """
+        ua_pos = source.get('ua_position') or self.ua_position
+        if ua_pos not in ('extinf', 'url'):
+            self.logger.warning(
+                f'源 "{source.get("name", "?")}" 的 ua_position="{ua_pos}" 非法，'
+                f'已回退为 "{self.ua_position}"（合法值: extinf/url）'
+            )
+            ua_pos = self.ua_position
+        return ua_pos
 
     def generate_m3u(self, sources: list[dict], level: str = 'base') -> str:
         """生成M3U文件内容（别名，保持对外接口一致）
@@ -110,10 +130,9 @@ class M3UGenerator:
 
                 # 构建URL
                 url = source['url']
-                ua_pos = source.get('ua_position') or self.ua_position
-                if self.ua_enabled and source.get('user_agent'):
-                    if ua_pos == 'url':
-                        url = f'{url}|User-Agent={source["user_agent"]}'
+                ua_pos = self._resolve_ua_position(source)
+                if self.ua_enabled and source.get('user_agent') and ua_pos == 'url':
+                    url = f'{url}|User-Agent={source["user_agent"]}'
 
                 output_lines.append(url)
 
@@ -164,7 +183,7 @@ class M3UGenerator:
                 channel_line = f'{source["name"]},{source["url"]}'
 
                 # 添加UA信息
-                ua_pos = source.get('ua_position') or self.ua_position
+                ua_pos = self._resolve_ua_position(source)
                 if self.ua_enabled and source.get('user_agent'):
                     if ua_pos == 'url':
                         channel_line = f'{source["name"]},{source["url"]}|User-Agent={source["user_agent"]}'
@@ -189,6 +208,11 @@ class M3UGenerator:
         """
         filtered = []
         for source in sources:
+            # P2-⑥：白名单强制保留 —— 命中白名单的源跳过全部质量过滤直接保留
+            if self.whitelist_force_keep and self._matches_whitelist(source):
+                filtered.append(source)
+                continue
+
             # 基本状态检查
             if source.get('status') != 'success':
                 continue
@@ -291,13 +315,24 @@ class M3UGenerator:
                 grouped[audio_group_key].extend(media_sources)
 
         # 第三步：对每个分组内的源进行排序 - 修复None值问题
+        sort_by = (self.output_params.get('output_sort_by') or 'speed').lower()
         for group_key, group_sources in grouped.items():
             # 根据媒体类型使用不同的排序策略
             if '收音机' in group_key or '在线音频' in group_key:
                 # 音频按名称排序 - 修复None值问题
                 group_sources.sort(key=lambda x: x.get('name', '') or '')
+            elif sort_by == 'name':
+                group_sources.sort(key=lambda x: x.get('name', '') or '')
+            elif sort_by == 'resolution':
+                # 按分辨率高度降序（无分辨率沉底）
+                group_sources.sort(
+                    key=lambda x: (
+                        -(self._parse_height(x.get('resolution', '') or '')),
+                        x.get('name', '') or '',
+                    )
+                )
             else:
-                # 视频按质量排序 - 修复None值问题
+                # 默认 speed：按测速降序 + 响应时间升序（快源在前）
                 group_sources.sort(
                     key=lambda x: (
                         x.get('continent', '') or '',
@@ -420,7 +455,7 @@ class M3UGenerator:
             parts.append(f'tvg-province="{source["province"]}"')
 
         # UA信息
-        ua_pos = source.get('ua_position') or self.ua_position
+        ua_pos = self._resolve_ua_position(source)
         if self.ua_enabled and ua_pos == 'extinf' and source.get('user_agent'):
             parts.append(f'user-agent="{source["user_agent"]}"')
 
@@ -519,3 +554,49 @@ class M3UGenerator:
         max_width, max_height = parse_resolution(max_resolution)
 
         return res_width <= max_width and res_height <= max_height
+
+    # ────────────────────────────────────────────────
+    # P2-⑤/⑥ 辅助：排序与白名单匹配
+    # ────────────────────────────────────────────────
+    @staticmethod
+    def _parse_list(raw: str) -> list[str]:
+        """解析逗号/换行/分号分隔的名单（去空、去空白），保持原大小写。"""
+        if not raw:
+            return []
+        return [p.strip() for p in re.split(r'[\n,;]', raw) if p.strip()]
+
+    @staticmethod
+    def _parse_height(resolution: str) -> int:
+        """从分辨率字符串解析高度（如 1920x1080 -> 1080, 720p -> 720）。"""
+        if not resolution:
+            return 0
+        if 'x' in resolution:
+            try:
+                return int(resolution.split('x')[1])
+            except (ValueError, IndexError):
+                return 0
+        if resolution.endswith('p'):
+            try:
+                return int(resolution[:-1])
+            except ValueError:
+                return 0
+        return 0
+
+    def _matches_whitelist(self, source: dict) -> bool:
+        """判断源是否命中全局白名单（URL 子串或 host 精确匹配，大小写不敏感）。"""
+        if not self._whitelist_entries:
+            return False
+        url = (source.get('url') or '').lower()
+        try:
+            from urllib.parse import urlparse
+
+            host = urlparse(url).netloc.lower()
+        except Exception:
+            host = ''
+        for e in self._whitelist_entries:
+            el = (e or '').lower()
+            if not el:
+                continue
+            if el == host or el in url:
+                return True
+        return False

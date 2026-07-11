@@ -52,13 +52,15 @@ async def api_list_rules(
 @router.post('/api/rules')
 async def api_create_rule(
     request: Request,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_admin),
 ):
     """新增分类规则"""
     try:
         data = await request.json()
+        if not isinstance(data, dict):
+            raise HTTPException(status_code=400, detail='请求体必须为 JSON 对象')
     except Exception:
-        raise HTTPException(status_code=400, detail='请求体必须为JSON格式（Content-Type: application/json）')
+        raise HTTPException(status_code=400, detail='请求体必须为JSON格式（Content-Type: application/json）') from None
 
     rule_type = data.get('rule_type', '').strip()
     name = data.get('name', '').strip()
@@ -101,13 +103,15 @@ async def api_create_rule(
 async def api_update_rule(
     rule_id: int,
     request: Request,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_admin),
 ):
     """更新分类规则"""
     try:
         data = await request.json()
+        if not isinstance(data, dict):
+            raise HTTPException(status_code=400, detail='请求体必须为 JSON 对象')
     except Exception:
-        raise HTTPException(status_code=400, detail='请求体必须为JSON格式（Content-Type: application/json）')
+        raise HTTPException(status_code=400, detail='请求体必须为JSON格式（Content-Type: application/json）') from None
 
     update_dict = {}
     for key in ('rule_type', 'name', 'priority', 'sort_order', 'is_active'):
@@ -128,7 +132,6 @@ async def api_update_rule(
         raise HTTPException(status_code=404, detail='规则不存在')
 
     # 记录审计日志
-    target = update_dict.get('name', str(rule_id))
     models.add_audit_log(
         user_id=current_user['user_id'],
         username=current_user['username'],
@@ -145,7 +148,7 @@ async def api_update_rule(
 async def api_delete_rule(
     rule_id: int,
     request: Request,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_admin),
 ):
     """删除分类规则"""
     success = models.delete_classification_rule(rule_id)
@@ -166,13 +169,15 @@ async def api_delete_rule(
 @router.put('/api/rules/batch-order')
 async def api_batch_update_order(
     request: Request,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_admin),
 ):
     """批量更新排序"""
     try:
         data = await request.json()
+        if not isinstance(data, dict):
+            raise HTTPException(status_code=400, detail='请求体必须为 JSON 对象')
     except Exception:
-        raise HTTPException(status_code=400, detail='请求体必须为JSON格式（Content-Type: application/json）')
+        raise HTTPException(status_code=400, detail='请求体必须为JSON格式（Content-Type: application/json）') from None
 
     orders = data.get('orders', [])
     if not orders:
@@ -204,13 +209,15 @@ async def api_list_dimensions(
 @router.post('/api/rules/dimensions')
 async def api_create_dimension(
     request: Request,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_admin),
 ):
     """新增维度"""
     try:
         data = await request.json()
+        if not isinstance(data, dict):
+            raise HTTPException(status_code=400, detail='请求体必须为 JSON 对象')
     except Exception:
-        raise HTTPException(status_code=400, detail='请求体必须为JSON格式')
+        raise HTTPException(status_code=400, detail='请求体必须为JSON格式') from None
 
     dim_key = data.get('dim_key', '').strip()
     dim_name = data.get('dim_name', '').strip()
@@ -273,13 +280,15 @@ async def api_list_exclusions(
 @router.post('/api/rules/exclusions')
 async def api_create_exclusion(
     request: Request,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_admin),
 ):
     """新增排除映射（检查唯一性）"""
     try:
         data = await request.json()
+        if not isinstance(data, dict):
+            raise HTTPException(status_code=400, detail='请求体必须为 JSON 对象')
     except Exception:
-        raise HTTPException(status_code=400, detail='请求体必须为JSON格式（Content-Type: application/json）')
+        raise HTTPException(status_code=400, detail='请求体必须为JSON格式（Content-Type: application/json）') from None
 
     province_keyword = data.get('province_keyword', '').strip()
     excluded_keyword = data.get('excluded_keyword', '').strip()
@@ -314,7 +323,7 @@ async def api_create_exclusion(
 async def api_delete_exclusion(
     exclusion_id: int,
     request: Request,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_admin),
 ):
     """删除排除映射"""
     success = models.delete_exclusion(exclusion_id)
@@ -340,8 +349,10 @@ async def api_test_classification(
     """多维分类测试：返回所有维度的分类结果"""
     try:
         data = await request.json()
+        if not isinstance(data, dict):
+            raise HTTPException(status_code=400, detail='请求体必须为 JSON 对象')
     except Exception:
-        raise HTTPException(status_code=400, detail='请求体必须为JSON格式（Content-Type: application/json）')
+        raise HTTPException(status_code=400, detail='请求体必须为JSON格式（Content-Type: application/json）') from None
 
     channel_name = data.get('channel_name', '').strip()
     if not channel_name:
@@ -350,7 +361,7 @@ async def api_test_classification(
     try:
         from app import ChannelRules
     except ImportError:
-        raise HTTPException(status_code=500, detail='无法导入 ChannelRules 模块')
+        raise HTTPException(status_code=500, detail='无法导入 ChannelRules 模块') from None
 
     CHANNEL_RULES_PATH = os.path.join(PROJECT_ROOT, 'config', 'channel_rules.yml')
     # 使用模块级缓存避免每次创建新实例
@@ -409,7 +420,7 @@ async def api_reimport_rules(
     try:
         import yaml
     except ImportError:
-        raise HTTPException(status_code=500, detail='PyYAML 未安装')
+        raise HTTPException(status_code=500, detail='PyYAML 未安装') from None
 
     # 先清空现有规则
     conn = models.get_conn()
@@ -423,7 +434,7 @@ async def api_reimport_rules(
 
     import datetime
 
-    now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
     # 导入 categories 作为 'content' 维度
     sort_idx = 0
@@ -447,8 +458,7 @@ async def api_reimport_rules(
         count += 1
 
     # 导入 channel_types 作为 'media_type' 维度
-    sort_idx = 0
-    for ctype_name, ctype_keywords in (data.get('channel_types') or {}).items():
+    for sort_idx, (ctype_name, ctype_keywords) in enumerate((data.get('channel_types') or {}).items()):
         keywords = json.dumps(ctype_keywords, ensure_ascii=False)
         models.add_classification_rule(
             {
@@ -460,7 +470,6 @@ async def api_reimport_rules(
                 'is_active': 1,
             }
         )
-        sort_idx += 1
         count += 1
 
     # 重新初始化排除映射
@@ -487,6 +496,24 @@ async def api_reimport_rules(
     return {'message': f'已从 YAML 重新导入 {count} 条规则', 'count': count}
 
 
+@router.post('/api/rules/reset-defaults')
+async def api_reset_rules_defaults(
+    request: Request,
+    current_user: dict = Depends(require_admin),
+):
+    """D-4 修复：将分类规则恢复为系统默认（从 channel_rules.yml 重新导入，清空用户自定义规则）"""
+    count = models.reset_classification_rules_to_default()
+    models.add_audit_log(
+        user_id=current_user['user_id'],
+        username=current_user['username'],
+        action='rules_reset_defaults',
+        target='classification_rules',
+        detail=f'恢复默认分类规则（{count} 条）',
+        ip_address=request.client.host if request.client else '',
+    )
+    return {'message': f'已恢复默认分类规则（{count} 条）', 'count': count}
+
+
 # ══════════════════════════════════════════════════
 # 频道全名映射 API
 # ══════════════════════════════════════════════════
@@ -508,13 +535,15 @@ async def api_get_channel_mapping(
 async def api_save_channel_mapping(
     channel_name: str,
     request: Request,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_admin),
 ):
     """保存或更新频道全名映射"""
     try:
         data = await request.json()
+        if not isinstance(data, dict):
+            raise HTTPException(status_code=400, detail='请求体必须为 JSON 对象')
     except Exception:
-        raise HTTPException(status_code=400, detail='请求体必须为JSON格式')
+        raise HTTPException(status_code=400, detail='请求体必须为JSON格式') from None
 
     # 从请求体提取各维度（只取合法的 dim_key，大小写容错）
     valid_dims = {'content', 'region', 'language', 'quality', 'media_type', 'genre'}
@@ -552,7 +581,7 @@ async def api_save_channel_mapping(
 @router.delete('/api/channel-mapping/{channel_name}')
 async def api_delete_channel_mapping(
     channel_name: str,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_admin),
 ):
     """删除频道全名映射"""
     # 仅管理员可操作
@@ -577,7 +606,7 @@ async def api_list_channel_mappings(
 
 @router.post('/api/channel-mappings/batch-import')
 async def api_batch_import_mappings(
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_admin),
 ):
     """从当前已测试成功的源批量导入频道全名映射"""
     if current_user.get('role') != 'admin':
@@ -599,6 +628,23 @@ DIMENSION_LABELS = {
     'media_type': '媒体类型',
     'genre': '类型',
 }
+
+
+@router.post('/api/category-dictionary/reset-defaults')
+async def api_reset_category_dictionary_defaults(
+    request: Request,
+    current_user: dict = Depends(require_admin),
+):
+    """D-4 修复：将分类字典恢复为系统默认种子值"""
+    models.reset_category_dictionary_to_default()
+    models.add_audit_log(
+        user_id=current_user['user_id'],
+        username=current_user['username'],
+        action='category_dict_reset_defaults',
+        target='category_dictionary',
+        ip_address=request.client.host if request.client else '',
+    )
+    return {'message': '已恢复默认分类字典'}
 
 
 @router.get('/api/category-dictionary')
@@ -633,11 +679,14 @@ async def api_add_category_option(
     try:
         body = await request.json()
     except Exception:
-        raise HTTPException(status_code=400, detail='请求体必须为JSON格式')
+        raise HTTPException(status_code=400, detail='请求体必须为JSON格式') from None
 
     value = str(body.get('value', '')).strip()
     label = str(body.get('label', '')).strip() or value
-    sort_order = int(body.get('sort_order', 99))
+    try:
+        sort_order = int(body.get('sort_order', 99))
+    except (ValueError, TypeError):
+        sort_order = 99
 
     if not value:
         raise HTTPException(status_code=400, detail='value 不能为空')
@@ -680,7 +729,7 @@ async def api_set_category_dimension(
     try:
         body = await request.json()
     except Exception:
-        raise HTTPException(status_code=400, detail='请求体必须为JSON格式')
+        raise HTTPException(status_code=400, detail='请求体必须为JSON格式') from None
 
     options = body.get('options', [])
     if not isinstance(options, list):

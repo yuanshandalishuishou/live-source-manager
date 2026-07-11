@@ -3,12 +3,32 @@
 SQLite ORM — 用户表、审计日志表、Session表
 """
 
+import threading
+import time
+
+# ── get_all_config() TTL 缓存（5 秒，避免同一请求内多次读取 SQLite）──
+_all_config_cache: dict | None = None
+_all_config_cache_time: float = 0
+_ALL_CONFIG_CACHE_TTL: float = 5.0
+_all_config_cache_lock = threading.Lock()
+
+
+def invalidate_config_cache():
+    """使配置缓存失效（write 操作时调用）。"""
+    global _all_config_cache, _all_config_cache_time
+    with _all_config_cache_lock:
+        _all_config_cache = None
+        _all_config_cache_time = 0
+
+
 import datetime
 import logging
 import os
+import secrets
 import sqlite3
+import string
 import threading
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 
 import bcrypt
 
@@ -42,7 +62,14 @@ class ProvinceExclusionMap:
     __tablename__ = 'province_exclusion_map'
 
 
-DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'web', 'data')
+# SQLite 数据目录：默认 <项目根>/web/data
+# 可用环境变量 WEB_DATA_DIR 覆盖（Docker 部署时指向持久卷 /data，容器重建不丢库）
+_DATA_DIR_ENV = os.getenv('WEB_DATA_DIR')
+DATA_DIR = (
+    _DATA_DIR_ENV
+    if _DATA_DIR_ENV
+    else os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'web', 'data')
+)
 DB_PATH = os.path.join(DATA_DIR, 'web.db')
 
 # 写锁 — 保护并发写入（check_same_thread=False + WAL 下仍可能竞态）
@@ -105,8 +132,16 @@ def _execute(sql: str, params=()):
                     logger.warning(f'关闭数据库连接异常: {_re}')
 
 
-def init_db(admin_password: str):
-    """建表 + 默认管理员用户（密码由调用方提供，非硬编码）"""
+def init_db(admin_password: str | None = None):
+    """建表 + 默认管理员用户。
+
+    - admin_password 为 None 且用户表为空（首次部署）：自动生成强随机密码并创建 admin。
+    - admin_password 提供：首次部署时使用该密码创建 admin（调用方应保证复杂度合规）。
+    - 用户已存在：保留现有密码不变（幂等，不覆盖用户已修改的密码）。
+
+    返回实际生效的管理员密码（生成或提供）；若用户已存在则返回 None。
+    首次创建时会向 stdout 打印 ``ADMIN_PASSWORD_INITIALIZED=xxx`` 供部署脚本捕获。
+    """
     conn = get_conn()
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS users (
@@ -161,14 +196,24 @@ def init_db(admin_password: str):
     # 策略：如果用户已存在（非首次部署），保留现有密码不变。
     # 仅当用户表为空（首次部署）时创建初始用户。
     # 只保留 admin 用户，删除 viewer 用户（如存在）
-    admin_hash = bcrypt.hashpw(admin_password.encode(), bcrypt.gensalt()).decode()
     existing_admin = conn.execute("SELECT id FROM users WHERE username='admin'").fetchone()
+    effective_pw = None
     if not existing_admin:
+        if admin_password is None:
+            # 首次部署且未提供密码：自动生成强随机密码（满足 GB/T 39786-2021 复杂度）
+            effective_pw = ''.join(secrets.choice(string.ascii_letters + string.digits + '!@#$%^&*') for _ in range(16))
+        else:
+            effective_pw = admin_password
+        admin_hash = bcrypt.hashpw(effective_pw.encode(), bcrypt.gensalt()).decode()
         conn.execute(
             'INSERT INTO users (username, password_hash, role, display_name) VALUES (?, ?, ?, ?)',
             ('admin', admin_hash, 'admin', '管理员'),
         )
         logger.info('创建管理员用户')
+        # 向 stdout 打印初始密码，供部署脚本捕获；同时记入日志（首次部署提示）
+        if effective_pw is not None:
+            print('ADMIN_PASSWORD_INITIALIZED=' + effective_pw, flush=True)
+            logger.info('初始管理员密码（请妥善保存）: %s', effective_pw)
     else:
         logger.info('管理员用户已存在，保留现有密码')
     # 删除 viewer 用户（如存在）
@@ -315,6 +360,7 @@ def init_db(admin_password: str):
     _seed_from_yaml(conn)
     conn.close()
     logger.info('init_db 完成')
+    return effective_pw
 
 
 # ── 应用配置操作 ────────────────────────────────────
@@ -333,6 +379,7 @@ def get_app_config_raw(key: str) -> str | None:
 def set_app_config_raw(key: str, value: str):
     """写入配置原始值（不自动加密）"""
     _execute("INSERT OR REPLACE INTO app_config (key, value, updated_at) VALUES (?, ?, datetime('now'))", (key, value))
+    invalidate_config_cache()
 
 
 def get_all_sensitive_config() -> dict[str, str]:
@@ -454,10 +501,11 @@ def set_app_config(key: str, value: str):
     _execute(
         'INSERT OR REPLACE INTO app_config (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)', (key, value)
     )
+    invalidate_config_cache()
 
 
-def get_all_config() -> dict[str, dict[str, str]]:
-    """返回 {section: {key: value}} 格式的全量配置（敏感字段自动解密，机器绑定字段用机器ID解密）"""
+def _get_all_config_raw() -> dict[str, dict[str, str]]:
+    """无缓存版 get_all_config，实际查询 SQLite 并解密敏感字段"""
     from web.crypto_utils import (
         decrypt_machine_bound,
         decrypt_value,
@@ -489,74 +537,22 @@ def get_all_config() -> dict[str, dict[str, str]]:
         conn.close()
 
 
-def import_from_ini_file(path: str) -> int:
-    """读取标准 configparser ini，批量写入 app_config（带事务和写锁保护）"""
-    import configparser
-
-    from web.crypto_utils import (
-        _is_valid_fernet_token,
-        encrypt_machine_bound,
-        encrypt_value,
-        is_encrypted,
-        is_machine_bound_encrypted,
-        is_machine_bound_key,
-        is_sensitive_key,
-    )
-
-    cp = configparser.ConfigParser()
-    if not os.path.exists(path):
-        logger.warning(f'INI文件不存在，跳过导入: {path}')
-        return 0
-    cp.read(path, encoding='utf-8')
-
-    # 收集所有配置项
-    entries = []
-    for section in cp.sections():
-        for key, value in cp.items(section):
-            config_key = f'{section}.{key}'
-            # 机器绑定字段优先
-            if is_machine_bound_key(config_key):
-                if not is_machine_bound_encrypted(value):
-                    value = encrypt_machine_bound(value)
-            elif is_sensitive_key(config_key) and not (is_encrypted(value) and _is_valid_fernet_token(value)):
-                value = encrypt_value(value)
-            entries.append((config_key, value))
-
-    if not entries:
-        return 0
-
-    # 批量写入（单次锁 + 事务）
-    conn = None
-    try:
-        with _write_lock:
-            conn = get_conn()
-            import datetime
-
-            now_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            conn.execute('BEGIN')
-            for config_key, value in entries:
-                conn.execute(
-                    'INSERT OR REPLACE INTO app_config (key, value, updated_at) VALUES (?, ?, ?)',
-                    (config_key, value, now_str),
-                )
-            conn.commit()
-    except Exception as e:
-        if conn:
-            try:
-                conn.rollback()
-            except Exception as _re:
-                logger.warning(f'INI导入回滚异常(可忽略): {_re}')
-        logger.error(f'从 INI 批量导入失败: {e}')
-        raise
-    finally:
-        if conn:
-            try:
-                conn.close()
-            except Exception as _re:
-                logger.warning(f'INI导入关闭连接异常(可忽略): {_re}')
-
-    logger.info(f'从 {path} 批量导入了 {len(entries)} 条配置到 app_config')
-    return len(entries)
+def get_all_config() -> dict[str, dict[str, str]]:
+    """返回 {section: {key: value}} 格式的全量配置（敏感字段自动解密，5 秒 TTL 缓存）"""
+    global _all_config_cache, _all_config_cache_time
+    now = time.time()
+    cached = _all_config_cache
+    cached_time = _all_config_cache_time
+    if cached is not None and now - cached_time < _ALL_CONFIG_CACHE_TTL:
+        return cached
+    with _all_config_cache_lock:
+        now = time.time()
+        if _all_config_cache is not None and now - _all_config_cache_time < _ALL_CONFIG_CACHE_TTL:
+            return _all_config_cache
+        result = _get_all_config_raw()
+        _all_config_cache = result
+        _all_config_cache_time = now
+        return result
 
 
 def has_app_config_data() -> bool:
@@ -600,6 +596,39 @@ def seed_app_config_defaults() -> int:
         return len(entries)
     except Exception as e:
         logger.error(f'app_config 默认值种子失败: {e}')
+        return 0
+    finally:
+        conn.close()
+
+
+def fill_missing_app_config_defaults() -> int:
+    """补全 app_config 中缺失的默认值键（不覆盖已有值）。
+
+    场景：当 schema（`Config._DEFAULT_VALUES`）新增配置键后，对「首次 seed 时尚无该键」
+    的旧库，由于 seed_app_config_defaults 幂等跳过（表非空即跳过），新键不会自动入库，
+    导致对应配置项从 /api/config 与配置中心 UI 上「消失」。
+
+    本函数在每次启动补齐「默认值中存在、但 DB 缺失」的键，使老库自愈、配置项不再丢失。
+    注意：仅写入代码默认值，绝不覆盖用户已修改的值。
+    返回的条目数（0 表示无需补齐）。
+    """
+    from app import Config
+
+    conn = get_conn()
+    try:
+        existing = {row[0] for row in conn.execute('SELECT key FROM app_config').fetchall()}
+        now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        entries = [(key, value, now) for key, value in Config._DEFAULT_VALUES.items() if key not in existing]
+        if entries:
+            conn.executemany(
+                'INSERT OR IGNORE INTO app_config (key, value, updated_at) VALUES (?, ?, ?)',
+                entries,
+            )
+            conn.commit()
+            logger.info(f'已补全 {len(entries)} 条缺失配置默认值: ' + ', '.join(k for k, _, _ in entries))
+        return len(entries)
+    except Exception as e:
+        logger.error(f'补全配置默认值失败: {e}')
         return 0
     finally:
         conn.close()
@@ -658,13 +687,11 @@ def _seed_from_yaml(conn: sqlite3.Connection):
             ('黑河', '黑龙', '黑河市不自动归入黑龙江'),
         ]
         for pk, ek, note in hardcoded_exclusions:
-            try:
+            with suppress(Exception):
                 conn.execute(
                     'INSERT OR IGNORE INTO province_exclusion_map (province_keyword, excluded_keyword, note) VALUES (?, ?, ?)',
                     (pk, ek, note),
                 )
-            except Exception:
-                pass
 
         # 从 YAML 的 geography 中提取省份关键词，自动推断省份排除
         province_keywords_map = {}
@@ -1208,6 +1235,69 @@ def delete_classification_rule(rule_id: int) -> bool:
     return cursor.rowcount > 0
 
 
+# ── 恢复默认（D-4 修复）─────────────────────────
+
+
+def reset_category_dictionary_to_default():
+    """D-4 修复：将分类字典恢复为系统默认种子值（先清空再种子）。"""
+    yaml_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'config', 'channel_rules.yml')
+    conn = get_conn()
+    try:
+        conn.execute('DELETE FROM category_dictionary')
+        _seed_category_dictionary(conn, yaml_path)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def reset_classification_rules_to_default() -> int:
+    """D-4 修复：将分类规则恢复为系统默认（从 channel_rules.yml 重新导入）。"""
+    yaml_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'config', 'channel_rules.yml')
+    if not os.path.exists(yaml_path):
+        return 0
+    import yaml
+
+    with open(yaml_path, encoding='utf-8') as f:
+        data = yaml.safe_load(f)
+    _execute('DELETE FROM classification_rules')
+    count = 0
+    for sort_idx, cat in enumerate(data.get('categories') or []):
+        name = cat.get('name', '')
+        if not name:
+            continue
+        add_classification_rule(
+            {
+                'rule_type': 'content',
+                'name': name,
+                'keywords': cat.get('keywords', []),
+                'priority': cat.get('priority', 100),
+                'sort_order': sort_idx,
+                'is_active': 1,
+            }
+        )
+        count += 1
+    for sort_idx, (ctype_name, ctype_keywords) in enumerate((data.get('channel_types') or {}).items()):
+        add_classification_rule(
+            {
+                'rule_type': 'media_type',
+                'name': ctype_name,
+                'keywords': ctype_keywords,
+                'priority': 50,
+                'sort_order': sort_idx,
+                'is_active': 1,
+            }
+        )
+        count += 1
+    _execute('DELETE FROM province_exclusion_map')
+    conn = get_conn()
+    try:
+        _seed_from_yaml(conn)
+        conn.commit()
+    finally:
+        conn.close()
+    return count
+
+
 # ── 分类维度操作 ────────────────────────────────
 
 
@@ -1605,7 +1695,7 @@ def get_github_download_cache(repo_key: str) -> list[dict]:
         return []
 
 
-def clear_github_download_cache(repo_key: str = None):
+def clear_github_download_cache(repo_key: str | None = None):
     """清除 GitHub 下载缓存。repo_key 为空则清空所有"""
     try:
         conn = get_conn()
@@ -1629,3 +1719,118 @@ def get_github_download_cache_summary(repo_key: str) -> dict:
     except Exception as e:
         logger.error(f'查询 GitHub 下载缓存摘要失败 [{repo_key}]: {e}')
         return {'discovered': 0, 'matched': 0, 'total_size': 0}
+
+
+# ═══════════════════════════════════════════════════
+# 首次登录强制修改密码（《网络安全法》第24条）
+# ═══════════════════════════════════════════════════
+
+
+def set_password_change_required(username: str, required: bool = True):
+    """设置用户是否需要在下次登录时修改密码（《网络安全法》第24条）"""
+    conn = get_conn()
+    try:
+        conn.execute(
+            'CREATE TABLE IF NOT EXISTS password_change_required ('
+            'username TEXT PRIMARY KEY, '
+            'required INTEGER NOT NULL DEFAULT 1, '
+            "created_at TEXT DEFAULT (datetime('now'))"
+            ')'
+        )
+        conn.execute(
+            'INSERT OR REPLACE INTO password_change_required (username, required) VALUES (?, ?)',
+            (username, 1 if required else 0),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_password_change_required(username: str) -> bool:
+    """查询用户是否需要在下次登录时修改密码"""
+    conn = get_conn()
+    try:
+        row = conn.execute('SELECT required FROM password_change_required WHERE username = ?', (username,)).fetchone()
+        return bool(row and row['required'])
+    finally:
+        conn.close()
+
+
+def clear_password_change_required(username: str):
+    """清除修改密码标记（用户已修改密码后调用）"""
+    set_password_change_required(username, False)
+
+
+# ── 登录失败锁定表 ──────────────────────────────
+
+
+def init_login_lockout_table():
+    """初始化登录失败锁定表（《网络安全法》第24条：身份鉴别失败处理）"""
+    conn = get_conn()
+    conn.execute(
+        'CREATE TABLE IF NOT EXISTS login_lockout ('
+        'username TEXT PRIMARY KEY, '
+        'attempts INTEGER NOT NULL DEFAULT 0, '
+        'lockout_until REAL'
+        ')'
+    )
+    conn.commit()
+    conn.close()
+    logger.info('login_lockout 表已就绪')
+
+
+# ── 登录锁定操作（从 core.py 迁移，消除重复 SQL 逻辑） ──────────
+
+LOGIN_LOCKOUT_MAX_ATTEMPTS = 5
+LOGIN_LOCKOUT_DURATION = 15 * 60  # 15分钟
+
+
+def check_login_lockout(username: str) -> tuple[bool, int]:
+    """检查用户是否被锁定。返回 (is_locked, remaining_seconds)"""
+    conn = get_conn()
+    try:
+        row = conn.execute(
+            'SELECT attempts, lockout_until FROM login_lockout WHERE username = ?',
+            (username,),
+        ).fetchone()
+        if not row:
+            return False, 0
+        lockout_until = row['lockout_until']
+        import time
+
+        now = time.time()
+        if lockout_until and now < lockout_until:
+            remaining = int(lockout_until - now)
+            return True, remaining
+        # 锁定已过期，重置计数器
+        if lockout_until and now >= lockout_until:
+            conn.execute('DELETE FROM login_lockout WHERE username = ?', (username,))
+            conn.commit()
+        return False, 0
+    finally:
+        conn.close()
+
+
+def record_login_failure(username: str):
+    """记录登录失败，达到阈值则锁定"""
+    import time
+
+    now = time.time()
+    _execute(
+        'INSERT INTO login_lockout (username, attempts, lockout_until) VALUES (?, 1, NULL) '
+        'ON CONFLICT(username) DO UPDATE SET '
+        'attempts = CASE WHEN attempts >= ? THEN ? ELSE attempts + 1 END, '
+        'lockout_until = CASE WHEN attempts + 1 >= ? THEN ? ELSE lockout_until END',
+        (
+            username,
+            LOGIN_LOCKOUT_MAX_ATTEMPTS - 1,
+            LOGIN_LOCKOUT_MAX_ATTEMPTS,
+            LOGIN_LOCKOUT_MAX_ATTEMPTS - 1,
+            now + LOGIN_LOCKOUT_DURATION,
+        ),
+    )
+
+
+def reset_login_lockout(username: str):
+    """登录成功后重置锁定计数器"""
+    _execute('DELETE FROM login_lockout WHERE username = ?', (username,))

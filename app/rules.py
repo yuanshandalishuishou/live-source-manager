@@ -17,8 +17,10 @@ import json as _json
 import logging
 import os
 import re
+import threading
 import time
 from collections import OrderedDict
+from typing import ClassVar
 
 try:
     import yaml
@@ -36,7 +38,7 @@ def _get_rule_models():
 
         return _m
     except ImportError:
-        raise ImportError('web.models 不可用，分类规则查询需要数据库')
+        raise ImportError('web.models 不可用，分类规则查询需要数据库') from None
 
 
 def get_active_classification_rules_for_app():
@@ -105,10 +107,10 @@ class ChannelRules:
     """
 
     # 维度列表
-    DIMENSIONS = ['content', 'region', 'language', 'quality', 'media_type', 'genre']
+    DIMENSIONS: ClassVar[list[str]] = ['content', 'region', 'language', 'quality', 'media_type', 'genre']
 
     # 省份名称列表，用于省份正则匹配
-    PROVINCE_NAMES = [
+    PROVINCE_NAMES: ClassVar[list[str]] = [
         '北京',
         '上海',
         '天津',
@@ -146,7 +148,7 @@ class ChannelRules:
     ]
 
     # 清晰度关键词
-    QUALITY_KEYWORDS = {
+    QUALITY_KEYWORDS: ClassVar[dict[str, str]] = {
         '8K': '8K',
         '4K': '4K',
         '超清': '超清',
@@ -175,6 +177,9 @@ class ChannelRules:
         # 缓存（使用 OrderedDict 确保 LRU popitem(last=False) 正确工作）
         self._category_cache: dict[str, str] = OrderedDict()  # 单分类缓存
         self._multi_category_cache: dict[str, dict[str, str]] = OrderedDict()  # 多维分类缓存
+        # 缓存读写锁：防止多线程并发读写 OrderedDict 导致的竞态/损坏
+        # （规则引擎在 web 请求线程与后台解析线程间共享，单一锁覆盖两个缓存）
+        self._cache_lock: threading.RLock = threading.RLock()
         self._last_load: float = 0.0
 
         # 加载规则
@@ -189,18 +194,19 @@ class ChannelRules:
         self._multi_category_cache 和 self._category_cache 都必须是 OrderedDict 实例。
         """
         MAX_CACHE = 200
-        # 保证是 OrderedDict
-        if not isinstance(self._multi_category_cache, OrderedDict):
-            self._multi_category_cache = OrderedDict(self._multi_category_cache)
-        if not isinstance(self._category_cache, OrderedDict):
-            self._category_cache = OrderedDict(self._category_cache)
+        with self._cache_lock:
+            # 保证是 OrderedDict
+            if not isinstance(self._multi_category_cache, OrderedDict):
+                self._multi_category_cache = OrderedDict(self._multi_category_cache)
+            if not isinstance(self._category_cache, OrderedDict):
+                self._category_cache = OrderedDict(self._category_cache)
 
-        if len(self._multi_category_cache) > MAX_CACHE:
-            while len(self._multi_category_cache) > MAX_CACHE:
-                self._multi_category_cache.popitem(last=False)
-        if len(self._category_cache) > MAX_CACHE:
-            while len(self._category_cache) > MAX_CACHE:
-                self._category_cache.popitem(last=False)
+            if len(self._multi_category_cache) > MAX_CACHE:
+                while len(self._multi_category_cache) > MAX_CACHE:
+                    self._multi_category_cache.popitem(last=False)
+            if len(self._category_cache) > MAX_CACHE:
+                while len(self._category_cache) > MAX_CACHE:
+                    self._category_cache.popitem(last=False)
 
     def _load_from_db(self):
         """从数据库加载规则（主加载路径）"""
@@ -433,8 +439,9 @@ class ChannelRules:
 
     def reload(self):
         """手动刷新规则数据"""
-        self.clear_category_cache()
-        self._multi_category_cache.clear()
+        with self._cache_lock:
+            self.clear_category_cache()
+            self._multi_category_cache.clear()
         self._load_from_db()
         self.logger.info('✓ 规则已刷新')
 
@@ -522,8 +529,9 @@ class ChannelRules:
             return {dim: '未知' for dim in self.DIMENSIONS}
 
         # 缓存查找
-        if channel_name in self._multi_category_cache:
-            return self._multi_category_cache[channel_name]
+        with self._cache_lock:
+            if channel_name in self._multi_category_cache:
+                return self._multi_category_cache[channel_name]
 
         # ── 优先查全名映射表（人工修正/导入的权威数据） ──
         try:
@@ -537,7 +545,8 @@ class ChannelRules:
                     'media_type': mapping.get('media_type', '电视节目'),
                     'genre': mapping.get('genre', '综合'),
                 }
-                self._multi_category_cache[channel_name] = result
+                with self._cache_lock:
+                    self._multi_category_cache[channel_name] = result
                 return result
         except Exception:
             pass  # 映射表查不到或异常，回退规则引擎
@@ -568,7 +577,8 @@ class ChannelRules:
                 result[dim] = matches[0]['name']
 
         # 写入缓存（限制大小，LRU-style）
-        self._multi_category_cache[channel_name] = result
+        with self._cache_lock:
+            self._multi_category_cache[channel_name] = result
         self._prune_cache()
 
         return result
@@ -640,10 +650,14 @@ class ChannelRules:
                 kw_j = candidates_by_name[names[j]]['keyword']
                 # 如果 kw_i 是 kw_j 的子串但两者不同（如"湖南" in "湖南卫视"）
                 # 且两者属于不同分类，则长的优先
-                if len(kw_i) < len(kw_j) and kw_i in kw_j and names[i] != names[j]:
+                if (
+                    len(kw_i) < len(kw_j)
+                    and kw_i in kw_j
+                    and names[i] != names[j]
+                    and (names[j] not in longer_kw_override or len(kw_j) > len(longer_kw_override.get(names[j], '')))
+                ):
                     # kw_j 更长，标记 kw_i 的分类应被 kw_j 的分类覆盖
-                    if names[j] not in longer_kw_override or len(kw_j) > len(longer_kw_override.get(names[j], '')):
-                        longer_kw_override[names[i]] = names[j]
+                    longer_kw_override[names[i]] = names[j]
 
         candidates = sorted(
             candidates_by_name.values(), key=lambda x: (x['priority'], -x['keyword_len'], x['sort_order'])
@@ -713,13 +727,15 @@ class ChannelRules:
 
     def _cache_result(self, channel_name: str, category: str):
         """缓存分类结果并修剪"""
-        self._category_cache[channel_name] = category
+        with self._cache_lock:
+            self._category_cache[channel_name] = category
         # 使用统一的 _prune_cache 方法修剪（P3-新-1: 替代手动list切片）
         self._prune_cache()
 
     def clear_category_cache(self):
         """清空分类缓存"""
-        self._category_cache.clear()
+        with self._cache_lock:
+            self._category_cache.clear()
         self.logger.debug('分类缓存已清空')
 
     # ── 频道信息提取 ─────────────────────────────────
@@ -921,7 +937,7 @@ class ChannelRules:
 
     # ── 测试工具 ────────────────────────────────────
 
-    def test_classification(self, test_cases: list[tuple] = None):
+    def test_classification(self, test_cases: list[tuple] | None = None):
         """测试分类准确性 — 用于调试和验证
 
         Args:

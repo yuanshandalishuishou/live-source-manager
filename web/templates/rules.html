@@ -11,6 +11,8 @@
             <button class="btn btn-primary btn-sm" onclick="showAddRuleModal()">+ 新增规则</button>
             {% if user and user.role == 'admin' %}
             <button class="btn btn-outline btn-sm" onclick="reimportRules()">🔄 从YAML重新导入</button>
+            <button class="btn btn-outline btn-sm" onclick="resetRulesToDefault()">♻️ 恢复默认规则</button>
+            <button class="btn btn-outline btn-sm" onclick="resetCategoryDictionary()">♻️ 恢复默认字典</button>
             {% endif %}
         </div>
         <div class="toolbar-right">
@@ -216,7 +218,7 @@ function loadRules(ruleType, targetId) {
                 html += '</td>';
                 html += '<td class="actions" style="white-space:nowrap">';
                 html += '<button class="btn btn-sm btn-outline" onclick="showEditRuleModal(' + rule.id + ',\'' + ruleType + '\')">编辑</button> ';
-                html += '<button class="btn btn-sm btn-outline" onclick="deleteRule(' + rule.id + ',\'' + LSM.escapeHtml(rule.name) + '\',\'' + ruleType + '\')">删除</button> ';
+                html += '<button class="btn btn-sm btn-outline" onclick="deleteRule(' + rule.id + ',\'' + escapeJs(rule.name) + '\',\'' + ruleType + '\')">删除</button> ';
                 html += '<button class="btn btn-sm btn-outline" onclick="moveRule(' + rule.id + ',\'up\',\'' + ruleType + '\')">↑</button>';
                 html += '<button class="btn btn-sm btn-outline" onclick="moveRule(' + rule.id + ',\'down\',\'' + ruleType + '\')">↓</button>';
                 html += '</td>';
@@ -510,21 +512,40 @@ function testClassification() {
     })
     .then(function(r) { return r.json(); })
     .then(function(data) {
+        var cats = data.categories || {};
+        var matches = data.matches_by_dim || {};
+        var dimNames = {
+            content: '内容类型', region: '地区', language: '语言',
+            quality: '画质', media_type: '媒体类型', genre: '类型'
+        };
         var html = '<div class="card" style="border:2px solid var(--primary)">';
         html += '<div class="card-header"><h3>📊 分类测试结果</h3></div>';
         html += '<div class="card-body">';
         html += '<p><strong>频道名称：</strong>' + LSM.escapeHtml(channelName) + '</p>';
-        html += '<p><strong>分类：</strong><span class="badge badge-green" style="font-size:14px;padding:4px 12px">' + LSM.escapeHtml(data.category || '未分类') + '</span></p>';
-        html += '<p><strong>媒体类型：</strong>' + (data.media_type || '-') + '</p>';
-        html += '<p><strong>省份：</strong>' + (data.province || '-') + '</p>';
 
-        if (data.matches && data.matches.length > 0) {
+        // 多维分类结果
+        html += '<p style="margin-top:12px"><strong>分类结果：</strong></p>';
+        html += '<table style="font-size:13px"><thead><tr><th>维度</th><th>分类值</th></tr></thead><tbody>';
+        Object.keys(cats).forEach(function(dim) {
+            var label = dimNames[dim] || dim;
+            html += '<tr><td>' + LSM.escapeHtml(label) + '</td>';
+            html += '<td><span class="badge badge-green">' + LSM.escapeHtml(cats[dim] || '未分类') + '</span></td></tr>';
+        });
+        html += '</tbody></table>';
+
+        // 匹配规则（按维度分组）
+        var dimKeys = Object.keys(matches);
+        if (dimKeys.length > 0) {
             html += '<p style="margin-top:12px"><strong>匹配规则：</strong></p>';
-            html += '<table style="font-size:13px"><thead><tr><th>关键词</th><th>规则名称</th><th>优先级</th></tr></thead><tbody>';
-            data.matches.forEach(function(m) {
-                html += '<tr><td><span class="badge badge-blue">' + LSM.escapeHtml(m.keyword) + '</span></td>';
-                html += '<td>' + LSM.escapeHtml(m.rule_name) + '</td>';
-                html += '<td>' + m.priority + '</td></tr>';
+            html += '<table style="font-size:13px"><thead><tr><th>维度</th><th>关键词</th><th>规则名称</th><th>优先级</th></tr></thead><tbody>';
+            dimKeys.forEach(function(dim) {
+                var label = dimNames[dim] || dim;
+                (matches[dim] || []).forEach(function(m) {
+                    html += '<tr><td>' + LSM.escapeHtml(label) + '</td>';
+                    html += '<td><span class="badge badge-blue">' + LSM.escapeHtml(m.keyword) + '</span></td>';
+                    html += '<td>' + LSM.escapeHtml(m.rule_name) + '</td>';
+                    html += '<td>' + m.priority + '</td></tr>';
+                });
             });
             html += '</tbody></table>';
         } else {
@@ -556,6 +577,46 @@ function reimportRules() {
         })
         .catch(function(e) {
             LSM.showToast('导入失败: ' + e.message, 'error');
+        });
+    });
+}
+
+// ── D-4 修复：恢复默认分类规则 ──────────────────────
+function resetRulesToDefault() {
+    LSM.confirm('确定将分类规则恢复为系统默认吗？\n此操作将清空你自定义的所有规则与排除映射，并从 channel_rules.yml 重新导入出厂默认。', '确认恢复默认').then(function(confirmed) {
+        if (!confirmed) return;
+        var csrfToken = window.__csrf_token || '';
+        fetch('/api/rules/reset-defaults', {
+            method: 'POST',
+            headers: { 'X-CSRF-Token': csrfToken }
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            LSM.showToast(data.message || '已恢复默认规则', 'success');
+            loadRules('content', 'rules-category-list');
+            loadRules('media_type', 'rules-channel-type-list');
+        })
+        .catch(function(e) {
+            LSM.showToast('恢复失败: ' + e.message, 'error');
+        });
+    });
+}
+
+// ── D-4 修复：恢复默认分类字典 ──────────────────────
+function resetCategoryDictionary() {
+    LSM.confirm('确定将分类字典恢复为系统默认吗？\n此操作将清空你自定义的所有分类字典选项，并重新种子出厂默认值。', '确认恢复默认').then(function(confirmed) {
+        if (!confirmed) return;
+        var csrfToken = window.__csrf_token || '';
+        fetch('/api/category-dictionary/reset-defaults', {
+            method: 'POST',
+            headers: { 'X-CSRF-Token': csrfToken }
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            LSM.showToast(data.message || '已恢复默认字典', 'success');
+        })
+        .catch(function(e) {
+            LSM.showToast('恢复失败: ' + e.message, 'error');
         });
     });
 }

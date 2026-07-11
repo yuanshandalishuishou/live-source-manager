@@ -19,7 +19,7 @@ import os
 import sys
 import tempfile
 import shutil
-import configparser
+import logging
 
 # ── 项目路径 ──────────────────────────────────────
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -38,27 +38,10 @@ from web import models
 models.DATA_DIR = SHARED_TMP_DIR
 models.DB_PATH = os.path.join(SHARED_TMP_DIR, 'web.db')
 
-# ── 覆写 web.webapp.CONFIG_PATH (原 config_proxy) ─
+# ── 覆写 web.webapp 下的 CSRF_EXEMPT_PATHS 确保一致 ──
 import web.webapp
 
-web.webapp.CONFIG_PATH = os.path.join(SHARED_TMP_DIR, 'config.ini')
-
-# ── 覆写 web.webapp 下的 CSRF_EXEMPT_PATHS 确保一致 ──
 web.webapp.CSRF_EXEMPT_PATHS = {'/api/auth/login', '/api/auth/logout', '/login', '/health'}
-
-# 写最小测试配置
-_cp = configparser.ConfigParser()
-_cp.add_section('Logging')
-_cp.set('Logging', 'level', 'INFO')
-_cp.set('Logging', 'file', os.path.join(SHARED_TMP_DIR, 'app.log'))
-_cp.add_section('Sources')
-_cp.set('Sources', 'local_dirs', '/config/sources')
-_cp.add_section('Network')
-_cp.set('Network', 'proxy_enabled', 'False')
-_cp.set('Network', 'proxy_username', '')
-_cp.set('Network', 'proxy_password', '')
-with open(web.webapp.CONFIG_PATH, 'w') as _f:
-    _cp.write(_f)
 
 # 创建 app.log 文件（test_logs_download_admin 需要文件存在）
 open(os.path.join(SHARED_TMP_DIR, 'app.log'), 'a').close()
@@ -77,7 +60,7 @@ except Exception:
 # ── 每个测试前清理数据库（P2-16A 修复） ──────────
 
 import pytest
-import logging
+
 
 # 注意：Session 存在全局内存 dict 中，每个测试前清理 DB 不自动清除 session
 # 因此我们同时清理内存中的 session
