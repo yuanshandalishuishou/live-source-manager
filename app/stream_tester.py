@@ -25,6 +25,62 @@ from datetime import datetime, timedelta
 from app.config import Config
 from app.exceptions import StreamTestError
 
+
+def _classify_stream_error(msg: str) -> str:
+    """将 ffprobe/ffmpeg 的 stderr 错误文本归类为可读的诊断类别。
+
+    避免测试把所有失败都叫 'ffprobe_error: Unknown error'（比如源是运营商
+    IPTV 内网/CDN、从本机根本连不上时），从而把「网络不可达」与「ffprobe 真崩了」
+    区分开，便于排查。
+    """
+    if not msg:
+        return 'ffprobe_failed_no_output'
+    t = msg.lower()
+    # 连接被拒
+    if 'connection refused' in t or 'error number -111' in t:
+        return 'connection_refused'
+    # 连接超时 / 不可达（运营商内网 CDN 典型表现）
+    if (
+        'connection timed out' in t
+        or 'timed out' in t
+        or 'error number -138' in t
+        or 'network unreachable' in t
+        or 'no route' in t
+        or 'error number -101' in t
+        or 'host is down' in t
+        or 'error number -64' in t
+        or 'connection failed' in t
+        or 'could not connect' in t
+        or 'failed: connection' in t
+    ):
+        return 'connection_failed'
+    # DNS 解析失败
+    if (
+        'name or service not known' in t
+        or 'could not resolve' in t
+        or 'nodename nor servname' in t
+        or 'getaddrinfo' in t
+        or 'resolve' in t
+        or 'dns error' in t
+    ):
+        return 'dns_failed'
+    # 鉴权 / 防盗链（如腾讯云 txSecret 过期）
+    if (
+        '403' in t
+        or '401' in t
+        or 'forbidden' in t
+        or 'unauthorized' in t
+        or 'expired' in t
+        or 'txsecret' in t
+        or 'txtime' in t
+    ):
+        return 'auth_blocked'
+    # 资源不存在
+    if '404' in t or 'not found' in t or 'no such' in t:
+        return 'not_found'
+    return 'ffprobe_error'
+
+
 # 第三方库可选导入（try/except 保证模块在缺少依赖时仍可加载）
 try:
     import aiohttp
@@ -688,7 +744,7 @@ class StreamTester:
                 cmd = [
                     ffprobe_cmd,
                     '-v',
-                    'quiet',  # 安静模式，减少输出
+                    'error',  # 显示错误级以上日志，确保连接失败原因透出到 stderr（quiet 会吞掉连接错误）
                     '-print_format',
                     'json',  # JSON输出格式
                     '-show_streams',  # 显示流信息
@@ -752,9 +808,10 @@ class StreamTester:
                 else:
                     if self._abort.is_set():
                         return 'interrupted', {'error_reason': 'aborted'}
-                    error_msg = stderr.strip() if stderr else 'Unknown error'
-                    self.logger.debug(f'FFprobe执行失败: {error_msg}')
-                    return 'failed', {'error_reason': f'ffprobe_error: {error_msg}'}
+                    raw = (stderr or '').strip() or (stdout or '').strip()
+                    cat = _classify_stream_error(raw)
+                    self.logger.debug(f'FFprobe执行失败: {raw}')
+                    return 'failed', {'error_reason': f'{cat}: {raw}'}
 
             elif StreamTester._ffmpeg_path:
                 # 降级：使用 ffmpeg -i 测试流可连接性（无详细元数据）
@@ -813,9 +870,10 @@ class StreamTester:
                 else:
                     if self._abort.is_set():
                         return 'interrupted', {'error_reason': 'aborted'}
-                    error_msg = stderr.strip() if stderr else 'Unknown error'
-                    self.logger.debug(f'FFmpeg降级测试失败: {error_msg}')
-                    return 'failed', {'error_reason': f'ffmpeg_error: {error_msg}'}
+                    raw = (stderr or '').strip() or (stdout or '').strip()
+                    cat = _classify_stream_error(raw)
+                    self.logger.debug(f'FFmpeg降级测试失败: {raw}')
+                    return 'failed', {'error_reason': f'{cat}: {raw}'}
 
             else:
                 return 'failed', {'error_reason': 'no_probe_tool_available'}

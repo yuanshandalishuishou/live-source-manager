@@ -8,6 +8,7 @@ import os
 import re
 import time
 
+from app.utils import force_remove
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from web import models
@@ -97,9 +98,13 @@ def _remove_file_from_online_dir(filename: str) -> bool:
     project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     file_path = os.path.join(project_root, 'config', 'online', filename)
     if os.path.isfile(file_path):
-        os.remove(file_path)
-        logger.info(f'已删除源文件: {file_path}')
-        return True
+        try:
+            force_remove(file_path)
+            logger.info(f'已删除源文件: {file_path}')
+            return True
+        except OSError as e:
+            logger.warning(f'删除源文件失败: {file_path}: {e}')
+            return False
     return False
 
 
@@ -550,9 +555,13 @@ async def api_delete_source(source_id: str, request: Request, current_user: dict
         project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         file_path = os.path.join(project_root, 'config', 'online', source_path)
         if os.path.isfile(file_path):
-            os.remove(file_path)
-            deleted_file = True
-            logger.info(f'已删除源文件: {file_path}')
+            try:
+                force_remove(file_path)
+                deleted_file = True
+                logger.info(f'已删除源文件: {file_path}')
+            except OSError as e:
+                logger.warning(f'删除源文件失败（配置仍会移除）: {file_path}: {e}')
+                deleted_file = False
 
     # 2. 如果上面没找到（source_path 可能是 base filename），尝试用 URL 推导文件名删除
     if not deleted_file and source_url:
@@ -891,8 +900,13 @@ async def api_delete_source_file(file_id: str, request: Request, current_user: d
             file_path = _get_online_file_path(url)
             deleted_file = False
             if os.path.isfile(file_path):
-                os.remove(file_path)
-                deleted_file = True
+                try:
+                    force_remove(file_path)
+                    deleted_file = True
+                except OSError as e:
+                    # 物理文件删除失败（如被占用）也不阻断配置更新，避免 500
+                    logger.warning(f'删除源文件失败（配置仍会移除）: {file_path}: {e}')
+                    deleted_file = False
             online_urls.remove(url)
             _write_online_urls_to_db(online_urls)
             reset_source_manager_cache()

@@ -278,10 +278,24 @@ async def api_trigger_test(request: Request, current_user: dict = Depends(requir
 
 @router.post('/api/test/pause')
 async def api_test_pause(current_user: dict = Depends(require_admin)):
-    """暂停正在进行的测试（立即终止当前在跑的源，恢复后重测被中断的源）"""
+    """暂停正在进行的测试（立即终止当前在跑的源，恢复后重测被中断的源）。
+
+    若后台线程已意外终止但状态仍卡在 running/paused，强制复位为已取消，
+    避免前端永久显示「进行中」假象（已停止的任务无法真正暂停）。
+    """
     global _test_pause, _test_tester
+    # 线程已死但状态仍卡在 running/paused（僵尸任务）→ 强制复位
     if _test_thread is None or not _test_thread.is_alive():
-        return {'status': 'error', 'detail': '当前没有运行中的测试'}
+        with _test_lock:
+            if _test_state.get('status') in ('running', 'paused'):
+                for res in _test_state.get('results', []):
+                    if res.get('status') in ('waiting', 'running', 'testing'):
+                        res['status'] = 'cancelled'
+                _test_state['status'] = 'cancelled'
+                _test_state['note'] = (_test_state.get('note') or '') + '（已强制复位）'
+        _test_pause.clear()
+        _publish_test_state()
+        return {'status': 'cancelled', 'message': '已强制复位测试状态（原任务已停止）'}
     _test_pause.set()
     # 立即终止当前所有在跑的 ffprobe/ffmpeg 子进程，使暂停即时生效
     if _test_tester is not None:
@@ -306,10 +320,25 @@ async def api_test_resume(current_user: dict = Depends(require_admin)):
 
 @router.post('/api/test/cancel')
 async def api_test_cancel(current_user: dict = Depends(require_admin)):
-    """取消正在进行的测试（立即终止所有在跑源，未开始的源标为已取消）"""
+    """取消正在进行的测试（立即终止所有在跑源，未开始的源标为已取消）。
+
+    若后台线程已意外终止（崩溃/卡死后被回收）但状态仍卡在 running/paused，
+    仍强制复位状态，避免前端永久显示「进行中」假象。
+    """
     global _test_cancel, _test_pause, _test_tester
+    # 线程已死但状态仍卡在 running/paused（僵尸任务）→ 强制复位，避免永久假「进行中」
     if _test_thread is None or not _test_thread.is_alive():
-        return {'status': 'error', 'detail': '当前没有运行中的测试'}
+        with _test_lock:
+            if _test_state.get('status') in ('running', 'paused'):
+                for res in _test_state.get('results', []):
+                    if res.get('status') in ('waiting', 'running', 'testing'):
+                        res['status'] = 'cancelled'
+                _test_state['status'] = 'cancelled'
+                _test_state['note'] = (_test_state.get('note') or '') + '（已强制复位）'
+        _test_cancel.clear()
+        _test_pause.clear()
+        _publish_test_state()
+        return {'status': 'cancelled', 'message': '已强制复位测试状态（原任务已停止）'}
     _test_cancel.set()
     _test_pause.clear()
     # 立即终止当前所有在跑的 ffprobe/ffmpeg 子进程，使取消即时生效
@@ -502,6 +531,8 @@ _test_tester = None
 _test_starting = threading.Event()
 # 测试任务世代：每次触发 +1，过期（被新触发取代）的任务自动退出，防止双任务并发写 _test_state 互相覆盖
 _test_gen = 0
+# 单源测试阻塞兜底超时（秒）：防止个别源的无界网络 I/O（如 DNS/连接被黑洞）拖垮整轮测试
+TEST_SOURCE_TIMEOUT = 60
 
 
 def schedule_auto_test() -> bool:
@@ -877,7 +908,18 @@ def _run_test_task(sources: list[dict], limit: int | None = None, gen: int = 0) 
                     with contextlib.suppress(Exception):
                         tester.abort()
                 try:
-                    r = fut.result()
+                    r = fut.result(timeout=TEST_SOURCE_TIMEOUT)
+                except concurrent.futures.TimeoutError:
+                    # 单源测试无界阻塞（如 DNS/连接被黑洞）兜底：超时不拖垮整轮，
+                    # 标记失败并尽量终止其在跑的 ffprobe，随后继续后续源
+                    with contextlib.suppress(Exception):
+                        tester.abort()
+                    r = {
+                        **sources[bi],
+                        'status': 'failed',
+                        'response_time': None,
+                        'error_reason': f'timeout: 单源测试超过 {TEST_SOURCE_TIMEOUT}s 无响应',
+                    }
                 except Exception as e:
                     r = {**sources[bi], 'status': 'failed', 'response_time': None, 'error_reason': f'exception:{e}'}
 
@@ -956,9 +998,10 @@ def _run_test_task(sources: list[dict], limit: int | None = None, gen: int = 0) 
                         _test_state['status'] = 'running'
                     _publish_test_state()
         finally:
-            # 等待本批线程池完全回收（as_completed 已耗尽 future，join 不会阻塞过久），
-            # 避免每批 wait=False 导致线程泄漏累积（稳健性修复）
-            ex.shutdown(wait=True, cancel_futures=True)
+            # 不阻塞等待：个别卡在网络 I/O 的 worker 可能在后台继续（泄漏线程），
+            # 但避免 shutdown(wait=True) 被其阻塞导致整轮停滞；每批新建线程池，
+            # 已完成 worker 由 GC 回收，卡住 worker 在自身 I/O 超时后自然结束
+            ex.shutdown(wait=False, cancel_futures=True)
         if cancelled:
             break
 

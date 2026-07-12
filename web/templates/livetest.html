@@ -103,6 +103,8 @@ table.test-table th { position: sticky; top: 0; background: var(--card-bg, #fff)
 <script>
 let testWS = null;
 let testData = null;
+let _lastCompleted = -1;        // 上次记录的已完成数，用于停滞检测
+let _lastMoveTime = Date.now(); // 上次进度变化时间
 
 function connectTestWS() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -162,7 +164,13 @@ function renderTestUI() {
     const status = testData.status || 'idle';
     let statusLabel;
     if (status === 'running') {
-        if (completed === 0) {
+        if (completed !== _lastCompleted) {
+            _lastCompleted = completed;
+            _lastMoveTime = Date.now();
+        } else if (Date.now() - _lastMoveTime > 45000) {
+            // 进行中但超过 45s 进度无变化：后台线程可能卡在单个源的无界网络 I/O
+            statusLabel = '⏳ 测试进行中... (' + completed + '/' + total + ') ⚠️ 进度长时间无变化，测试可能已停滞，可尝试「取消」后重新测试';
+        } else if (completed === 0) {
             statusLabel = '⏳ 正在连接首批源（单源测试可能耗时数秒~数十秒）...';
         } else {
             statusLabel = '⏳ 测试进行中... (' + completed + '/' + total + ')';

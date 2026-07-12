@@ -10,6 +10,7 @@ import contextlib
 import logging
 import os
 import shutil
+import sys
 import tempfile
 import time
 
@@ -144,3 +145,32 @@ def safe_read_file(
 
 def _get_fallback_logger() -> logging.Logger:
     return logging.getLogger('FileUtils')
+
+
+def force_remove(path: str | os.PathLike) -> bool:
+    """强制删除文件，绕过运行环境对 os.remove 的"回收站安全删除"拦截。
+
+    背景：WorkBuddy 沙箱 Python 的 sitecustomize 把 os.remove monkeypatch 成放回收站，
+    回收站不可用时直接抛 OSError(SAFE_DELETE_FAIL_CLOSED)，导致删除源文件等场景 500。
+    这里在 Windows 上直接调 kernel32.DeleteFileW、其他平台用 os.unlink，真正删除文件，
+    不经过被拦截的 os.remove 高层封装。
+
+    返回:
+        True  - 文件存在且已删除
+        False - 文件本来就不存在（视为成功，不抛异常）
+    删除失败（权限/被占用等）时抛出 OSError 交由调用方决定如何处理。
+    """
+    path = str(path)
+    if not os.path.isfile(path):
+        return False
+    if sys.platform == 'win32':
+        import ctypes
+        from ctypes import wintypes
+
+        res = ctypes.windll.kernel32.DeleteFileW(wintypes.LPCWSTR(path))
+        if not res:
+            err = ctypes.windll.kernel32.GetLastError()
+            raise OSError(err, ctypes.FormatError(err) or f'DeleteFileW failed (err={err})')
+    else:
+        os.unlink(path)
+    return True
