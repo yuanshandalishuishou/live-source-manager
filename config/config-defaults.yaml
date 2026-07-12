@@ -1,98 +1,131 @@
 # config-defaults.yaml — 配置默认值与源URL定义
-# 本文件覆盖代码中的硬编码默认值。
-# 修改后需重启应用生效。
-# ---
-# 来源定义格式：
-# Sources:
-#   online_urls: 文本块，每行一个URL
-#   github_sources: 文本块，每行 owner/repo
-
-Sources:
-  local_dirs: './config/sources'
-  online_urls: |
-    https://live.zbds.org/tv/iptv4.m3u
-    https://myernestlu.github.io/zby.txt
-    https://raw.githubusercontent.com/Rivens7/Livelist/main/CCTV.m3u
-    https://raw.githubusercontent.com/Rivens7/Livelist/main/CNTV.m3u
-    https://raw.githubusercontent.com/Rivens7/Livelist/main/IPTV.m3u
-    https://raw.githubusercontent.com/Guovin/iptv-api/gd/output/ipv4/result.m3u
-    https://raw.githubusercontent.com/suxuang/myIPTV/refs/heads/main/ipv4.m3u
-    https://raw.githubusercontent.com/hujingguang/ChinaIPTV/main/cnTV_AutoUpdate.m3u8
-    https://raw.githubusercontent.com/zwc456baby/iptv_alive/refs/heads/master/live.m3u
-    https://raw.githubusercontent.com/zbefine/iptv/main/iptv.m3u
-    https://raw.githubusercontent.com/vamoschuck/TV/main/M3U
-    https://raw.githubusercontent.com/BigBigGrandG/IPTV-URL/release/Gather.m3u
-    https://raw.githubusercontent.com/Kimentanm/aptv/master/m3u/iptv.m3u
-    https://raw.githubusercontent.com/YanG-1989/m3u/main/Gather.m3u
-    https://raw.githubusercontent.com/huang770101/my-iptv/main/IPTV-ipv4.m3u
-    https://raw.githubusercontent.com/fanmingming/live/main/tv/m3u/ipv6.m3u
-    https://live.fanmingming.cn/tv/m3u/ipv6.m3u
-    https://raw.githubusercontent.com/YueChan/Live/main/IPTV.m3u
-    https://iptv-org.github.io/iptv/countries/tw.m3u
-    https://iptv-org.github.io/iptv/index.m3u
-  github_sources: |
-    wcb1969/iptv/main
-    joevess/IPTV/main
-    suxuang/myIPTV/main
-    YueChan/Live
-    YanG-1989/m3u
-    qwerttvv/Beijing-IPTV
-    joevess/IPTV
-    cymz6/AutoIPTV-Hotel
-    Rivens7/Livelist
-
-Network:
-  proxy_enabled: 'False'
-  proxy_type: 'socks5'
-  proxy_host: '192.168.1.46'
-  proxy_port: '1800'
-  proxy_username: ''
-  proxy_password: ''
-  github_mirror: 'https://ghproxy.com/'
-  ipv6_enabled: 'True'
-
-HTTPServer:
-  enabled: 'True'
-  host: '0.0.0.0'
-  fileshare_port: '12345'
-  manager_port: '23456'
-  document_root: './www/output'
-
-GitHub:
-  api_url: 'https://api.github.com'
-  api_token: ''
-  rate_limit: '5000'
-
-Testing:
-  timeout: '10'
-  concurrent_threads: '40'
-  cache_ttl: '120'
-  enable_speed_test: 'True'
-  speed_test_duration: '6'
-
-Output:
-  filename: 'live.m3u'
-  group_by: 'category'
-  include_failed: 'False'
-  max_sources_per_channel: '8'
-  enable_filter: 'False'
-
-Logging:
-  level: 'INFO'
-  file: './log/app.log'
-  max_size: '10'
-  backup_count: '5'
+# 本文件由 app.config.Config._DEFAULT_VALUES 自动同步生成，作为 SECTION_SCHEMA 默认值的覆盖源。
+# 单一事实来源是 app/config.py 的 _DEFAULT_VALUES；修改默认值请改那里，本文件保持一致。
 
 Filter:
   max_latency: '4000'
+  max_resolution: 4k
   min_bitrate: '80'
-  must_hd: 'False'
-  must_4k: 'False'
+  min_resolution: 360p
   min_speed: '50'
-  min_resolution: '360p'
-  max_resolution: '4k'
-  resolution_filter_mode: 'range'
+  must_4k: 'False'
+  must_hd: 'False'
+  resolution_filter_mode: range
+GitHub:
+  api_token: ''
+  api_url: https://api.github.com
+  rate_limit: '5000'
+HTTPServer:
+  document_root: ./www/output
+  enabled: 'True'
+  fileshare_port: '12345'
+  host: 0.0.0.0
+  manager_port: '23456'
+Logging:
+  backup_count: '5'
+  file: ./log/app.log
+  level: INFO
+  max_size: '10'
+Network:
+  github_mirror: https://ghproxy.com/
+  ipv6_enabled: 'True'
+  proxy_enabled: 'False'
+  proxy_host: 192.168.1.46
+  proxy_password: ''
+  proxy_port: '1800'
+  proxy_type: socks5
+  proxy_username: ''
+Output:
+  enable_filter: 'False'
+  filename: live.m3u
+  group_by: category
+  include_failed: 'False'
+  max_sources_per_channel: '8'
+  whitelist_force_keep: 'False'
+Sources:
+  channel_ua_overrides: '{}'
+  github_source_settings: '{}'
+  github_sources: 'wcb1969/iptv/main
 
+    joevess/IPTV/main
+
+    suxuang/myIPTV/main
+
+    YueChan/Live
+
+    YanG-1989/m3u
+
+    qwerttvv/Beijing-IPTV
+
+    joevess/IPTV
+
+    cymz6/AutoIPTV-Hotel
+
+    Rivens7/Livelist'
+  local_dirs: ./config/sources
+  online_urls: 'https://live.zbds.org/tv/iptv4.m3u
+
+    https://myernestlu.github.io/zby.txt
+
+    https://raw.githubusercontent.com/Rivens7/Livelist/main/CCTV.m3u
+
+    https://raw.githubusercontent.com/Rivens7/Livelist/main/CNTV.m3u
+
+    https://raw.githubusercontent.com/Rivens7/Livelist/main/IPTV.m3u
+
+    https://raw.githubusercontent.com/Guovin/iptv-api/gd/output/ipv4/result.m3u
+
+    https://raw.githubusercontent.com/suxuang/myIPTV/refs/heads/main/ipv4.m3u
+
+    https://raw.githubusercontent.com/hujingguang/ChinaIPTV/main/cnTV_AutoUpdate.m3u8
+
+    https://raw.githubusercontent.com/zwc456baby/iptv_alive/refs/heads/master/live.m3u
+
+    https://raw.githubusercontent.com/zbefine/iptv/main/iptv.m3u
+
+    https://raw.githubusercontent.com/vamoschuck/TV/main/M3U
+
+    https://raw.githubusercontent.com/BigBigGrandG/IPTV-URL/release/Gather.m3u
+
+    https://raw.githubusercontent.com/Kimentanm/aptv/master/m3u/iptv.m3u
+
+    https://raw.githubusercontent.com/YanG-1989/m3u/main/Gather.m3u
+
+    https://raw.githubusercontent.com/huang770101/my-iptv/main/IPTV-ipv4.m3u
+
+    https://raw.githubusercontent.com/fanmingming/live/main/tv/m3u/ipv6.m3u
+
+    https://live.fanmingming.cn/tv/m3u/ipv6.m3u
+
+    https://raw.githubusercontent.com/YueChan/Live/main/IPTV.m3u
+
+    https://iptv-org.github.io/iptv/countries/tw.m3u
+
+    https://iptv-org.github.io/iptv/index.m3u'
+  source_file_ua_settings: '{}'
+Testing:
+  ad_keywords: no_signal,/ad/,advertisement,测试卡,无信号,test_pattern,colorbar,broadcast_test,signal_lost
+  ad_max_duration: '90'
+  auto_scan_daily_time: 03:00
+  auto_scan_enabled: 'False'
+  auto_scan_interval_hours: '24'
+  auto_scan_mode: interval
+  cache_ttl: '120'
+  concurrent_threads: '40'
+  enable_ad_detect: 'True'
+  enable_host_speed_share: 'True'
+  enable_source_freeze: 'True'
+  enable_speed_test: 'True'
+  freeze_base_seconds: '60'
+  freeze_fail_threshold: '3'
+  freeze_max_hours: '24'
+  global_blacklist: ''
+  global_whitelist: ''
+  max_concurrent_ffprobe: '16'
+  max_test_attempts: '1'
+  output_sort_by: speed
+  speed_test_duration: '6'
+  timeout: '10'
 UserAgents:
-  ua_position: 'extinf'
   ua_enabled: 'False'
+  ua_position: extinf

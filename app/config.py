@@ -109,6 +109,7 @@ class Config:
         'Testing.global_blacklist': '',  # 全局黑名单：URL/host，逗号或换行分隔，命中则跳过测试
         'Testing.global_whitelist': '',  # 全局白名单：URL/host，逗号或换行分隔（豁免黑名单）
         'Testing.output_sort_by': 'speed',  # 输出排序方式：speed(默认,快源在前)/name/resolution
+        'Testing.max_test_attempts': '1',  # 实时测试次数(总): 1=每个地址测一次; 2=测两次(含1次重试); 默认1
         # [Output]
         'Output.filename': 'live.m3u',
         'Output.group_by': 'category',

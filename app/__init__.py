@@ -101,6 +101,7 @@ from app.security import (
     clear_domain_blacklist,
     get_domain_blacklist,
     is_safe_url,
+    is_static_safe,
     sanitize_url,
     validate_url,
 )

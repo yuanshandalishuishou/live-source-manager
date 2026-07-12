@@ -576,7 +576,7 @@ def delete_app_config_by_section(section: str):
 def seed_app_config_defaults() -> int:
     """首次启动时，将配置默认值写入 app_config 表（仅空表执行，幂等）。
 
-    默认值来源：app/config_utils.py Config._DEFAULT_VALUES。
+    默认值来源：app.config.Config._DEFAULT_VALUES。
     返回写入的条目数。如果表已有数据则跳过，返回 0。
     """
     conn = get_conn()

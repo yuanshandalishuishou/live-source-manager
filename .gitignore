@@ -25,6 +25,10 @@ Thumbs.db
 
 # Project
 config/config.ini
+# 运行时下载的在线源文件（由采集任务自动生成，不入库）
+config/online/
+# 本地源文件目录（用户数据，不入库）
+config/sources/
 web/data/web.db
 *.db-journal
 *.db-wal

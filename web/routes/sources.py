@@ -1061,12 +1061,14 @@ async def api_get_source_file_channels(
             file_ua = _get_source_file_ua('online', url)
             if os.path.isfile(file_path):
                 # D-1 修复：parse_file 在 worker 线程执行
-                channels = await asyncio.to_thread(sm.parse_file, file_path, file_ua=file_ua if file_ua else None)
+                exclusions = []
+                channels = await asyncio.to_thread(sm.parse_file, file_path, file_ua=file_ua if file_ua else None, exclusions=exclusions)
                 channels = _enrich_channels_with_mappings(channels)
                 channels = _apply_channel_ua_overrides(channels)
                 result = _paginate_channels(channels, page, size, search)
                 result['file_name'] = os.path.basename(file_path)
                 result['file_ua'] = file_ua
+                result['exclusion_summary'] = sm.summarize_exclusions(exclusions)
                 return result
             return {
                 'channels': [],
@@ -1090,6 +1092,7 @@ async def api_get_source_file_channels(
                 return {'channels': [], 'total': 0, 'file_name': entry, 'message': f'GitHub API 调用失败: {e}'}
 
             all_channels = []
+            exclusions = []
             matched_files = 0
             file_ua = _get_source_file_ua('github', entry)
             for d_info in discovered:
@@ -1098,7 +1101,7 @@ async def api_get_source_file_channels(
                 file_path = os.path.join(sm.online_dir, filename)
                 if os.path.isfile(file_path):
                     # D-1 修复：parse_file 在 worker 线程执行
-                    channels = await asyncio.to_thread(sm.parse_file, file_path, file_ua=file_ua if file_ua else None)
+                    channels = await asyncio.to_thread(sm.parse_file, file_path, file_ua=file_ua if file_ua else None, exclusions=exclusions)
                     all_channels.extend(channels)
                     matched_files += 1
 
@@ -1155,6 +1158,7 @@ async def api_get_source_file_channels(
             result['discovered_files'] = len(discovered)
             result['matched_files'] = matched_files
             result['file_ua'] = file_ua
+            result['exclusion_summary'] = sm.summarize_exclusions(exclusions)
             return result
 
     # 3. 本地源
@@ -1164,11 +1168,12 @@ async def api_get_source_file_channels(
             abs_path = _resolve_local_path(path)
             file_ua = _get_source_file_ua('local', path)
             all_channels = []
+            exclusions = []
             if os.path.isfile(abs_path):
                 # D-1 修复：parse_file 在 worker 线程执行
-                all_channels = await asyncio.to_thread(sm.parse_file, abs_path, file_ua=file_ua if file_ua else None)
+                all_channels = await asyncio.to_thread(sm.parse_file, abs_path, file_ua=file_ua if file_ua else None, exclusions=exclusions)
             elif os.path.isdir(abs_path):
-                all_channels = sm.parse_local_files(abs_path)
+                all_channels = sm.parse_local_files(abs_path, exclusions=exclusions)
                 # 对本地目录也应用文件级 UA
                 if file_ua and file_ua.get('enabled') and file_ua.get('ua_value'):
                     for ch in all_channels:
@@ -1180,6 +1185,7 @@ async def api_get_source_file_channels(
             result = _paginate_channels(all_channels, page, size, search)
             result['file_name'] = os.path.basename(path)
             result['file_ua'] = file_ua
+            result['exclusion_summary'] = sm.summarize_exclusions(exclusions)
             return result
 
     raise HTTPException(status_code=404, detail='源文件不存在')

@@ -9,7 +9,7 @@
 
 ARG BASE_IMAGE=python:3.13-slim-bookworm
 
-# ===== Stage 1: 构建环境 =====
+# ===== Stage 1: 构建环境（仅准备构建工具）=====
 FROM ${BASE_IMAGE} AS builder
 
 # 安装构建工具（Debian bookworm 容器内）
@@ -24,16 +24,6 @@ RUN sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.li
         && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# 配置 pip 使用清华镜像（国内加速）
-RUN pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple && \
-    pip config set global.trusted-host pypi.tuna.tsinghua.edu.cn
-
-# 复制并安装 Python 依赖
-COPY requirements.txt /tmp/requirements.txt
-RUN pip install --no-cache-dir --target=/opt/pylib -r /tmp/requirements.txt && \
-    rm -rf /tmp/requirements.txt ~/.cache/pip
-
-
 
 # ===== Stage 2: 运行环境 =====
 FROM ${BASE_IMAGE}
@@ -44,6 +34,7 @@ ENV TZ=Asia/Shanghai \
     PYTHONIOENCODING=utf-8 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/ \
+    PROJECT_DIR=/app \
     DEBIAN_FRONTEND=noninteractive \
     NGINX_PORT=12345 \
     WEB_PORT=23456 \
@@ -70,6 +61,7 @@ RUN sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.li
         procps \
         dos2unix \
         gettext-base \
+        python3-venv \
         && \
     ln -snf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
     echo "Asia/Shanghai" > /etc/timezone && \
@@ -77,8 +69,8 @@ RUN sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.li
     update-ca-certificates && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* && \
-    mkdir -p /app /config /log ./www/output /data /var/log/nginx /tmp/livesourcemanager && \
-    chown -R www-data:www-data ./www/output /var/log/nginx
+    mkdir -p /app /config /log /www/output /data /var/log/nginx /tmp/livesourcemanager && \
+    chown -R www-data:www-data /www/output /var/log/nginx
 
 # 安装 FFmpeg 静态构建（包含 ffmpeg + ffprobe）
 RUN cd /tmp && \
@@ -91,10 +83,22 @@ RUN cd /tmp && \
     rm -rf /tmp/ffmpeg* && \
     echo "FFmpeg installed: $(ffmpeg -version | head -1)"
 
-WORKDIR /
+# ── 构建期创建带全部依赖的虚拟环境 ──────────────
+# start_docker.sh 默认以 /app/.venv/bin/python 启动 Web 服务；
+# 必须在镜像内预先建好「带依赖」的 venv，否则容器首启时 start_docker.sh 会尝试
+# 联网 pip install（离线/弱网环境下会失败，导致 Web 服务起不来）。
+# 注意：venv 必须构建在运行阶段（路径固定为 /app/.venv），不能从 builder 阶段
+# COPY 过来——否则 venv 内部 shebang 仍指向 builder 路径而失效。
+COPY requirements.txt /tmp/requirements.txt
+RUN python3 -m venv /app/.venv && \
+    /app/.venv/bin/pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple && \
+    /app/.venv/bin/pip config set global.trusted-host pypi.tuna.tsinghua.edu.cn && \
+    /app/.venv/bin/pip install --no-cache-dir -r /tmp/requirements.txt && \
+    rm -rf /tmp/requirements.txt ~/.cache/pip
+# 复制 requirements.txt 供容器运行时依赖自检（check_python_deps 命中即跳过安装）
+COPY requirements.txt /app/requirements.txt
 
-# 从 builder 阶段复制 Python 依赖
-COPY --from=builder /opt/pylib /usr/local/lib/python3.13/site-packages/
+WORKDIR /
 
 # 复制应用文件
 COPY app/ /app/app/
@@ -111,13 +115,13 @@ COPY healthcheck.sh /healthcheck.sh
 # P3-新-4: 创建 /app/config/channel_rules.yml → /config/channel_rules.yml 软链接
 RUN chmod +x /start_docker.sh /healthcheck.sh && \
     find /app -name "*.py" -exec chmod 644 {} \; && \
-    chown -R www-data:www-data ./www/output /var/log/nginx && \
+    chown -R www-data:www-data /www/output /var/log/nginx && \
     touch /log/cron.log /log/app.log && \
     chmod 640 /log/cron.log /log/app.log && \
-    echo "healthy" > ./www/output/health && \
-    echo "<html><body><h1>Live Source Manager</h1><p>Nginx serving on port $NGINX_PORT</p></body></html>" > ./www/output/index.html && \
-    chmod 644 ./www/output/health ./www/output/index.html && \
-    chown www-data:www-data ./www/output/health ./www/output/index.html && \
+    echo "healthy" > /www/output/health && \
+    echo "<html><body><h1>Live Source Manager</h1><p>Nginx serving on port $NGINX_PORT</p></body></html>" > /www/output/index.html && \
+    chmod 644 /www/output/health /www/output/index.html && \
+    chown www-data:www-data /www/output/health /www/output/index.html && \
     ln -sf /dev/stdout /var/log/nginx/access.log && \
     ln -sf /dev/stderr /var/log/nginx/error.log && \
     mkdir -p /app/config && \

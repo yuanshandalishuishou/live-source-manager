@@ -196,8 +196,14 @@ class StreamTester:
         self._active_futures = set()
         self._active_futures_lock = threading.Lock()
 
-        # ---- 纪码增强：指数退避重试 ----
-        self.max_retries = 2
+        # ---- 实时测试次数开关：1=每个地址测一次; 2=测两次(含1次重试); 默认1 ----
+        # 配置值语义为「总测试次数」，转换为重试次数 = 次数 - 1，并钳制到 [1,2]
+        _attempts = self.config.getint('Testing', 'max_test_attempts', 1)
+        if _attempts < 1:
+            _attempts = 1
+        elif _attempts > 2:
+            _attempts = 2
+        self.max_retries = _attempts - 1
 
         # ---- 纪码增强：细化超时层级 ----
         self.connect_timeout = self._get_config_timeout('connect_timeout', 8)
@@ -694,7 +700,8 @@ class StreamTester:
             test_result = {
                 'status': 'failed',
                 'response_time': None,
-                'error_reason': f'after_{self.max_retries}_retries: {last_error_reason}',
+                'error_reason': (f'after_{self.max_retries}_retries: {last_error_reason}'
+                                 if self.max_retries > 0 else last_error_reason),
             }
             # ---- P0-②：记录失败，连续失败达阈值则冻结冷却 ----
             if self._source_freeze:

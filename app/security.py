@@ -55,6 +55,9 @@ ALLOWED_SCHEMES = frozenset(
     {
         'http',
         'https',
+        'rtmp',
+        'rtsp',
+        'rtp',
     }
 )
 
@@ -204,7 +207,17 @@ XSS_PATTERNS = [
     re.compile(r'<script[^>]*>', re.I),
     re.compile(r'</script>', re.I),
     re.compile(r'javascript\s*:', re.I),
-    re.compile(r'on\w+\s*=', re.I),
+    # 仅匹配真正的 HTML 事件处理器（XSS 向量）；
+    # 切勿写成宽泛的 on\w+=，否则会误伤流媒体 URL 中大量合法的 query 参数名
+    # （contentid=、sessionid=、action=、region= 等含 'on' 子串），导致海量有效
+    # 频道地址在「源文件解析」阶段被安全审查静默丢弃（实测静默砍掉约 15% 地址）。
+    re.compile(
+        r'\bon(?:abort|blur|change|click|contextmenu|dblclick|drag|dragend|'
+        r'dragenter|dragleave|dragover|drop|error|focus|input|keydown|keypress|'
+        r'keyup|load|mousedown|mouseenter|mouseleave|mousemove|mouseout|'
+        r'mouseover|mouseup|reset|resize|scroll|select|submit|unload|wheel)\s*=',
+        re.I,
+    ),
     re.compile(r'<iframe[^>]*>', re.I),
     re.compile(r'<embed[^>]*>', re.I),
     re.compile(r'<object[^>]*>', re.I),
@@ -276,7 +289,7 @@ def validate_url(url: str) -> dict[str, Any]:
         return result
 
     if scheme not in ALLOWED_SCHEMES:
-        result['reason'] = f'不支持的协议: {scheme}（仅支持 http/https）'
+        result['reason'] = f'不支持的协议: {scheme}（仅支持 http/https/rtmp/rtsp/rtp）'
         return result
 
     host = parsed.hostname or parsed.netloc
@@ -390,6 +403,57 @@ def is_safe_url(url: str) -> tuple[bool, str]:
     """快捷函数：判断 URL 是否安全"""
     result = validate_url(url)
     return result['safe'], result['reason']
+
+
+def is_static_safe(url: str) -> tuple[bool, str, str]:
+    """解析阶段用的「窄门禁」：只保服务器，不做联网 / 内容策略检查。
+
+    直播源是给用户看的，用户网络 ≠ 服务器网络；可达性应由 StreamTester 在测试
+    阶段判定（解析不了 → connection_failed 分类），不应在解析阶段用 DNS 预筛把
+    合法源静默蒸发。URL 字符串级的 XSS / 命令注入 / 路径穿越对以参数列表调用的
+    ffprobe 不构成威胁，且 UI 渲染由 Jinja2 自动转义保障。
+
+    本函数仅做三件事：
+      1. 协议白名单 (http/https)
+      2. 主机格式合法
+      3. SSRF：拒绝私有 / 回环 / 链路本地 / 元数据 IP 以及 localhost/internal 等自引用主机
+
+    相对原 is_safe_url / validate_url 故意移除：
+      - DNS 解析验证（会误杀本机不可达但用户可看的源）
+      - URL 级 XSS / 命令注入 / 路径遍历
+      - 境外流媒体拦截 / 域名黑白名单（内容策略，不应静默丢弃）
+
+    Returns:
+        (safe, reason, category)  category ∈ {'ok', 'scheme', 'host', 'ssrf'}
+    """
+    if not url or not url.strip():
+        return False, 'URL 为空', 'host'
+
+    clean_url = url.strip().split('|')[0].split('#')[0]
+    try:
+        parsed = urlparse(clean_url)
+    except Exception as e:
+        return False, f'URL 解析失败: {e}', 'host'
+
+    scheme = (parsed.scheme or '').lower()
+    if not scheme:
+        return False, 'URL 缺少协议 scheme', 'scheme'
+    if scheme not in ALLOWED_SCHEMES:
+        return False, f'不支持的协议: {scheme}（仅支持 http/https/rtmp/rtsp/rtp）', 'scheme'
+
+    host = (parsed.hostname or parsed.netloc or '').strip().lower()
+    if not host:
+        return False, 'URL 缺少主机地址', 'host'
+    if not _is_valid_host(host):
+        return False, f'无效的主机地址格式: {host}', 'host'
+
+    # ---- SSRF 防护：拒绝服务器自引用 / 内网地址 ----
+    if host == 'localhost' or host.endswith('.localhost') or host.endswith('.local') or host.endswith('.internal'):
+        return False, f'拒绝自引用主机(SSRF): {host}', 'ssrf'
+    if _is_private_ip(host):
+        return False, f'私有/内网 IP 被拒绝(SSRF): {host}', 'ssrf'
+
+    return True, '', 'ok'
 
 
 # ============================================================

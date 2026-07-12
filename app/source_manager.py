@@ -48,7 +48,7 @@ except ImportError:
 from app.config import Config
 from app.exceptions import SourceDownloadError, SourceParseError
 from app.rules import ChannelRules
-from app.security import is_safe_url
+from app.security import is_static_safe
 
 
 class SourceManager:
@@ -70,6 +70,8 @@ class SourceManager:
         self.github_config = config.get_github_config()
         self.user_agents = config.get_user_agents()
         self.ua_enabled = config.is_ua_enabled()
+        # 解析阶段被「窄门禁」排除的 URL 汇总（可见化，杜绝静默丢弃）
+        self.last_parse_exclusion_summary: dict = {'total': 0, 'by_category': {}, 'samples': []}
         # 从 local_dirs 配置派生 online_dir（同级 online 目录），兼容 Docker/本地
         # 规范化：过滤空字符串/空白项（DB 中可能存为 ['']），否则会被视为「有值」而误把
         # online_dir 解析到错误的根 online/ 目录，与 source-files API 使用的 config/online 不一致。
@@ -437,10 +439,10 @@ class SourceManager:
         Returns:
             Optional[str]: 成功下载的文件路径,失败返回None
         """
-        # ---- 纪码增强:URL安全审查 ----
-        safe, reason = is_safe_url(url)
+        # ---- 解析阶段窄门禁：仅 SSRF + 协议/格式，不做 DNS/XSS/境外/黑白名单 ----
+        safe, reason, category = is_static_safe(url)
         if not safe:
-            self.logger.warning(f'URL安全审查未通过,跳过下载: {url} - {reason}')
+            self.logger.warning(f'URL安全审查未通过(窄门禁:{category}),跳过下载: {url} - {reason}')
             return None
 
         # 根据下载方式选择策略
@@ -581,13 +583,14 @@ class SourceManager:
             List[Dict]: 解析后的源数据列表
         """
         all_sources = []
+        exclusions: list = []  # 解析阶段被「窄门禁」排除的 URL（可见化，杜绝静默丢弃）
 
         # 解析本地文件
         local_dirs = self.config.get_sources()['local_dirs']
         for local_dir in local_dirs:
             if os.path.exists(local_dir):
                 try:
-                    sources = self.parse_local_files(local_dir)
+                    sources = self.parse_local_files(local_dir, exclusions=exclusions)
                     all_sources.extend(sources)
                     self.logger.info(f'成功解析本地目录 {local_dir}: {len(sources)} 个源')
                 except Exception as e:
@@ -595,14 +598,38 @@ class SourceManager:
 
         # 解析在线文件
         try:
-            online_sources = self.parse_local_files(self.online_dir)
+            online_sources = self.parse_local_files(self.online_dir, exclusions=exclusions)
             all_sources.extend(online_sources)
             self.logger.info(f'成功解析在线目录: {len(online_sources)} 个源')
         except Exception as e:
             self.logger.error(f'解析在线文件失败: {e}')
 
-        self.logger.info(f'成功解析 {len(all_sources)} 个源')
+        self.last_parse_exclusion_summary = self.summarize_exclusions(exclusions)
+        self.logger.info(
+            f'成功解析 {len(all_sources)} 个源；解析阶段窄门禁排除 {len(exclusions)} 个 '
+            f'(分类: {self.last_parse_exclusion_summary["by_category"]})'
+        )
         return all_sources
+
+    def summarize_exclusions(self, exclusions: list) -> dict:
+        """汇总解析阶段被「窄门禁」排除的 URL，供 UI/日志可见化。
+
+        Args:
+            exclusions: parse_file/parse_local_files 累计的排除记录列表
+                        [{'url':..., 'reason':..., 'category':...}, ...]
+
+        Returns:
+            {'total': int, 'by_category': {cat: count}, 'samples': [前20条]}
+        """
+        by_category: dict[str, int] = {}
+        for item in exclusions:
+            cat = item.get('category', 'unknown')
+            by_category[cat] = by_category.get(cat, 0) + 1
+        return {
+            'total': len(exclusions),
+            'by_category': by_category,
+            'samples': exclusions[:20],
+        }
 
     def apply_ua_settings(self, sources: list[dict]) -> list[dict]:
         """对已解析的源数据应用文件级 UA 设置和频道级 UA 覆盖。
@@ -669,17 +696,20 @@ class SourceManager:
 
         return sources
 
-    def parse_local_files(self, directory: str) -> list[dict]:
+    def parse_local_files(self, directory: str, exclusions: list | None = None) -> list[dict]:
         """
         解析本地目录中的所有源文件
 
         Args:
             directory: 目录路径
+            exclusions: 可选，被「窄门禁」排除的 URL 记录列表（累计用）
 
         Returns:
             List[Dict]: 解析后的源数据列表
         """
         sources = []
+        if exclusions is None:
+            exclusions = []
 
         # 遍历目录中的所有文件
         for root, _, files in os.walk(directory):
@@ -688,7 +718,7 @@ class SourceManager:
                 if file.endswith(('.m3u', '.m3u8', '.txt')):
                     file_path = os.path.join(root, file)
                     try:
-                        file_sources = self.parse_file(file_path)
+                        file_sources = self.parse_file(file_path, exclusions=exclusions)
                         sources.extend(file_sources)
                         self.logger.debug(f'成功解析文件 {file_path}: {len(file_sources)} 个源')
                     except Exception as e:
@@ -696,7 +726,7 @@ class SourceManager:
 
         return sources
 
-    def parse_file(self, file_path: str, file_ua: dict | None = None) -> list[dict]:
+    def parse_file(self, file_path: str, file_ua: dict | None = None, exclusions: list | None = None) -> list[dict]:
         """
         解析单个源文件
 
@@ -704,6 +734,8 @@ class SourceManager:
             file_path: 文件路径
             file_ua: 可选的文件级 UA 配置 {"enabled": bool, "ua_value": str, "ua_position": str}
                      由 Web API 传入，优先于 self.user_agents 的文件级配置
+            exclusions: 可选，被「窄门禁」排除的 URL 记录列表（由调用方传入以累计；
+                      单文件调用不传则为一次性本地列表，不对外暴露）
 
         Returns:
             List[Dict]: 解析后的源数据列表
@@ -712,6 +744,8 @@ class SourceManager:
             SourceParseError: 文件不可读或格式无法解析时抛出
         """
         sources = []
+        if exclusions is None:
+            exclusions = []
 
         # 确定源类型(在线或本地)
         source_type = 'online' if file_path.startswith(self.online_dir) else 'local'
@@ -791,10 +825,11 @@ class SourceManager:
                         # UA 优先级：URL 内联 > #EXTVLCOPT > EXTINF 属性 > 文件级配置
                         url_user_agent = extvlc_user_agent or extinf_ua or file_ua_value
 
-                        # ---- 纪码增强:URL安全审查 ----
-                        safe, reason = is_safe_url(stream_url)
+                        # ---- 解析阶段窄门禁：仅 SSRF + 协议/格式，不做 DNS/XSS/境外/黑白名单 ----
+                        safe, reason, category = is_static_safe(stream_url)
                         if not safe:
-                            self.logger.debug(f'URL安全审查未通过,跳过: {stream_url} - {reason}')
+                            exclusions.append({'url': stream_url, 'reason': reason, 'category': category})
+                            self.logger.info(f'解析跳过(窄门禁:{category}): {stream_url} - {reason}')
                             i += 1
                             continue
 
@@ -829,11 +864,12 @@ class SourceManager:
             else:
                 # 处理简单URL格式
                 if line and not line.startswith('#') and self.is_valid_url(line):
-                    # ---- 纪码增强:URL安全审查 ----
+                    # ---- 解析阶段窄门禁 ----
                     clean_line_url = line.split('|')[0]
-                    safe, reason = is_safe_url(clean_line_url)
+                    safe, reason, category = is_static_safe(clean_line_url)
                     if not safe:
-                        self.logger.debug(f'URL安全审查未通过,跳过: {clean_line_url} - {reason}')
+                        exclusions.append({'url': clean_line_url, 'reason': reason, 'category': category})
+                        self.logger.info(f'解析跳过(窄门禁:{category}): {clean_line_url} - {reason}')
                         i += 1
                         continue
 

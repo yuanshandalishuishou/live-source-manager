@@ -201,6 +201,12 @@ SECTION_SCHEMA: dict[str, dict[str, tuple]] = {
         'global_blacklist': ('str', '', '全局黑名单', '命中(URL/host)的源跳过测试，逗号或换行分隔'),
         'global_whitelist': ('str', '', '全局白名单', 'URL/host 清单，豁免于黑名单与冻结，逗号或换行分隔'),
         'output_sort_by': ('str', 'speed', '输出排序', 'speed=快源在前；name=按名；resolution=按分辨率'),
+        'max_test_attempts': (
+            'int',
+            '1',
+            '实时测试次数',
+            '每个地址的总测试次数：1=测一次；2=测两次(含1次自动重试)；默认1',
+        ),
     },
     'Output': {
         'filename': ('str', 'live.m3u', '输出文件名'),
