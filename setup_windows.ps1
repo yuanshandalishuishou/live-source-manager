@@ -461,6 +461,13 @@ function Main-Install {
     Write-Host "  cd $ProjectDir" -ForegroundColor Yellow
     Write-Host "  .venv\Scripts\python.exe -m uvicorn web.webapp:app --host 0.0.0.0 --port 23456" -ForegroundColor Yellow
     Write-Host ""
+
+    # 8. 注册 Windows 开机自启任务（任务计划程序）
+    try {
+        & "$ProjectDir\deploy\windows\install-autostart.ps1" -ProjectDir $ProjectDir
+    } catch {
+        Write-Warn "开机自启任务注册失败（不影响手动启动）: $_"
+    }
 }
 
 # 执行主安装流程
