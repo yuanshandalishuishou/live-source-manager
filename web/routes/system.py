@@ -145,7 +145,17 @@ async def api_test_status(current_user: dict = Depends(get_current_user)):
                 return json.load(f)
         except Exception as e:
             logger.warning(f'读取 latest_test.json 失败: {e}')
-    return {'status': 'idle', 'progress': 0, 'message': '暂无测试数据'}
+    return {
+        'status': 'idle',
+        'progress': 0,
+        'completed': 0,
+        'total': 0,
+        'passed': 0,
+        'failed': 0,
+        'error_breakdown': {},
+        'results': [],
+        'message': '暂无测试数据',
+    }
 
 
 @router.post('/api/test/trigger')
@@ -516,9 +526,65 @@ _test_state: dict = {
     'completed': 0,
     'passed': 0,
     'failed': 0,
+    'error_breakdown': {},
     'results': [],
     'note': '',
 }
+
+# 失败原因 → 聚合类别映射（供「实时测试结果」页按错误类别聚合统计）。
+# 覆盖 StreamTester.test_single_stream 产生的所有 error_reason 形态：
+#  - 带 'cat: raw' 前缀（如 connection_failed: ... Error number -138）
+#  - 无前缀特殊原因（network_incompatible / ad_playlist / timeout / frozen until / ...）
+def categorize_reason(reason):
+    if not reason:
+        return 'unknown'
+    r = reason.lower()
+    # 剥离 'after_N_retries: ' 外层包裹（真实 reason 形如 after_2_retries: connection_failed: ...）
+    if r.startswith('after_') and ':' in r:
+        reason = reason.split(':', 1)[1].strip()
+        r = reason.lower()
+    # 无 'cat:' 前缀的特殊原因
+    if r.startswith('timeout') or '单源测试超过' in r:
+        return 'timeout'
+    if r.startswith('network_incompatible'):
+        return 'network_incompatible'
+    if r.startswith('ad_playlist'):
+        return 'ad_playlist'
+    if r.startswith('no_valid_streams'):
+        return 'no_valid_streams'
+    if r.startswith('no_probe_tool_available'):
+        return 'no_probe_tool_available'
+    if r.startswith('json_parse_error'):
+        return 'json_parse_error'
+    if r.startswith('global_blacklist'):
+        return 'global_blacklist'
+    if r.startswith('frozen until'):
+        return 'frozen'
+    if r.startswith('aborted'):
+        return 'aborted'
+    if r.startswith('exception:'):
+        return 'exception'
+    # 带 'cat: raw' 前缀：提取 cat 部分
+    if ':' in reason:
+        head = reason.split(':', 1)[0].strip().lower()
+        _known = {
+            'connection_failed', 'connection_refused', 'dns_failed', 'auth_blocked',
+            'not_found', 'ffprobe_error', 'ffprobe_failed_no_output',
+        }
+        if head in _known:
+            return head
+    # 兜底（极少触发）：按关键词粗分
+    if 'error number -138' in r or 'connection failed' in r or 'could not connect' in r:
+        return 'connection_failed'
+    if 'name or service not known' in r or 'resolve' in r or 'getaddrinfo' in r:
+        return 'dns_failed'
+    if '403' in r or '401' in r or 'forbidden' in r or 'unauthorized' in r or 'expired' in r:
+        return 'auth_blocked'
+    if '404' in r or 'not found' in r:
+        return 'not_found'
+    return 'ffprobe_error'
+
+
 _test_lock = threading.Lock()
 _test_thread: threading.Thread | None = None
 _app_loop: asyncio.AbstractEventLoop | None = None
@@ -656,6 +722,7 @@ def _run_test_task(sources: list[dict], limit: int | None = None, gen: int = 0) 
                 'completed': 0,
                 'passed': 0,
                 'failed': 0,
+                'error_breakdown': {},
                 'results': [],
                 'note': '',
             }
@@ -678,6 +745,7 @@ def _run_test_task(sources: list[dict], limit: int | None = None, gen: int = 0) 
                 'completed': 0,
                 'passed': 0,
                 'failed': 0,
+                'error_breakdown': {},
                 'results': [],
                 'note': '',
             }
@@ -841,6 +909,7 @@ def _run_test_task(sources: list[dict], limit: int | None = None, gen: int = 0) 
             'completed': 0,
             'passed': 0,
             'failed': 0,
+            'error_breakdown': {},
             'results': [
                 {
                     'name': s.get('name', s.get('url', '?')),
@@ -976,6 +1045,9 @@ def _run_test_task(sources: list[dict], limit: int | None = None, gen: int = 0) 
                             _test_state['passed'] += 1
                         else:
                             _test_state['failed'] += 1
+                            _cat = categorize_reason(entry.get('reason'))
+                            entry['category'] = _cat
+                            _test_state['error_breakdown'][_cat] = _test_state['error_breakdown'].get(_cat, 0) + 1
                 if gen == _test_gen:
                     _publish_test_state()
                 else:

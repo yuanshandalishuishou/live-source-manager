@@ -79,6 +79,7 @@
     <div class="card">
         <div class="card-header"><h3>测试结果 <span id="result-count" style="font-weight:400;color:var(--text-light)">(0)</span></h3></div>
         <div class="card-body" id="test-results">
+            <div class="error-breakdown" id="error-breakdown"></div>
             <div class="empty-state" style="text-align:center;padding:40px;color:var(--text-light)">
                 暂无测试数据
             </div>
@@ -99,10 +100,59 @@ table.test-table th { position: sticky; top: 0; background: var(--card-bg, #fff)
 .tag-online { background: rgba(34,197,94,.15); color: #16a34a; }
 .tag-local { background: rgba(59,130,246,.15); color: #2563eb; }
 .src-path { word-break: break-all; max-width: 420px; line-height: 1.45; font-size: 12px; color: var(--text-light); white-space: normal; }
+
+/* 错误类别列 */
+.cat-badge { display: inline-block; padding: 2px 9px; border-radius: 12px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+.cat-none { color: var(--text-light); }
+.cat-connection_failed, .cat-connection_refused { background: rgba(239,68,68,.15); color: #dc2626; }
+.cat-dns_failed { background: rgba(217,119,6,.15); color: #d97706; }
+.cat-auth_blocked { background: rgba(168,85,247,.15); color: #9333ea; }
+.cat-not_found { background: rgba(100,116,139,.15); color: #475569; }
+.cat-timeout { background: rgba(234,179,8,.18); color: #ca8a04; }
+.cat-network_incompatible { background: rgba(71,85,105,.15); color: #475569; }
+.cat-ad_playlist { background: rgba(236,72,153,.15); color: #db2777; }
+.cat-no_valid_streams, .cat-no_probe_tool_available, .cat-json_parse_error { background: rgba(148,163,184,.18); color: #64748b; }
+.cat-frozen { background: rgba(56,189,248,.15); color: #0284c7; }
+.cat-aborted { background: rgba(156,163,175,.15); color: #6b7280; }
+.cat-exception { background: rgba(239,68,68,.12); color: #b91c1c; }
+.cat-ffprobe_error, .cat-ffprobe_failed_no_output, .cat-unknown, .cat-other { background: rgba(148,163,184,.15); color: #64748b; }
+
+/* 失败原因分布面板 */
+.error-breakdown { margin: 12px 0 4px; padding: 10px 12px; background: var(--card-bg, #fff); border: 1px solid var(--border, #eee); border-radius: 10px; }
+.bd-title { font-size: 12px; font-weight: 600; color: var(--text-light); margin-bottom: 8px; }
+.bd-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.bd-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 13px; font-size: 12px; cursor: pointer; border: 1px solid transparent; transition: transform .12s, box-shadow .12s; }
+.bd-chip:hover { transform: translateY(-1px); box-shadow: 0 2px 8px rgba(0,0,0,.12); }
+.bd-chip b { font-weight: 700; }
+.bd-chip.active { outline: 2px solid var(--accent, #3b82f6); }
+.bd-clear { font-size: 11px; color: var(--accent, #3b82f6); cursor: pointer; padding: 3px 8px; }
 </style>
 <script>
 let testWS = null;
 let testData = null;
+
+// 错误类别 → 中文标签（供「错误类别」列与「失败原因分布」面板展示）
+const CATEGORY_LABELS = {
+    'connection_failed': '连接失败',
+    'connection_refused': '连接被拒',
+    'dns_failed': 'DNS解析失败',
+    'auth_blocked': '鉴权/防盗链',
+    'not_found': '资源不存在',
+    'timeout': '超时',
+    'network_incompatible': '网络不兼容',
+    'ad_playlist': '广告/占位源',
+    'no_valid_streams': '无有效流',
+    'no_probe_tool_available': '无探测工具',
+    'json_parse_error': '解析错误',
+    'global_blacklist': '全局黑名单',
+    'frozen': '已冻结冷却',
+    'aborted': '已中断',
+    'exception': '异常',
+    'ffprobe_error': 'ffprobe错误',
+    'ffprobe_failed_no_output': 'ffprobe无输出',
+    'unknown': '未知',
+};
+let currentCategoryFilter = '';  // 点击「失败原因分布」chip 时设置的类别筛选
 let _lastCompleted = -1;        // 上次记录的已完成数，用于停滞检测
 let _lastMoveTime = Date.now(); // 上次进度变化时间
 
@@ -193,6 +243,7 @@ function renderTestUI() {
     // Update stats
     updateStats(total, completed, passed, failed);
 
+    renderErrorBreakdown();
     // Results list
     renderResults();
 
@@ -205,6 +256,36 @@ function truncateStr(s, n) {
     return s.length > n ? s.substring(0, n) + '…' : s;
 }
 
+function renderErrorBreakdown() {
+    const box = document.getElementById('error-breakdown');
+    if (!box) return;
+    const bd = (testData && testData.error_breakdown) || {};
+    const keys = Object.keys(bd).sort(function(a, b) { return bd[b] - bd[a]; });
+    if (!keys.length) { box.innerHTML = ''; return; }
+    let html = '<div class="bd-title">失败原因分布（点击类别可筛选结果）</div><div class="bd-chips">';
+    keys.forEach(function(k) {
+        const label = CATEGORY_LABELS[k] || k;
+        const active = (currentCategoryFilter === k) ? ' active' : '';
+        html += '<span class="bd-chip cat-' + k + active + '" onclick="filterByCategory(\'' + k + '\')">'
+              + escapeHtml(label) + ' <b>' + bd[k] + '</b></span>';
+    });
+    if (currentCategoryFilter) {
+        html += '<span class="bd-clear" onclick="clearCategoryFilter()">清除筛选</span>';
+    }
+    html += '</div>';
+    box.innerHTML = html;
+}
+function filterByCategory(k) {
+    currentCategoryFilter = (currentCategoryFilter === k) ? '' : k;
+    renderErrorBreakdown();
+    renderResults();
+}
+function clearCategoryFilter() {
+    currentCategoryFilter = '';
+    renderErrorBreakdown();
+    renderResults();
+}
+
 function renderResults() {
     const container = document.getElementById('test-results');
     const results = (testData && testData.results) || [];
@@ -215,8 +296,13 @@ function renderResults() {
         return;
     }
 
-    // 类别筛选已移除，直接展示全部结果
+    // 按错误类别筛选（点击「失败原因分布」中的类别 chip 时生效）
     let filtered = results;
+    if (currentCategoryFilter) {
+        filtered = results.filter(function(r) {
+            return r.status === 'failed' && r.category === currentCategoryFilter;
+        });
+    }
 
     // Sort: testing first, then failed, then passed
     var order = {'testing': 0, 'failed': 1, 'passed': 2, 'waiting': 3};
@@ -225,7 +311,7 @@ function renderResults() {
     });
 
     let html = '<div class="test-results-wrap"><table class="test-table"><thead><tr>'
-        + '<th>频道</th><th>状态</th><th>真实地址</th><th>所在源</th><th>详情</th>'
+        + '<th>频道</th><th>状态</th><th>真实地址</th><th>所在源</th><th>错误类别</th><th>详情</th>'
         + '</tr></thead><tbody>';
     filtered.forEach(function(r) {
         var statusClass = r.status;
@@ -263,6 +349,13 @@ function renderResults() {
         } else {
             html += '<td><div class="src-path">' + escapeHtml(src) + '</div></td>';
         }
+        // 错误类别列
+        var catLabel = '', catCls = '';
+        if (r.status === 'failed' && r.category) {
+            catLabel = CATEGORY_LABELS[r.category] || r.category;
+            catCls = 'cat-' + r.category;
+        }
+        html += '<td>' + (catLabel ? '<span class="cat-badge ' + catCls + '">' + escapeHtml(catLabel) + '</span>' : '<span class="cat-none">—</span>') + '</td>';
         html += '<td>' + detail + '</td>';
         html += '</tr>';
     });
