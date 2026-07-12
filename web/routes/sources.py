@@ -126,8 +126,14 @@ def _write_github_sources_to_db(sources: list):
 # ── GitHub 源下载方式配置 ─────────────────────
 
 GITHUB_DOWNLOAD_METHODS = {
-    'raw': {'label': 'raw.githubusercontent.com', 'desc': '直接通过 raw.githubusercontent.com 下载（默认）'},
-    'api': {'label': 'GitHub API', 'desc': '通过 api.github.com 内容接口下载（有速率限制）'},
+    'raw': {
+        'label': 'raw.githubusercontent.com',
+        'desc': '直接通过 raw.githubusercontent.com 下载（默认）',
+    },
+    'api': {
+        'label': 'GitHub API',
+        'desc': '通过 api.github.com 内容接口下载（有速率限制）',
+    },
     'proxy': {'label': 'SOCKS/HTTP 代理', 'desc': '通过 Network 配置的代理服务器下载'},
     'mirror': {'label': '代理网站', 'desc': '通过公开镜像站（如 ghproxy.com）中转下载'},
 }
@@ -438,7 +444,12 @@ async def api_create_source(data: dict, request: Request, current_user: dict = D
     # 检查重复
     current_urls = _read_online_urls_from_db()
     if url in current_urls:
-        return {'status': 'exists', 'name': source_name, 'url': url, 'message': '该 URL 已存在，如需要请先删除旧源'}
+        return {
+            'status': 'exists',
+            'name': source_name,
+            'url': url,
+            'message': '该 URL 已存在，如需要请先删除旧源',
+        }
 
     # 追加到配置
     current_urls.append(url)
@@ -481,11 +492,22 @@ async def api_create_source(data: dict, request: Request, current_user: dict = D
         except Exception:
             pass
 
-    return {'status': 'created', 'name': source_name, 'url': url, 'download': download_status, 'message': msg}
+    return {
+        'status': 'created',
+        'name': source_name,
+        'url': url,
+        'download': download_status,
+        'message': msg,
+    }
 
 
 @router.put('/api/sources/{source_id}')
-async def api_update_source(source_id: str, data: dict, request: Request, current_user: dict = Depends(require_admin)):
+async def api_update_source(
+    source_id: str,
+    data: dict,
+    request: Request,
+    current_user: dict = Depends(require_admin),
+):
     """更新源：支持修改 URL（重新下载）或修改名称/分组"""
     source = get_source_by_id(source_id)
     if not source:
@@ -533,7 +555,11 @@ async def api_update_source(source_id: str, data: dict, request: Request, curren
         detail=json.dumps({'old': old_url, 'new': new_url, 'changes': changes}, ensure_ascii=False),
         ip_address=request.client.host if request.client else '',
     )
-    return {'status': 'updated', 'changes': changes, 'message': '; '.join(changes) if changes else '无变更'}
+    return {
+        'status': 'updated',
+        'changes': changes,
+        'message': '; '.join(changes) if changes else '无变更',
+    }
 
 
 @router.delete('/api/sources/{source_id}')
@@ -600,7 +626,12 @@ async def api_delete_source(source_id: str, request: Request, current_user: dict
         action='source_delete',
         target=target_name,
         detail=json.dumps(
-            {'url': source_url, 'file_deleted': deleted_file, 'config_removed': removed_from_config}, ensure_ascii=False
+            {
+                'url': source_url,
+                'file_deleted': deleted_file,
+                'config_removed': removed_from_config,
+            },
+            ensure_ascii=False,
         ),
         ip_address=request.client.host if request.client else '',
     )
@@ -805,7 +836,10 @@ async def api_create_source_file(data: dict, request: Request, current_user: dic
             username=current_user['username'],
             action='source_file_add',
             target=value,
-            detail=json.dumps({'type': 'online', 'url': value, 'download': download_status}, ensure_ascii=False),
+            detail=json.dumps(
+                {'type': 'online', 'url': value, 'download': download_status},
+                ensure_ascii=False,
+            ),
             ip_address=request.client.host if request.client else '',
         )
         msg = '在线源已添加'
@@ -813,7 +847,12 @@ async def api_create_source_file(data: dict, request: Request, current_user: dic
             msg += '，文件已下载'
         elif download_status == 'download_failed':
             msg += '，但下载失败（可稍后重试采集）'
-        return {'status': 'created', 'type': 'online', 'download': download_status, 'message': msg}
+        return {
+            'status': 'created',
+            'type': 'online',
+            'download': download_status,
+            'message': msg,
+        }
 
     elif src_type == 'github':
         # 检查重复
@@ -837,7 +876,8 @@ async def api_create_source_file(data: dict, request: Request, current_user: dic
         reset_source_manager_cache()
 
         method_label = GITHUB_DOWNLOAD_METHODS.get(
-            download_method or GITHUB_DOWNLOAD_METHOD_DEFAULT, GITHUB_DOWNLOAD_METHODS[GITHUB_DOWNLOAD_METHOD_DEFAULT]
+            download_method or GITHUB_DOWNLOAD_METHOD_DEFAULT,
+            GITHUB_DOWNLOAD_METHODS[GITHUB_DOWNLOAD_METHOD_DEFAULT],
         )
         models.add_audit_log(
             user_id=current_user['user_id'],
@@ -915,7 +955,10 @@ async def api_delete_source_file(file_id: str, request: Request, current_user: d
                 username=current_user['username'],
                 action='source_file_delete',
                 target=url,
-                detail=json.dumps({'type': 'online', 'url': url, 'file_deleted': deleted_file}, ensure_ascii=False),
+                detail=json.dumps(
+                    {'type': 'online', 'url': url, 'file_deleted': deleted_file},
+                    ensure_ascii=False,
+                ),
                 ip_address=request.client.host if request.client else '',
             )
             msg = '在线源已删除'
@@ -969,7 +1012,10 @@ async def api_delete_source_file(file_id: str, request: Request, current_user: d
 
 @router.put('/api/source-files/{file_id}')
 async def api_update_source_file(
-    file_id: str, data: dict, request: Request, current_user: dict = Depends(require_admin)
+    file_id: str,
+    data: dict,
+    request: Request,
+    current_user: dict = Depends(require_admin),
 ):
     """更新源文件配置（目前仅支持 GitHub 源的下载方式修改）
 
@@ -995,7 +1041,8 @@ async def api_update_source_file(
                 action='source_file_update',
                 target=entry,
                 detail=json.dumps(
-                    {'type': 'github', 'entry': entry, 'download_method': new_method}, ensure_ascii=False
+                    {'type': 'github', 'entry': entry, 'download_method': new_method},
+                    ensure_ascii=False,
                 ),
                 ip_address=request.client.host if request.client else '',
             )
@@ -1051,7 +1098,13 @@ async def api_get_source_file_channels(
     """
     sm = _load_source_manager()
     if not sm:
-        return {'channels': [], 'total': 0, 'page': page, 'size': size, 'message': 'SourceManager 加载失败'}
+        return {
+            'channels': [],
+            'total': 0,
+            'page': page,
+            'size': size,
+            'message': 'SourceManager 加载失败',
+        }
 
     # 1. 在线 URL 源
     online_urls = _read_online_urls_from_db()
@@ -1062,7 +1115,12 @@ async def api_get_source_file_channels(
             if os.path.isfile(file_path):
                 # D-1 修复：parse_file 在 worker 线程执行
                 exclusions = []
-                channels = await asyncio.to_thread(sm.parse_file, file_path, file_ua=file_ua if file_ua else None, exclusions=exclusions)
+                channels = await asyncio.to_thread(
+                    sm.parse_file,
+                    file_path,
+                    file_ua=file_ua if file_ua else None,
+                    exclusions=exclusions,
+                )
                 channels = _enrich_channels_with_mappings(channels)
                 channels = _apply_channel_ua_overrides(channels)
                 result = _paginate_channels(channels, page, size, search)
@@ -1089,7 +1147,12 @@ async def api_get_source_file_channels(
                 # D-3 修复：带缓存 + 总超时（20s）的 GitHub 源发现
                 discovered = await _discover_github_cached(sm, entry, download_methods)
             except Exception as e:
-                return {'channels': [], 'total': 0, 'file_name': entry, 'message': f'GitHub API 调用失败: {e}'}
+                return {
+                    'channels': [],
+                    'total': 0,
+                    'file_name': entry,
+                    'message': f'GitHub API 调用失败: {e}',
+                }
 
             all_channels = []
             exclusions = []
@@ -1101,7 +1164,12 @@ async def api_get_source_file_channels(
                 file_path = os.path.join(sm.online_dir, filename)
                 if os.path.isfile(file_path):
                     # D-1 修复：parse_file 在 worker 线程执行
-                    channels = await asyncio.to_thread(sm.parse_file, file_path, file_ua=file_ua if file_ua else None, exclusions=exclusions)
+                    channels = await asyncio.to_thread(
+                        sm.parse_file,
+                        file_path,
+                        file_ua=file_ua if file_ua else None,
+                        exclusions=exclusions,
+                    )
                     all_channels.extend(channels)
                     matched_files += 1
 
@@ -1171,7 +1239,12 @@ async def api_get_source_file_channels(
             exclusions = []
             if os.path.isfile(abs_path):
                 # D-1 修复：parse_file 在 worker 线程执行
-                all_channels = await asyncio.to_thread(sm.parse_file, abs_path, file_ua=file_ua if file_ua else None, exclusions=exclusions)
+                all_channels = await asyncio.to_thread(
+                    sm.parse_file,
+                    abs_path,
+                    file_ua=file_ua if file_ua else None,
+                    exclusions=exclusions,
+                )
             elif os.path.isdir(abs_path):
                 all_channels = sm.parse_local_files(abs_path, exclusions=exclusions)
                 # 对本地目录也应用文件级 UA
@@ -1196,7 +1269,10 @@ async def api_get_source_file_channels(
 
 @router.put('/api/source-files/{file_id}/ua')
 async def api_set_source_file_ua(
-    file_id: str, data: dict, request: Request, current_user: dict = Depends(require_admin)
+    file_id: str,
+    data: dict,
+    request: Request,
+    current_user: dict = Depends(require_admin),
 ):
     """设置源文件的文件级 UA 配置
 
@@ -1234,7 +1310,11 @@ async def api_set_source_file_ua(
         detail=json.dumps(ua_settings, ensure_ascii=False),
         ip_address=request.client.host if request.client else '',
     )
-    return {'status': 'ok', 'ua_settings': ua_settings, 'message': f'UA 设置已{"启用" if enabled else "关闭"}'}
+    return {
+        'status': 'ok',
+        'ua_settings': ua_settings,
+        'message': f'UA 设置已{"启用" if enabled else "关闭"}',
+    }
 
 
 @router.delete('/api/source-files/{file_id}/ua')
@@ -1261,7 +1341,12 @@ async def api_del_source_file_ua(file_id: str, request: Request, current_user: d
 
 
 @router.put('/api/source-files/{file_id}/channel-ua')
-async def api_set_channel_ua(file_id: str, data: dict, request: Request, current_user: dict = Depends(require_admin)):
+async def api_set_channel_ua(
+    file_id: str,
+    data: dict,
+    request: Request,
+    current_user: dict = Depends(require_admin),
+):
     """设置频道级 UA 覆盖
 
     请求体: {url: str, ua_value: str, ua_position: "extinf"|"url"}
@@ -1296,7 +1381,10 @@ async def api_set_channel_ua(file_id: str, data: dict, request: Request, current
 
 @router.delete('/api/source-files/{file_id}/channel-ua')
 async def api_del_channel_ua(
-    file_id: str, request: Request, url: str = Query(...), current_user: dict = Depends(require_admin)
+    file_id: str,
+    request: Request,
+    url: str = Query(...),
+    current_user: dict = Depends(require_admin),
 ):
     """删除频道级 UA 覆盖
 

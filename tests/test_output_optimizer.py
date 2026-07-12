@@ -99,7 +99,10 @@ class TestOutputSortBy:
 class TestWhitelistForceKeep:
     def test_whitelist_kept_despite_filter(self):
         # 启用过滤 + 白名单强制保留：白名单源（速度低于 min_speed）仍进输出
-        gen = _make_gen({'enable_filter': True, 'whitelist_force_keep': True}, whitelist='keep.example.com')
+        gen = _make_gen(
+            {'enable_filter': True, 'whitelist_force_keep': True},
+            whitelist='keep.example.com',
+        )
         srcs = [
             _src('keep', 10),  # download_speed=10 < min_speed=50，但白名单应保留
             _src('good', 200),
@@ -111,7 +114,10 @@ class TestWhitelistForceKeep:
 
     def test_whitelist_disabled_drops_slow(self):
         # 未启用强制保留：慢源被过滤掉
-        gen = _make_gen({'enable_filter': True, 'whitelist_force_keep': False}, whitelist='keep.example.com')
+        gen = _make_gen(
+            {'enable_filter': True, 'whitelist_force_keep': False},
+            whitelist='keep.example.com',
+        )
         srcs = [_src('keep', 10), _src('good', 200)]
         filtered = gen.enhanced_filter_sources(srcs)
         names = {s['name'] for s in filtered}

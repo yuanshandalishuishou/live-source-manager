@@ -1,35 +1,27 @@
 # pre-commit 配置 — 使用本地安装的工具（避免网络依赖）
-# 工具通过 pip install -e ".[dev]" 安装到 .venv
+# tools invoked via managed venv python absolute path (no project .venv / PATH dependency)
 
 repos:
   # 基础钩子（本地 Python 实现）
   - repo: local
     hooks:
-      - id: trailing-whitespace
-        name: trailing-whitespace
-        entry: python -c "import sys; [print(l.rstrip()) for l in sys.stdin]" ||
-        language: system
-        types: [text]
-        stages: [pre-commit]
-        skip: true  # ruff format 已覆盖
-
       - id: check-yaml
         name: check-yaml
-        entry: python -c "import yaml,sys; yaml.safe_load(open(sys.argv[1]))"
+        entry: C:/Users/Administrator/.workbuddy/binaries/python/envs/default/Scripts/python.exe -c "import yaml,sys; yaml.safe_load(open(sys.argv[1]))"
         language: system
         files: \.(yaml|yml)$
         pass_filenames: true
 
       - id: check-large-files
         name: check-large-files
-        entry: python -c "import os,sys; f=sys.argv[1]; exit(0 if os.path.getsize(f)<500000 else 1)"
+        entry: C:/Users/Administrator/.workbuddy/binaries/python/envs/default/Scripts/python.exe -c "import os,sys; f=sys.argv[1]; exit(0 if os.path.getsize(f)<500000 else 1)"
         language: system
         pass_filenames: true
 
       # Ruff — lint + autofix
       - id: ruff
         name: ruff check
-        entry: ruff check --fix --exit-non-zero-on-fix
+        entry: C:/Users/Administrator/.workbuddy/binaries/python/envs/default/Scripts/python.exe -m ruff check --fix --exit-non-zero-on-fix
         language: system
         types: [python]
         files: ^(app|web|tests)/
@@ -37,7 +29,7 @@ repos:
       # Ruff — format
       - id: ruff-format
         name: ruff format
-        entry: ruff format
+        entry: C:/Users/Administrator/.workbuddy/binaries/python/envs/default/Scripts/python.exe -m ruff format
         language: system
         types: [python]
         files: ^(app|web|tests)/
@@ -45,8 +37,7 @@ repos:
       # mypy — 类型检查（仅核心模块）
       - id: mypy
         name: mypy
-        entry: mypy --config-file=pyproject.toml
+        entry: C:/Users/Administrator/.workbuddy/binaries/python/envs/default/Scripts/python.exe -m mypy --config-file=pyproject.toml --no-incremental
         language: system
         types: [python]
         files: ^app/(exceptions|utils|logger)\.py$
-        pass_filenames: false

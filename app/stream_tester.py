@@ -323,7 +323,10 @@ class StreamTester:
         if StreamTester._ffprobe_path:
             try:
                 result = subprocess.run(
-                    [StreamTester._ffprobe_path, '-version'], capture_output=True, text=True, timeout=5
+                    [StreamTester._ffprobe_path, '-version'],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
                 )
                 if result.returncode == 0:
                     self.logger.info(f'✓ FFprobe工具验证成功: {StreamTester._ffprobe_path}')
@@ -355,7 +358,10 @@ class StreamTester:
             # 降级：没有 ffprobe 但有 ffmpeg，验证 ffmpeg 可用
             try:
                 result = subprocess.run(
-                    [StreamTester._ffmpeg_path, '-version'], capture_output=True, text=True, timeout=5
+                    [StreamTester._ffmpeg_path, '-version'],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
                 )
                 if result.returncode == 0:
                     self.logger.info(f'✓ FFprobe不可用，降级使用FFmpeg: {StreamTester._ffmpeg_path}')
@@ -481,7 +487,12 @@ class StreamTester:
                 except concurrent.futures.TimeoutError:
                     # 处理测试超时
                     self.logger.error(f'测试超时: {source["name"]} - {source["url"]}')
-                    timeout_result = {**source, 'status': 'timeout', 'response_time': None, 'is_qualified': False}
+                    timeout_result = {
+                        **source,
+                        'status': 'timeout',
+                        'response_time': None,
+                        'is_qualified': False,
+                    }
                     test_results.append(timeout_result)
                     failed_count += 1
 
@@ -490,7 +501,12 @@ class StreamTester:
                 except Exception as e:
                     # 处理其他异常
                     self.logger.error(f'测试异常 {source["name"]}: {e}')
-                    error_result = {**source, 'status': 'error', 'response_time': None, 'is_qualified': False}
+                    error_result = {
+                        **source,
+                        'status': 'error',
+                        'response_time': None,
+                        'is_qualified': False,
+                    }
                     test_results.append(error_result)
                     failed_count += 1
 
@@ -663,7 +679,11 @@ class StreamTester:
                         metadata['download_speed'] = download_speed
                     metadata['media_type'] = self._determine_media_type(metadata)
 
-                    test_result = {'status': test_status, 'response_time': response_time, **metadata}
+                    test_result = {
+                        'status': test_status,
+                        'response_time': response_time,
+                        **metadata,
+                    }
 
                     # ---- P1：广告/循环占位源检测（成功连接但可能是假活源）----
                     # 命中则降级为 failed 并标记 is_ad，既不解除冻结也不计入死源失败
@@ -700,8 +720,11 @@ class StreamTester:
             test_result = {
                 'status': 'failed',
                 'response_time': None,
-                'error_reason': (f'after_{self.max_retries}_retries: {last_error_reason}'
-                                 if self.max_retries > 0 else last_error_reason),
+                'error_reason': (
+                    f'after_{self.max_retries}_retries: {last_error_reason}'
+                    if self.max_retries > 0
+                    else last_error_reason
+                ),
             }
             # ---- P0-②：记录失败，连续失败达阈值则冻结冷却 ----
             if self._source_freeze:
@@ -909,9 +932,10 @@ class StreamTester:
         if self._watchdog_timeout <= 0:
             return
         self._watchdog_triggered = False
-        self._watchdog_timer = threading.Timer(self._watchdog_timeout, self._watchdog_timeout_handler)
-        self._watchdog_timer.daemon = True
-        self._watchdog_timer.start()
+        timer = threading.Timer(self._watchdog_timeout, self._watchdog_timeout_handler)
+        timer.daemon = True
+        timer.start()
+        self._watchdog_timer = timer
         self.logger.debug(f'看门狗已启动，超时时间: {self._watchdog_timeout}s')
 
     def _watchdog_timeout_handler(self):
@@ -1186,7 +1210,12 @@ class StreamTester:
 
             # 开始下载测试
             start_time = time.time()
-            with requests.get(url, stream=True, timeout=self.testing_params['timeout'], headers=headers) as response:
+            with requests.get(
+                url,
+                stream=True,
+                timeout=self.testing_params['timeout'],
+                headers=headers,
+            ) as response:
                 total_downloaded = 0
                 test_duration = self.testing_params['speed_test_duration']
                 chunk_size = 64 * 1024  # 64KB chunks
@@ -1424,7 +1453,14 @@ class StreamTester:
             normalized_query = urlencode(filtered_params, doseq=True)
 
             normalized_url = urlunparse(
-                (parsed.scheme, parsed.netloc, parsed.path, parsed.params, normalized_query, parsed.fragment)
+                (
+                    parsed.scheme,
+                    parsed.netloc,
+                    parsed.path,
+                    parsed.params,
+                    normalized_query,
+                    parsed.fragment,
+                )
             )
 
             return normalized_url
@@ -1587,7 +1623,12 @@ class StreamTester:
     # ---- P0-②：失败源指数退避冻结 ----
     def _resolve_status_dir(self) -> str:
         """定位 data/status 目录（与 web.models.DATA_DIR 同级），用于跨进程持久化冻结状态。"""
-        base = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'web', 'data', 'status')
+        base = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            'web',
+            'data',
+            'status',
+        )
         with contextlib.suppress(Exception):
             os.makedirs(base, exist_ok=True)
         return base
@@ -1646,7 +1687,10 @@ class StreamTester:
             fr = self._frozen_map.get(url_norm, {'fail_count': 0, 'frozen_until': 0})
             fr['fail_count'] = fr.get('fail_count', 0) + 1
             if fr['fail_count'] >= self._freeze_fail_threshold:
-                delay = min((2 ** fr['fail_count']) * self._freeze_base_seconds, self._freeze_max_seconds)
+                delay = min(
+                    (2 ** fr['fail_count']) * self._freeze_base_seconds,
+                    self._freeze_max_seconds,
+                )
                 fr['frozen_until'] = time.time() + delay
                 self.logger.info(f'源连续失败 {fr["fail_count"]} 次，冻结冷却 {delay:.0f}s: {url_norm[:80]}')
             self._frozen_map[url_norm] = fr

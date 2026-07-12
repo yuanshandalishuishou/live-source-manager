@@ -56,7 +56,8 @@ class Logger:
 
         # 创建格式化器
         formatter = logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S'
+            '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S',
         )
 
         # 文件处理器（如果配置了文件路径）
@@ -79,7 +80,10 @@ class Logger:
                 backup_count = config.get('backup_count', 5)
 
                 file_handler = logging.handlers.RotatingFileHandler(
-                    log_file, maxBytes=max_size, backupCount=backup_count, encoding='utf-8'
+                    log_file,
+                    maxBytes=max_size,
+                    backupCount=backup_count,
+                    encoding='utf-8',
                 )
                 file_handler.setFormatter(formatter)
                 logger.addHandler(file_handler)

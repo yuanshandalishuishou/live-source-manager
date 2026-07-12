@@ -150,8 +150,8 @@ class Config:
 
             self._models = _m
             return self._models
-        except ImportError:
-            raise ConfigError('无法加载 web.models 模块，SQLite 配置不可用')
+        except ImportError as err:
+            raise ConfigError('无法加载 web.models 模块，SQLite 配置不可用') from err
 
     def _get_config_dict(self) -> dict[str, dict[str, str]]:
         """从 SQLite 读取全量配置"""
@@ -235,7 +235,9 @@ class Config:
     def get_network_config(self) -> dict:
         return {
             'proxy_enabled': self.getboolean(
-                'Network', 'proxy_enabled', self._default_bool('Network', 'proxy_enabled')
+                'Network',
+                'proxy_enabled',
+                self._default_bool('Network', 'proxy_enabled'),
             ),
             'proxy_type': self.get('Network', 'proxy_type', self._default('Network', 'proxy_type')),
             'proxy_host': self.get('Network', 'proxy_host', self._default('Network', 'proxy_host')),
@@ -257,41 +259,69 @@ class Config:
         return {
             'timeout': self.getint('Testing', 'timeout', self._default_int('Testing', 'timeout')),
             'concurrent_threads': self.getint(
-                'Testing', 'concurrent_threads', self._default_int('Testing', 'concurrent_threads')
+                'Testing',
+                'concurrent_threads',
+                self._default_int('Testing', 'concurrent_threads'),
             ),
             'cache_ttl': self.getint('Testing', 'cache_ttl', self._default_int('Testing', 'cache_ttl')),
             'enable_speed_test': self.getboolean(
-                'Testing', 'enable_speed_test', self._default_bool('Testing', 'enable_speed_test')
+                'Testing',
+                'enable_speed_test',
+                self._default_bool('Testing', 'enable_speed_test'),
             ),
             'speed_test_duration': self.getint(
-                'Testing', 'speed_test_duration', self._default_int('Testing', 'speed_test_duration')
+                'Testing',
+                'speed_test_duration',
+                self._default_int('Testing', 'speed_test_duration'),
             ),
             # 性能优化（对标 Guovin/iptv-api P0）
             'enable_host_speed_share': self.getboolean(
-                'Testing', 'enable_host_speed_share', self._default_bool('Testing', 'enable_host_speed_share')
+                'Testing',
+                'enable_host_speed_share',
+                self._default_bool('Testing', 'enable_host_speed_share'),
             ),
             'enable_source_freeze': self.getboolean(
-                'Testing', 'enable_source_freeze', self._default_bool('Testing', 'enable_source_freeze')
+                'Testing',
+                'enable_source_freeze',
+                self._default_bool('Testing', 'enable_source_freeze'),
             ),
             'freeze_fail_threshold': self.getint(
-                'Testing', 'freeze_fail_threshold', self._default_int('Testing', 'freeze_fail_threshold')
+                'Testing',
+                'freeze_fail_threshold',
+                self._default_int('Testing', 'freeze_fail_threshold'),
             ),
             'freeze_base_seconds': self.getint(
-                'Testing', 'freeze_base_seconds', self._default_int('Testing', 'freeze_base_seconds')
+                'Testing',
+                'freeze_base_seconds',
+                self._default_int('Testing', 'freeze_base_seconds'),
             ),
             'freeze_max_hours': self.getint(
-                'Testing', 'freeze_max_hours', self._default_int('Testing', 'freeze_max_hours')
+                'Testing',
+                'freeze_max_hours',
+                self._default_int('Testing', 'freeze_max_hours'),
             ),
             # 质量与过滤增强（对标 Guovin/iptv-api P1/P2）
             'enable_ad_detect': self.getboolean(
-                'Testing', 'enable_ad_detect', self._default_bool('Testing', 'enable_ad_detect')
+                'Testing',
+                'enable_ad_detect',
+                self._default_bool('Testing', 'enable_ad_detect'),
             ),
             'ad_keywords': self.get('Testing', 'ad_keywords', self._default('Testing', 'ad_keywords')),
             'ad_max_duration': self.getint(
-                'Testing', 'ad_max_duration', self._default_int('Testing', 'ad_max_duration')
+                'Testing',
+                'ad_max_duration',
+                self._default_int('Testing', 'ad_max_duration'),
             ),
-            'global_blacklist': self.get('Testing', 'global_blacklist', self._default('Testing', 'global_blacklist')),
-            'global_whitelist': self.get('Testing', 'global_whitelist', self._default('Testing', 'global_whitelist')),
+            'global_blacklist': self.get(
+                'Testing',
+                'global_blacklist',
+                self._default('Testing', 'global_blacklist'),
+            ),
+            'global_whitelist': self.get(
+                'Testing',
+                'global_whitelist',
+                self._default('Testing', 'global_whitelist'),
+            ),
             'output_sort_by': self.get('Testing', 'output_sort_by', self._default('Testing', 'output_sort_by')),
             'max_workers': 50,
         }
@@ -306,7 +336,9 @@ class Config:
             'min_resolution': self.get('Filter', 'min_resolution', self._default('Filter', 'min_resolution')),
             'max_resolution': self.get('Filter', 'max_resolution', self._default('Filter', 'max_resolution')),
             'resolution_filter_mode': self.get(
-                'Filter', 'resolution_filter_mode', self._default('Filter', 'resolution_filter_mode')
+                'Filter',
+                'resolution_filter_mode',
+                self._default('Filter', 'resolution_filter_mode'),
             ),
         }
 
@@ -318,14 +350,20 @@ class Config:
             'filename': self.get('Output', 'filename', self._default('Output', 'filename')),
             'group_by': self.get('Output', 'group_by', self._default('Output', 'group_by')),
             'include_failed': self.getboolean(
-                'Output', 'include_failed', self._default_bool('Output', 'include_failed')
+                'Output',
+                'include_failed',
+                self._default_bool('Output', 'include_failed'),
             ),
             'max_sources_per_channel': self.getint(
-                'Output', 'max_sources_per_channel', self._default_int('Output', 'max_sources_per_channel')
+                'Output',
+                'max_sources_per_channel',
+                self._default_int('Output', 'max_sources_per_channel'),
             ),
             'enable_filter': self.getboolean('Output', 'enable_filter', self._default_bool('Output', 'enable_filter')),
             'whitelist_force_keep': self.getboolean(
-                'Output', 'whitelist_force_keep', self._default_bool('Output', 'whitelist_force_keep')
+                'Output',
+                'whitelist_force_keep',
+                self._default_bool('Output', 'whitelist_force_keep'),
             ),
             'output_dir': output_dir,
         }
@@ -335,17 +373,27 @@ class Config:
             'enabled': self.getboolean('HTTPServer', 'enabled', self._default_bool('HTTPServer', 'enabled')),
             'host': self.get('HTTPServer', 'host', self._default('HTTPServer', 'host')),
             'fileshare_port': self.getint(
-                'HTTPServer', 'fileshare_port', self._default_int('HTTPServer', 'fileshare_port')
+                'HTTPServer',
+                'fileshare_port',
+                self._default_int('HTTPServer', 'fileshare_port'),
             ),
-            'manager_port': self.getint('HTTPServer', 'manager_port', self._default_int('HTTPServer', 'manager_port')),
-            'document_root': self.get('HTTPServer', 'document_root', self._default('HTTPServer', 'document_root')),
+            'manager_port': self.getint(
+                'HTTPServer',
+                'manager_port',
+                self._default_int('HTTPServer', 'manager_port'),
+            ),
+            'document_root': self.get(
+                'HTTPServer',
+                'document_root',
+                self._default('HTTPServer', 'document_root'),
+            ),
         }
         if config['document_root'] and not os.path.isabs(config['document_root']):
             config['document_root'] = os.path.abspath(config['document_root'])
         return config
 
     def get_ua_position(self) -> str:
-        return self.get('UserAgents', 'ua_position', self._default('UserAgents', 'ua_position'))
+        return self.get('UserAgents', 'ua_position', self._default('UserAgents', 'ua_position')) or ''
 
     def is_ua_enabled(self) -> bool:
         return self.getboolean('UserAgents', 'ua_enabled', self._default_bool('UserAgents', 'ua_enabled'))
@@ -402,4 +450,8 @@ class Config:
         else:
             github_sources = []
 
-        return {'local_dirs': local_dirs, 'online_urls': online_urls, 'github_sources': github_sources}
+        return {
+            'local_dirs': local_dirs,
+            'online_urls': online_urls,
+            'github_sources': github_sources,
+        }

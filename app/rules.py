@@ -60,7 +60,7 @@ def get_all_exclusions_for_app() -> list:
     return _get_rule_models().get_all_exclusions()
 
 
-def get_channel_name_mapping_for_app(channel_name: str) -> str:
+def get_channel_name_mapping_for_app(channel_name: str) -> dict | None:
     """获取频道全名映射（app 层版本）"""
     return _get_rule_models().get_channel_name_mapping(channel_name)
 
@@ -107,7 +107,14 @@ class ChannelRules:
     """
 
     # 维度列表
-    DIMENSIONS: ClassVar[list[str]] = ['content', 'region', 'language', 'quality', 'media_type', 'genre']
+    DIMENSIONS: ClassVar[list[str]] = [
+        'content',
+        'region',
+        'language',
+        'quality',
+        'media_type',
+        'genre',
+    ]
 
     # 省份名称列表，用于省份正则匹配
     PROVINCE_NAMES: ClassVar[list[str]] = [
@@ -269,7 +276,11 @@ class ChannelRules:
                     if isinstance(kw_list, list):
                         for kw in kw_list:
                             # 排除过于宽泛的词：单字词、'频道/台/channel' 这样的通用词
-                            if len(kw) >= 3 and kw.lower() not in ('频道', 'channel', '台'):
+                            if len(kw) >= 3 and kw.lower() not in (
+                                '频道',
+                                'channel',
+                                '台',
+                            ):
                                 neg_set.add(kw)
             self.negative_keywords = list(neg_set)
 
@@ -450,7 +461,13 @@ class ChannelRules:
     def get_empty_rules(self) -> dict:
         """返回空的规则结构"""
         return {
-            'categories': [{'name': '其他频道', 'priority': 100, 'keywords': ['台', '频道', 'channel', 'Channel']}],
+            'categories': [
+                {
+                    'name': '其他频道',
+                    'priority': 100,
+                    'keywords': ['台', '频道', 'channel', 'Channel'],
+                }
+            ],
             'channel_types': {},
             'geography': {
                 'continents': [
@@ -660,7 +677,8 @@ class ChannelRules:
                     longer_kw_override[names[i]] = names[j]
 
         candidates = sorted(
-            candidates_by_name.values(), key=lambda x: (x['priority'], -x['keyword_len'], x['sort_order'])
+            candidates_by_name.values(),
+            key=lambda x: (x['priority'], -x['keyword_len'], x['sort_order']),
         )
 
         if len(candidates) == 1:
@@ -688,7 +706,13 @@ class ChannelRules:
 
         return candidates[0]['name']
 
-    def _is_excluded(self, candidate_kw: str, other_kw: str, candidate_rule_name: str, other_rule_name: str) -> bool:
+    def _is_excluded(
+        self,
+        candidate_kw: str,
+        other_kw: str,
+        candidate_rule_name: str,
+        other_rule_name: str,
+    ) -> bool:
         """检查 other_kw 是否会因为错误包含而被 candidate_kw 排挤
 
         仅在以下情况下才触发排除：

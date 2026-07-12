@@ -57,7 +57,11 @@ def atomic_write(
                 raise FileException(
                     message=f'文件写入失败（已重试 {retries} 次）: {filepath}',
                     suggestion=f'请检查目录权限: {os.path.dirname(filepath)}',
-                    details={'filepath': filepath, 'attempts': retries, 'last_error': str(e)},
+                    details={
+                        'filepath': filepath,
+                        'attempts': retries,
+                        'last_error': str(e),
+                    },
                     original=e,
                 ) from e
 
@@ -111,7 +115,10 @@ def _backup_file(filepath: str, backup_dir: str | None = None, logger: logging.L
 
 
 def safe_read_file(
-    filepath: str, encoding: str = 'utf-8', fallback_encodings: list | None = None, logger: logging.Logger | None = None
+    filepath: str,
+    encoding: str = 'utf-8',
+    fallback_encodings: list | None = None,
+    logger: logging.Logger | None = None,
 ) -> str:
     """安全读取文件内容（支持多编码回退）"""
     if not os.path.exists(filepath):

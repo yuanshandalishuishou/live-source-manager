@@ -19,7 +19,6 @@ import os
 import sys
 import tempfile
 import shutil
-import logging
 
 # ── 项目路径 ──────────────────────────────────────
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -41,7 +40,12 @@ models.DB_PATH = os.path.join(SHARED_TMP_DIR, 'web.db')
 # ── 覆写 web.webapp 下的 CSRF_EXEMPT_PATHS 确保一致 ──
 import web.webapp
 
-web.webapp.CSRF_EXEMPT_PATHS = {'/api/auth/login', '/api/auth/logout', '/login', '/health'}
+web.webapp.CSRF_EXEMPT_PATHS = {
+    '/api/auth/login',
+    '/api/auth/logout',
+    '/login',
+    '/health',
+}
 
 # 创建 app.log 文件（test_logs_download_admin 需要文件存在）
 open(os.path.join(SHARED_TMP_DIR, 'app.log'), 'a').close()

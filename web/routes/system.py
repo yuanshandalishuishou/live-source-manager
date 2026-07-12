@@ -9,7 +9,14 @@ import os
 import threading
 import time
 
-from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.responses import JSONResponse
 
 from web import models
@@ -171,12 +178,18 @@ async def api_trigger_test(request: Request, current_user: dict = Depends(requir
             _test_starting.is_set(),
             _test_thread.is_alive() if _test_thread else None,
         )
-        return {'status': 'running', 'message': '测试已在进行中', 'task_id': 'test_running'}
+        return {
+            'status': 'running',
+            'message': '测试已在进行中',
+            'task_id': 'test_running',
+        }
     _test_starting.set()
     _test_gen += 1
     my_gen = _test_gen
     logger.warning(
-        '[TEST] 触发接受：gen=%d（上一线程 alive=%s）', my_gen, _test_thread.is_alive() if _test_thread else None
+        '[TEST] 触发接受：gen=%d（上一线程 alive=%s）',
+        my_gen,
+        _test_thread.is_alive() if _test_thread else None,
     )
     try:
         # 每次触发前重置控制信令（避免上次取消/暂停残留影响本次）
@@ -209,7 +222,10 @@ async def api_trigger_test(request: Request, current_user: dict = Depends(requir
         if not sm:
             return JSONResponse(
                 status_code=503,
-                content={'status': 'error', 'detail': 'SourceManager 不可用，无法启动测试'},
+                content={
+                    'status': 'error',
+                    'detail': 'SourceManager 不可用，无法启动测试',
+                },
             )
 
         if file_id:
@@ -257,7 +273,11 @@ async def api_trigger_test(request: Request, current_user: dict = Depends(requir
             mode = 'limit'
 
         if _test_thread is not None and _test_thread.is_alive():
-            return {'status': 'running', 'message': '测试已在进行中', 'task_id': 'test_running'}
+            return {
+                'status': 'running',
+                'message': '测试已在进行中',
+                'task_id': 'test_running',
+            }
 
         # 文件模式不限制上限（limit 仅用于规模测试截断），传 None 避免 _run_test_task 误报"已限制上限"
         thread_limit = None if mode == 'file' else limit
@@ -397,7 +417,12 @@ async def websocket_test_endpoint(ws: WebSocket):
 
 
 @router.get('/api/logs')
-async def api_logs(level: str = 'INFO', tail: int = 100, page: int = 1, current_user: dict = Depends(get_current_user)):
+async def api_logs(
+    level: str = 'INFO',
+    tail: int = 100,
+    page: int = 1,
+    current_user: dict = Depends(get_current_user),
+):
     """读取应用日志文件，支持分页"""
     config_data = read_section('Logging')
     log_file = config_data.get('file', './log/app.log')
@@ -452,7 +477,12 @@ async def api_logs_download(current_user: dict = Depends(require_admin)):
 
 
 @router.get('/api/audit')
-async def api_audit(page: int = 1, size: int = 50, action: str = '', current_user: dict = Depends(require_admin)):
+async def api_audit(
+    page: int = 1,
+    size: int = 50,
+    action: str = '',
+    current_user: dict = Depends(require_admin),
+):
     return models.list_audit_logs(page, size, action_filter=action)
 
 
@@ -531,6 +561,7 @@ _test_state: dict = {
     'note': '',
 }
 
+
 # 失败原因 → 聚合类别映射（供「实时测试结果」页按错误类别聚合统计）。
 # 覆盖 StreamTester.test_single_stream 产生的所有 error_reason 形态：
 #  - 带 'cat: raw' 前缀（如 connection_failed: ... Error number -138）
@@ -568,8 +599,13 @@ def categorize_reason(reason):
     if ':' in reason:
         head = reason.split(':', 1)[0].strip().lower()
         _known = {
-            'connection_failed', 'connection_refused', 'dns_failed', 'auth_blocked',
-            'not_found', 'ffprobe_error', 'ffprobe_failed_no_output',
+            'connection_failed',
+            'connection_refused',
+            'dns_failed',
+            'auth_blocked',
+            'not_found',
+            'ffprobe_error',
+            'ffprobe_failed_no_output',
         }
         if head in _known:
             return head
@@ -711,7 +747,12 @@ def _run_test_task(sources: list[dict], limit: int | None = None, gen: int = 0) 
     if gen != _test_gen:
         logger.warning('[TEST] 丢弃过期任务 gen=%d（当前=%d），不覆盖状态', gen, _test_gen)
         return
-    logger.warning('[TEST] 任务启动 gen=%d tid=%s 源数=%d', gen, threading.get_ident(), len(sources))
+    logger.warning(
+        '[TEST] 任务启动 gen=%d tid=%s 源数=%d',
+        gen,
+        threading.get_ident(),
+        len(sources),
+    )
     sm = _load_source_manager()
     if not sm:
         with _test_lock:
@@ -990,7 +1031,12 @@ def _run_test_task(sources: list[dict], limit: int | None = None, gen: int = 0) 
                         'error_reason': f'timeout: 单源测试超过 {TEST_SOURCE_TIMEOUT}s 无响应',
                     }
                 except Exception as e:
-                    r = {**sources[bi], 'status': 'failed', 'response_time': None, 'error_reason': f'exception:{e}'}
+                    r = {
+                        **sources[bi],
+                        'status': 'failed',
+                        'response_time': None,
+                        'error_reason': f'exception:{e}',
+                    }
 
                 raw_status = r.get('status')
 
@@ -1007,13 +1053,17 @@ def _run_test_task(sources: list[dict], limit: int | None = None, gen: int = 0) 
                                 'user_agent': sources[bi].get('user_agent', '') or '',
                                 'source_type': sources[bi].get('source_type', ''),
                                 'source': _resolve_source_label(
-                                    sources[bi].get('source_type', ''), sources[bi].get('source_path', '')
+                                    sources[bi].get('source_type', ''),
+                                    sources[bi].get('source_path', ''),
                                 ),
                             }
                     continue
 
                 disp_status = 'passed' if raw_status == 'success' else 'failed'
-                entry = {'name': r.get('name', sources[bi].get('name', '?')), 'status': disp_status}
+                entry = {
+                    'name': r.get('name', sources[bi].get('name', '?')),
+                    'status': disp_status,
+                }
                 # 展示字段：真实地址、生效 UA、所在源
                 entry['url'] = r.get('url') or sources[bi].get('url', '')
                 _ua = r.get('user_agent') or sources[bi].get('user_agent') or ''
@@ -1026,7 +1076,8 @@ def _run_test_task(sources: list[dict], limit: int | None = None, gen: int = 0) 
                 entry['user_agent'] = _ua
                 entry['source_type'] = r.get('source_type') or sources[bi].get('source_type', '')
                 entry['source'] = _resolve_source_label(
-                    entry['source_type'], r.get('source_path') or sources[bi].get('source_path', '')
+                    entry['source_type'],
+                    r.get('source_path') or sources[bi].get('source_path', ''),
                 )
                 if r.get('response_time') is not None:
                     rt = r['response_time']

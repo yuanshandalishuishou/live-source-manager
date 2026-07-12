@@ -915,7 +915,10 @@ class EnhancedLiveSourceManager:
         return '\n'.join(lines)
 
     def enhanced_output_statistics(
-        self, valid_sources: list[dict], base_sources: list[dict], qualified_sources: list[dict]
+        self,
+        valid_sources: list[dict],
+        base_sources: list[dict],
+        qualified_sources: list[dict],
     ):
         """增强版统计信息输出
 

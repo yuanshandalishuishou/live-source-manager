@@ -130,7 +130,10 @@ def get_machine_id() -> str:
     if sys.platform == 'darwin':
         try:
             result = subprocess.run(
-                ['ioreg', '-rd1', '-c', 'IOPlatformExpertDevice'], capture_output=True, text=True, timeout=5
+                ['ioreg', '-rd1', '-c', 'IOPlatformExpertDevice'],
+                capture_output=True,
+                text=True,
+                timeout=5,
             )
             for line in result.stdout.splitlines():
                 if 'IOPlatformUUID' in line:

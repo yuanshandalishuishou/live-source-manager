@@ -101,7 +101,7 @@ from app.security import (
     clear_domain_blacklist,
     get_domain_blacklist,
     is_safe_url,
-    is_static_safe,
+    is_static_safe,  # noqa: F401  (re-exported public API)
     sanitize_url,
     validate_url,
 )

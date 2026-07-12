@@ -71,7 +71,11 @@ class SourceManager:
         self.user_agents = config.get_user_agents()
         self.ua_enabled = config.is_ua_enabled()
         # 解析阶段被「窄门禁」排除的 URL 汇总（可见化，杜绝静默丢弃）
-        self.last_parse_exclusion_summary: dict = {'total': 0, 'by_category': {}, 'samples': []}
+        self.last_parse_exclusion_summary: dict = {
+            'total': 0,
+            'by_category': {},
+            'samples': [],
+        }
         # 从 local_dirs 配置派生 online_dir（同级 online 目录），兼容 Docker/本地
         # 规范化：过滤空字符串/空白项（DB 中可能存为 ['']），否则会被视为「有值」而误把
         # online_dir 解析到错误的根 online/ 目录，与 source-files API 使用的 config/online 不一致。
@@ -191,6 +195,7 @@ class SourceManager:
                 connector = aiohttp.TCPConnector(family=family, verify_ssl=False, limit=100)
 
             self._session = aiohttp.ClientSession(connector=connector, timeout=timeout)
+            assert self._session is not None
             return self._session
 
     async def download_all_sources(self, github_download_methods: dict | None = None) -> list[str]:
@@ -203,7 +208,7 @@ class SourceManager:
         Returns:
             List[str]: 成功下载的文件路径列表
         """
-        downloaded_files = []
+        downloaded_files: list[str] = []
 
         # 获取在线URL列表
         sources_cfg = self.config.get_sources()
@@ -237,7 +242,9 @@ class SourceManager:
                     # GitHub 源带下载方式
                     tasks.append(
                         self.download_with_retry(
-                            item['url'], method=item.get('method', 'raw'), entry=item.get('entry', '')
+                            item['url'],
+                            method=item.get('method', 'raw'),
+                            entry=item.get('entry', ''),
                         )
                     )
                 else:
@@ -253,7 +260,7 @@ class SourceManager:
                 url = item['url'] if isinstance(item, dict) else item
                 if isinstance(result, Exception):
                     self.logger.error(f'下载失败 {url}: {result}')
-                elif result:
+                elif isinstance(result, str):
                     downloaded_files.append(result)
                     self.logger.info(f'下载成功: {url}')
                     # 记录 GitHub 条目 → 文件名 映射（供文件级 UA 精确匹配）
@@ -405,7 +412,13 @@ class SourceManager:
 
             # 查找 m3u/m3u8/txt 文件（排除 README、LICENSE 等非源文件）
             source_results = []
-            excluded_names = {'readme', 'license', 'changelog', 'contributing', '.gitignore'}
+            excluded_names = {
+                'readme',
+                'license',
+                'changelog',
+                'contributing',
+                '.gitignore',
+            }
             for item in tree_data.get('tree', []):
                 if item.get('type') != 'blob':
                     continue
@@ -465,7 +478,10 @@ class SourceManager:
             ]
         else:
             # raw 方式（默认）
-            strategies = [{'type': 'direct', 'use_proxy': False}, {'type': 'proxy', 'use_proxy': True}]
+            strategies = [
+                {'type': 'direct', 'use_proxy': False},
+                {'type': 'proxy', 'use_proxy': True},
+            ]
 
         # 尝试不同的下载策略
         for strategy in strategies:
@@ -726,7 +742,12 @@ class SourceManager:
 
         return sources
 
-    def parse_file(self, file_path: str, file_ua: dict | None = None, exclusions: list | None = None) -> list[dict]:
+    def parse_file(
+        self,
+        file_path: str,
+        file_ua: dict | None = None,
+        exclusions: list | None = None,
+    ) -> list[dict]:
         """
         解析单个源文件
 
@@ -828,7 +849,13 @@ class SourceManager:
                         # ---- 解析阶段窄门禁：仅 SSRF + 协议/格式，不做 DNS/XSS/境外/黑白名单 ----
                         safe, reason, category = is_static_safe(stream_url)
                         if not safe:
-                            exclusions.append({'url': stream_url, 'reason': reason, 'category': category})
+                            exclusions.append(
+                                {
+                                    'url': stream_url,
+                                    'reason': reason,
+                                    'category': category,
+                                }
+                            )
                             self.logger.info(f'解析跳过(窄门禁:{category}): {stream_url} - {reason}')
                             i += 1
                             continue
@@ -868,7 +895,13 @@ class SourceManager:
                     clean_line_url = line.split('|')[0]
                     safe, reason, category = is_static_safe(clean_line_url)
                     if not safe:
-                        exclusions.append({'url': clean_line_url, 'reason': reason, 'category': category})
+                        exclusions.append(
+                            {
+                                'url': clean_line_url,
+                                'reason': reason,
+                                'category': category,
+                            }
+                        )
                         self.logger.info(f'解析跳过(窄门禁:{category}): {clean_line_url} - {reason}')
                         i += 1
                         continue

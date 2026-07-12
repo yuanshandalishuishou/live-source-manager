@@ -359,6 +359,16 @@ def init_db(admin_password: str | None = None):
     # ── 从 YAML 导入种子数据 ──────────────────────
     _seed_from_yaml(conn)
     conn.close()
+
+    # ── 幂等写入应用配置默认值 ─────────────────────
+    # 首次部署自动将 Config._DEFAULT_VALUES 灌入 app_config 表，
+    # 使「建库」步骤自包含，无需等待 Web 启动（部署脚本调用 init_db 即可获得默认值）。
+    try:
+        seed_app_config_defaults()
+        fill_missing_app_config_defaults()
+    except Exception as _e:
+        logger.warning('应用配置默认值种子失败（Web 启动时会重试）: %s', _e)
+
     logger.info('init_db 完成')
     return effective_pw
 
@@ -378,7 +388,10 @@ def get_app_config_raw(key: str) -> str | None:
 
 def set_app_config_raw(key: str, value: str):
     """写入配置原始值（不自动加密）"""
-    _execute("INSERT OR REPLACE INTO app_config (key, value, updated_at) VALUES (?, ?, datetime('now'))", (key, value))
+    _execute(
+        "INSERT OR REPLACE INTO app_config (key, value, updated_at) VALUES (?, ?, datetime('now'))",
+        (key, value),
+    )
     invalidate_config_cache()
 
 
@@ -411,7 +424,8 @@ def get_all_sensitive_raw() -> dict[str, str]:
     conn = get_conn()
     placeholders = ','.join('?' for _ in keys_to_query)
     rows = conn.execute(
-        f'SELECT key, value FROM app_config WHERE key IN ({placeholders})', list(keys_to_query)
+        f'SELECT key, value FROM app_config WHERE key IN ({placeholders})',
+        list(keys_to_query),
     ).fetchall()
     conn.close()
     return {row['key']: row['value'] for row in rows}
@@ -499,7 +513,8 @@ def set_app_config(key: str, value: str):
     elif is_sensitive_key(key) and not (is_encrypted(value) and _is_valid_fernet_token(value)):
         value = encrypt_value(value)
     _execute(
-        'INSERT OR REPLACE INTO app_config (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)', (key, value)
+        'INSERT OR REPLACE INTO app_config (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)',
+        (key, value),
     )
     invalidate_config_cache()
 
@@ -590,7 +605,10 @@ def seed_app_config_defaults() -> int:
 
         now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         entries = [(key, value, now) for key, value in Config._DEFAULT_VALUES.items()]
-        conn.executemany('INSERT OR REPLACE INTO app_config (key, value, updated_at) VALUES (?, ?, ?)', entries)
+        conn.executemany(
+            'INSERT OR REPLACE INTO app_config (key, value, updated_at) VALUES (?, ?, ?)',
+            entries,
+        )
         conn.commit()
         logger.info(f'已写入 {len(entries)} 条配置默认值到 app_config')
         return len(entries)
@@ -872,7 +890,13 @@ def get_category_dictionary() -> dict[str, list[dict]]:
         dim = row['dimension']
         if dim not in result:
             result[dim] = []
-        result[dim].append({'value': row['value'], 'label': row['label'], 'sort_order': row['sort_order']})
+        result[dim].append(
+            {
+                'value': row['value'],
+                'label': row['label'],
+                'sort_order': row['sort_order'],
+            }
+        )
     return result
 
 
@@ -896,7 +920,10 @@ def delete_category_dictionary_option(dimension: str, value: str) -> bool:
     """删除一条分类字典选项"""
     try:
         conn = get_conn()
-        cursor = conn.execute('DELETE FROM category_dictionary WHERE dimension = ? AND value = ?', (dimension, value))
+        cursor = conn.execute(
+            'DELETE FROM category_dictionary WHERE dimension = ? AND value = ?',
+            (dimension, value),
+        )
         conn.commit()
         conn.close()
         return cursor.rowcount > 0
@@ -913,7 +940,12 @@ def set_category_dictionary_dimension(dimension: str, options: list[dict]) -> bo
         for i, opt in enumerate(options):
             conn.execute(
                 'INSERT INTO category_dictionary (dimension, value, label, sort_order) VALUES (?, ?, ?, ?)',
-                (dimension, opt['value'], opt.get('label', opt['value']), opt.get('sort_order', i)),
+                (
+                    dimension,
+                    opt['value'],
+                    opt.get('label', opt['value']),
+                    opt.get('sort_order', i),
+                ),
             )
         conn.commit()
         conn.close()
@@ -928,7 +960,10 @@ def cleanup_audit_logs(max_days: int = 90):
     try:
         conn = get_conn()
         try:
-            conn.execute("DELETE FROM audit_logs WHERE created_at < datetime('now', ? || ' days')", (str(-max_days),))
+            conn.execute(
+                "DELETE FROM audit_logs WHERE created_at < datetime('now', ? || ' days')",
+                (str(-max_days),),
+            )
             conn.commit()
         finally:
             conn.close()
@@ -1020,14 +1055,18 @@ def toggle_user(user_id: int) -> bool | None:
     if not user:
         return None
     new_status = 0 if user['is_active'] else 1
-    _execute('UPDATE users SET is_active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', (new_status, user_id))
+    _execute(
+        'UPDATE users SET is_active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+        (new_status, user_id),
+    )
     return bool(new_status)
 
 
 def update_user_password(user_id: int, new_password: str) -> bool:
     pw_hash = bcrypt.hashpw(new_password.encode(), bcrypt.gensalt()).decode()
     cursor = _execute(
-        'UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', (pw_hash, user_id)
+        'UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+        (pw_hash, user_id),
     )
     return cursor.rowcount > 0
 
@@ -1111,7 +1150,14 @@ def cleanup_expired_sessions():
 # ── 审计日志 ──────────────────────────────────────
 
 
-def add_audit_log(user_id: int, username: str, action: str, target: str = '', detail: str = '', ip_address: str = ''):
+def add_audit_log(
+    user_id: int,
+    username: str,
+    action: str,
+    target: str = '',
+    detail: str = '',
+    ip_address: str = '',
+):
     _execute(
         'INSERT INTO audit_logs (user_id, username, action, target, detail, ip_address) VALUES (?, ?, ?, ?, ?, ?)',
         (user_id, username, action, target, detail, ip_address),
@@ -1131,9 +1177,15 @@ def list_audit_logs(page: int = 1, size: int = 50, action_filter: str = '') -> d
         else:
             total = conn.execute('SELECT COUNT(*) FROM audit_logs').fetchone()[0]
             rows = conn.execute(
-                'SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT ? OFFSET ?', (size, offset)
+                'SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT ? OFFSET ?',
+                (size, offset),
             ).fetchall()
-        return {'total': total, 'page': page, 'size': size, 'logs': [dict(r) for r in rows]}
+        return {
+            'total': total,
+            'page': page,
+            'size': size,
+            'logs': [dict(r) for r in rows],
+        }
     finally:
         conn.close()
 
@@ -1155,7 +1207,8 @@ def get_all_classification_rules(rule_type: str | None = None) -> list[dict]:
     conn = get_conn()
     if rule_type:
         rows = conn.execute(
-            'SELECT * FROM classification_rules WHERE rule_type = ? ORDER BY sort_order, priority, id', (rule_type,)
+            'SELECT * FROM classification_rules WHERE rule_type = ? ORDER BY sort_order, priority, id',
+            (rule_type,),
         ).fetchall()
     else:
         rows = conn.execute(
@@ -1240,7 +1293,11 @@ def delete_classification_rule(rule_id: int) -> bool:
 
 def reset_category_dictionary_to_default():
     """D-4 修复：将分类字典恢复为系统默认种子值（先清空再种子）。"""
-    yaml_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'config', 'channel_rules.yml')
+    yaml_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        'config',
+        'channel_rules.yml',
+    )
     conn = get_conn()
     try:
         conn.execute('DELETE FROM category_dictionary')
@@ -1252,7 +1309,11 @@ def reset_category_dictionary_to_default():
 
 def reset_classification_rules_to_default() -> int:
     """D-4 修复：将分类规则恢复为系统默认（从 channel_rules.yml 重新导入）。"""
-    yaml_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'config', 'channel_rules.yml')
+    yaml_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        'config',
+        'channel_rules.yml',
+    )
     if not os.path.exists(yaml_path):
         return 0
     import yaml
@@ -1414,7 +1475,8 @@ def get_source_categories(source_id: int) -> dict[str, str]:
     """
     conn = get_conn()
     rows = conn.execute(
-        'SELECT dim_key, dim_value FROM stream_source_categories WHERE source_id=?', (source_id,)
+        'SELECT dim_key, dim_value FROM stream_source_categories WHERE source_id=?',
+        (source_id,),
     ).fetchall()
     conn.close()
     result = {}
@@ -1750,7 +1812,10 @@ def get_password_change_required(username: str) -> bool:
     """查询用户是否需要在下次登录时修改密码"""
     conn = get_conn()
     try:
-        row = conn.execute('SELECT required FROM password_change_required WHERE username = ?', (username,)).fetchone()
+        row = conn.execute(
+            'SELECT required FROM password_change_required WHERE username = ?',
+            (username,),
+        ).fetchone()
         return bool(row and row['required'])
     finally:
         conn.close()

@@ -139,7 +139,12 @@ SECTION_SCHEMA: dict[str, dict[str, tuple]] = {
         'proxy_port': ('int', '1800', '代理端口'),
         'proxy_username': ('str', '', '代理用户名'),
         'proxy_password': ('str', '', '代理密码'),
-        'github_mirror': ('str', 'https://ghproxy.com/', 'GitHub镜像站', '用于 mirror 下载方式的代理网站URL'),
+        'github_mirror': (
+            'str',
+            'https://ghproxy.com/',
+            'GitHub镜像站',
+            '用于 mirror 下载方式的代理网站URL',
+        ),
         'ipv6_enabled': ('bool', 'True', '启用IPv6', ''),
     },
     'HTTPServer': {
@@ -150,14 +155,24 @@ SECTION_SCHEMA: dict[str, dict[str, tuple]] = {
         'document_root': ('str', './www/output', '文档根目录'),
     },
     'GitHub': {
-        'api_url': ('str', 'https://api.github.com', 'API地址', 'GitHub API 基地址，一般无需修改'),
+        'api_url': (
+            'str',
+            'https://api.github.com',
+            'API地址',
+            'GitHub API 基地址，一般无需修改',
+        ),
         'api_token': (
             'str',
             '',
             'API Token',
             'GitHub Personal Access Token（无需任何权限，仅用于提升 API 速率限制至 5000次/时）。前往 GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic) → Generate new token 生成',
         ),
-        'rate_limit': ('int', '5000', '速率限制', '每小时最大 API 请求次数（有 Token: 5000，无 Token: 60）'),
+        'rate_limit': (
+            'int',
+            '5000',
+            '速率限制',
+            '每小时最大 API 请求次数（有 Token: 5000，无 Token: 60）',
+        ),
     },
     'Testing': {
         'timeout': ('int', '10', '测试超时(秒)'),
@@ -173,7 +188,12 @@ SECTION_SCHEMA: dict[str, dict[str, tuple]] = {
             '自动扫描模式',
             'interval=按间隔小时数；daily=每日指定时刻（与下方参数配合）',
         ),
-        'auto_scan_interval_hours': ('int', '24', '间隔小时数', 'mode=interval 时生效：每 N 小时自动测试一次'),
+        'auto_scan_interval_hours': (
+            'int',
+            '24',
+            '间隔小时数',
+            'mode=interval 时生效：每 N 小时自动测试一次',
+        ),
         'auto_scan_daily_time': (
             'str',
             '03:00',
@@ -186,21 +206,61 @@ SECTION_SCHEMA: dict[str, dict[str, tuple]] = {
             '同 Host 测速复用',
             '同 CDN/Host 仅 ffprobe 一次并复用结果，大幅减少重复探测（对标 Guovin）',
         ),
-        'enable_source_freeze': ('bool', 'True', '失败源冻结', '连续失败的源按 2^n×基数 秒指数退避冻结冷却，省资源'),
-        'freeze_fail_threshold': ('int', '3', '冻结阈值', '连续失败达到该次数后开始冻结'),
-        'freeze_base_seconds': ('int', '60', '退避基数(秒)', '冻结时长 = 2^失败次数 × 基数，封顶 freeze_max_hours'),
+        'enable_source_freeze': (
+            'bool',
+            'True',
+            '失败源冻结',
+            '连续失败的源按 2^n×基数 秒指数退避冻结冷却，省资源',
+        ),
+        'freeze_fail_threshold': (
+            'int',
+            '3',
+            '冻结阈值',
+            '连续失败达到该次数后开始冻结',
+        ),
+        'freeze_base_seconds': (
+            'int',
+            '60',
+            '退避基数(秒)',
+            '冻结时长 = 2^失败次数 × 基数，封顶 freeze_max_hours',
+        ),
         'freeze_max_hours': ('int', '24', '冻结上限(小时)', '单次冻结最长时间'),
-        'enable_ad_detect': ('bool', 'True', '广告/循环源检测', '拉取 m3u8 检查广告关键字与循环占位标志'),
+        'enable_ad_detect': (
+            'bool',
+            'True',
+            '广告/循环源检测',
+            '拉取 m3u8 检查广告关键字与循环占位标志',
+        ),
         'ad_keywords': (
             'str',
             'no_signal,/ad/,advertisement,测试卡,无信号,test_pattern,colorbar,broadcast_test,signal_lost',
             '广告关键字',
             '命中即判为广告源（逗号或换行分隔）',
         ),
-        'ad_max_duration': ('int', '90', '循环占位阈值(秒)', '含 #EXT-X-ENDLIST 且累计时长<=该值判为循环占位'),
-        'global_blacklist': ('str', '', '全局黑名单', '命中(URL/host)的源跳过测试，逗号或换行分隔'),
-        'global_whitelist': ('str', '', '全局白名单', 'URL/host 清单，豁免于黑名单与冻结，逗号或换行分隔'),
-        'output_sort_by': ('str', 'speed', '输出排序', 'speed=快源在前；name=按名；resolution=按分辨率'),
+        'ad_max_duration': (
+            'int',
+            '90',
+            '循环占位阈值(秒)',
+            '含 #EXT-X-ENDLIST 且累计时长<=该值判为循环占位',
+        ),
+        'global_blacklist': (
+            'str',
+            '',
+            '全局黑名单',
+            '命中(URL/host)的源跳过测试，逗号或换行分隔',
+        ),
+        'global_whitelist': (
+            'str',
+            '',
+            '全局白名单',
+            'URL/host 清单，豁免于黑名单与冻结，逗号或换行分隔',
+        ),
+        'output_sort_by': (
+            'str',
+            'speed',
+            '输出排序',
+            'speed=快源在前；name=按名；resolution=按分辨率',
+        ),
         'max_test_attempts': (
             'int',
             '1',
@@ -214,7 +274,12 @@ SECTION_SCHEMA: dict[str, dict[str, tuple]] = {
         'include_failed': ('bool', 'False', '包含失败源'),
         'max_sources_per_channel': ('int', '8', '每频道最大源数'),
         'enable_filter': ('bool', 'False', '启用过滤'),
-        'whitelist_force_keep': ('bool', 'False', '白名单强制保留', '白名单源即使未过质量过滤也保留到输出'),
+        'whitelist_force_keep': (
+            'bool',
+            'False',
+            '白名单强制保留',
+            '白名单源即使未过质量过滤也保留到输出',
+        ),
     },
     'Logging': {
         'level': ('str', 'INFO', '日志级别'),
@@ -264,7 +329,12 @@ SENSITIVE_FIELDS = {
 }
 
 # 字段类型映射
-FIELD_TYPE = {'str': 'text', 'textarea': 'textarea', 'int': 'number', 'bool': 'checkbox'}
+FIELD_TYPE = {
+    'str': 'text',
+    'textarea': 'textarea',
+    'int': 'number',
+    'bool': 'checkbox',
+}
 
 
 def read_config() -> dict[str, dict[str, str]]:
@@ -343,7 +413,14 @@ def _validate_config_values(data: dict[str, dict[str, str]]) -> list[dict] | Non
         for key, value in fields.items():
             field_def = schema.get(key)
             if not field_def:
-                errors.append({'section': section, 'key': key, 'error': '未知字段', 'field_label': key})
+                errors.append(
+                    {
+                        'section': section,
+                        'key': key,
+                        'error': '未知字段',
+                        'field_label': key,
+                    }
+                )
                 continue
             _, err = validate_and_coerce(section, key, value, field_def)
             if err:
@@ -718,7 +795,10 @@ async def lifespan(app_instance: FastAPI):
     # 首次部署：未设置 WEB_ADMIN_PASSWORD 时 init_db 自动生成强密码并写入日志
     effective_pw = await asyncio.to_thread(models.init_db, admin_password=admin_pw)
     if effective_pw is not None:
-        logger.info('📌 初始管理员密码已就绪（请妥善保存，首次登录后建议修改）: %s', effective_pw)
+        logger.info(
+            '📌 初始管理员密码已就绪（请妥善保存，首次登录后建议修改）: %s',
+            effective_pw,
+        )
     await asyncio.to_thread(models.cleanup_expired_sessions)
     await asyncio.to_thread(models.cleanup_audit_logs, max_days=180)
     logger.info('数据库初始化完成，已清除过期Session，清理180天前审计日志')
@@ -900,9 +980,8 @@ category_keywords:
                             h, m = (int(x) for x in daily_time.split(':'))
                         except Exception:
                             h, m = 3, 0
-                        if now.hour == h and now.minute == m:
-                            if last_dt is None or last_dt.date() < now.date():
-                                should_run = True
+                        if now.hour == h and now.minute == m and (last_dt is None or last_dt.date() < now.date()):
+                            should_run = True
                     else:  # interval
                         try:
                             hours = int(float(cfg.get('auto_scan_interval_hours') or 24))
@@ -1017,9 +1096,15 @@ async def csrf_middleware(request: Request, call_next):
             session_id = request.cookies.get('session')
             token = request.headers.get('x-csrf-token', '')
             if not session_id or not token:
-                return JSONResponse(status_code=403, content={'detail': 'CSRF token missing（缺少安全令牌）'})
+                return JSONResponse(
+                    status_code=403,
+                    content={'detail': 'CSRF token missing（缺少安全令牌）'},
+                )
             if not verify_csrf_token(session_id, token, request.headers.get('user-agent', '')):
-                return JSONResponse(status_code=403, content={'detail': 'CSRF token invalid（安全令牌无效）'})
+                return JSONResponse(
+                    status_code=403,
+                    content={'detail': 'CSRF token invalid（安全令牌无效）'},
+                )
     return await call_next(request)
 
 

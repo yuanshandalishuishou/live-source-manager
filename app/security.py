@@ -307,10 +307,9 @@ def validate_url(url: str) -> dict[str, Any]:
 
     # ---- 白名单默认拒绝模式 ----
     whitelist = get_domain_whitelist()
-    if whitelist:  # 白名单非空时启用
-        if not _is_whitelisted(host, whitelist):
-            result['reason'] = f'域名不在白名单中: {host}（白名单默认拒绝模式已启用）'
-            return result
+    if whitelist and not _is_whitelisted(host, whitelist):  # 白名单非空时启用
+        result['reason'] = f'域名不在白名单中: {host}（白名单默认拒绝模式已启用）'
+        return result
 
     # ---- 境外流媒体检查 ----
     if _is_overseas_streaming(host, parsed.hostname):
@@ -380,7 +379,16 @@ def sanitize_url(url: str) -> str:
             path = path.replace('//', '/')
 
     query_params = parse_qs(parsed.query, keep_blank_values=True)
-    unsafe_params = {'cmd', 'exec', 'command', 'shell', 'debug', 'eval', 'callback', 'jsonp'}
+    unsafe_params = {
+        'cmd',
+        'exec',
+        'command',
+        'shell',
+        'debug',
+        'eval',
+        'callback',
+        'jsonp',
+    }
     safe_params = {k: v for k, v in query_params.items() if k.lower() not in unsafe_params}
 
     new_query = urlencode(safe_params, doseq=True) if safe_params else ''
@@ -439,7 +447,11 @@ def is_static_safe(url: str) -> tuple[bool, str, str]:
     if not scheme:
         return False, 'URL 缺少协议 scheme', 'scheme'
     if scheme not in ALLOWED_SCHEMES:
-        return False, f'不支持的协议: {scheme}（仅支持 http/https/rtmp/rtsp/rtp）', 'scheme'
+        return (
+            False,
+            f'不支持的协议: {scheme}（仅支持 http/https/rtmp/rtsp/rtp）',
+            'scheme',
+        )
 
     host = (parsed.hostname or parsed.netloc or '').strip().lower()
     if not host:

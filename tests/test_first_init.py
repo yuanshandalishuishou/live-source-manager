@@ -73,10 +73,19 @@ def first_init_db():
 
 
 def _run_first_init():
-    """执行与 core.lifespan 完全一致的真实首启三步。"""
-    pw = models.init_db(None)  # 首次部署：不传密码 -> 自动生成强密码
-    seed_n = models.seed_app_config_defaults()
+    """执行与 core.lifespan 完全一致的真实首启三步。
+
+    注意：init_db 现已自包含写入 app_config 默认值（首次部署无需等待 Web 启动），
+    故显式 seed_app_config_defaults() 在表非空时幂等跳过；seed_n 取首启后 DB 实际行数。
+    """
+    pw = models.init_db(None)  # 首次部署：不传密码 -> 自动生成强密码 + 自包含灌入默认值
+    models.seed_app_config_defaults()  # 幂等：表非空时跳过
     fill_n = models.fill_missing_app_config_defaults()
+    conn = sqlite3.connect(models.DB_PATH)
+    try:
+        seed_n = conn.execute('SELECT COUNT(*) FROM app_config').fetchone()[0]
+    finally:
+        conn.close()
     return pw, seed_n, fill_n
 
 

@@ -4,7 +4,13 @@
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from web.core import _render, get_current_user, get_session, get_source_by_id, require_admin
+from web.core import (
+    _render,
+    get_current_user,
+    get_session,
+    get_source_by_id,
+    require_admin,
+)
 
 router = APIRouter()
 

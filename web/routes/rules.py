@@ -60,7 +60,10 @@ async def api_create_rule(
         if not isinstance(data, dict):
             raise HTTPException(status_code=400, detail='请求体必须为 JSON 对象')
     except Exception:
-        raise HTTPException(status_code=400, detail='请求体必须为JSON格式（Content-Type: application/json）') from None
+        raise HTTPException(
+            status_code=400,
+            detail='请求体必须为JSON格式（Content-Type: application/json）',
+        ) from None
 
     rule_type = data.get('rule_type', '').strip()
     name = data.get('name', '').strip()
@@ -111,7 +114,10 @@ async def api_update_rule(
         if not isinstance(data, dict):
             raise HTTPException(status_code=400, detail='请求体必须为 JSON 对象')
     except Exception:
-        raise HTTPException(status_code=400, detail='请求体必须为JSON格式（Content-Type: application/json）') from None
+        raise HTTPException(
+            status_code=400,
+            detail='请求体必须为JSON格式（Content-Type: application/json）',
+        ) from None
 
     update_dict = {}
     for key in ('rule_type', 'name', 'priority', 'sort_order', 'is_active'):
@@ -177,7 +183,10 @@ async def api_batch_update_order(
         if not isinstance(data, dict):
             raise HTTPException(status_code=400, detail='请求体必须为 JSON 对象')
     except Exception:
-        raise HTTPException(status_code=400, detail='请求体必须为JSON格式（Content-Type: application/json）') from None
+        raise HTTPException(
+            status_code=400,
+            detail='请求体必须为JSON格式（Content-Type: application/json）',
+        ) from None
 
     orders = data.get('orders', [])
     if not orders:
@@ -288,7 +297,10 @@ async def api_create_exclusion(
         if not isinstance(data, dict):
             raise HTTPException(status_code=400, detail='请求体必须为 JSON 对象')
     except Exception:
-        raise HTTPException(status_code=400, detail='请求体必须为JSON格式（Content-Type: application/json）') from None
+        raise HTTPException(
+            status_code=400,
+            detail='请求体必须为JSON格式（Content-Type: application/json）',
+        ) from None
 
     province_keyword = data.get('province_keyword', '').strip()
     excluded_keyword = data.get('excluded_keyword', '').strip()
@@ -352,7 +364,10 @@ async def api_test_classification(
         if not isinstance(data, dict):
             raise HTTPException(status_code=400, detail='请求体必须为 JSON 对象')
     except Exception:
-        raise HTTPException(status_code=400, detail='请求体必须为JSON格式（Content-Type: application/json）') from None
+        raise HTTPException(
+            status_code=400,
+            detail='请求体必须为JSON格式（Content-Type: application/json）',
+        ) from None
 
     channel_name = data.get('channel_name', '').strip()
     if not channel_name:
@@ -366,8 +381,8 @@ async def api_test_classification(
     CHANNEL_RULES_PATH = os.path.join(PROJECT_ROOT, 'config', 'channel_rules.yml')
     # 使用模块级缓存避免每次创建新实例
     if not hasattr(app, '_test_rules_instance'):
-        app._test_rules_instance = ChannelRules(rules_path=CHANNEL_RULES_PATH)
-    rules_engine = app._test_rules_instance
+        app._test_rules_instance = ChannelRules(rules_path=CHANNEL_RULES_PATH)  # type: ignore[attr-defined]
+    rules_engine = app._test_rules_instance  # type: ignore[attr-defined]
 
     # 多维分类
     categories = rules_engine.determine_categories(channel_name)
@@ -575,7 +590,11 @@ async def api_save_channel_mapping(
     if not success:
         raise HTTPException(status_code=500, detail='保存失败')
 
-    return {'message': f'{channel_name} 映射已保存', 'categories': categories, 'is_manual': 1}
+    return {
+        'message': f'{channel_name} 映射已保存',
+        'categories': categories,
+        'is_manual': 1,
+    }
 
 
 @router.delete('/api/channel-mapping/{channel_name}')
@@ -673,7 +692,8 @@ async def api_add_category_option(
     """添加一条分类字典选项"""
     if dimension not in VALID_DIMENSIONS:
         raise HTTPException(
-            status_code=400, detail=f'无效的维度: {dimension}，可选: {", ".join(sorted(VALID_DIMENSIONS))}'
+            status_code=400,
+            detail=f'无效的维度: {dimension}，可选: {", ".join(sorted(VALID_DIMENSIONS))}',
         )
 
     try:

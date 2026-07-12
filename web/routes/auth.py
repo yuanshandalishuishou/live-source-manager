@@ -50,7 +50,14 @@ async def api_login(request: Request, username: str = Form(...), password: str =
         }
     )
     is_https = os.environ.get('HTTPS', '') == 'on'
-    resp.set_cookie(key='session', value=session_id, httponly=True, max_age=86400, secure=is_https, samesite='lax')
+    resp.set_cookie(
+        key='session',
+        value=session_id,
+        httponly=True,
+        max_age=86400,
+        secure=is_https,
+        samesite='lax',
+    )
     return resp
 
 
@@ -91,7 +98,10 @@ async def api_update_password(request: Request, current_user: dict = Depends(get
     try:
         data = await request.json()
     except Exception:
-        raise HTTPException(status_code=400, detail='请求体必须为JSON格式（Content-Type: application/json）') from None
+        raise HTTPException(
+            status_code=400,
+            detail='请求体必须为JSON格式（Content-Type: application/json）',
+        ) from None
     old_password = data.get('old_password', '')
     new_password = data.get('new_password', '')
 
@@ -131,7 +141,10 @@ async def api_update_user_password(user_id: int, request: Request, current_user:
     try:
         data = await request.json()
     except Exception:
-        raise HTTPException(status_code=400, detail='请求体必须为JSON格式（Content-Type: application/json）') from None
+        raise HTTPException(
+            status_code=400,
+            detail='请求体必须为JSON格式（Content-Type: application/json）',
+        ) from None
     new_password = data.get('new_password', '')
 
     if not new_password:
@@ -177,7 +190,10 @@ async def api_update_encrypt_key(request: Request, current_user: dict = Depends(
     try:
         data = await request.json()
     except Exception:
-        raise HTTPException(status_code=400, detail='请求体必须为JSON格式（Content-Type: application/json）') from None
+        raise HTTPException(
+            status_code=400,
+            detail='请求体必须为JSON格式（Content-Type: application/json）',
+        ) from None
     new_key = data.get('new_key', '').strip()
     if not new_key:
         raise HTTPException(status_code=400, detail='新密钥不能为空')
@@ -237,7 +253,12 @@ async def api_create_user(data: dict, request: Request, current_user: dict = Dep
 
 
 @router.put('/api/users/{user_id}')
-async def api_update_user(user_id: int, data: dict, request: Request, current_user: dict = Depends(require_admin)):
+async def api_update_user(
+    user_id: int,
+    data: dict,
+    request: Request,
+    current_user: dict = Depends(require_admin),
+):
     """更新用户信息（角色、显示名、密码）"""
     if current_user['user_id'] == user_id and data.get('role') and data['role'] != current_user['role']:
         raise HTTPException(status_code=400, detail='不能修改自己的角色')
@@ -260,7 +281,10 @@ async def api_update_user(user_id: int, data: dict, request: Request, current_us
         username=current_user['username'],
         action='user_update',
         target=str(user_id),
-        detail=json.dumps({k: '***' if k == 'password' else v for k, v in kwargs.items()}, ensure_ascii=False),
+        detail=json.dumps(
+            {k: '***' if k == 'password' else v for k, v in kwargs.items()},
+            ensure_ascii=False,
+        ),
         ip_address=request.client.host if request.client else '',
     )
     return {'status': 'updated'}

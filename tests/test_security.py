@@ -112,14 +112,19 @@ class TestValidateUrl:
         assert result['valid'] is True
 
     def test_url_with_query_params(self):
-        # 注意：含 & 的查询参数会被命令注入检查拦截（& 在 CMD_INJECTION_PATTERNS 中）
-        # 这是 validate_url 的已知限制 — 直播源 URL 通常不含复杂查询参数
+        # & 是合法的 URL query 分隔符（如 ?a=1&b=2）；CMD_INJECTION_PATTERNS 故意
+        # 不拦截单个 shell 元字符（& ; | ` $），否则会误杀海量合法直播源。
         result = validate_url('https://example.com/stream?key=value')
         assert result['valid'] is True
 
-    def test_url_with_ampersand_blocked(self):
-        """含 & 的 URL 被命令注入检查拦截（已知限制）"""
+    def test_ampersand_allowed_as_query_separator(self):
+        """& 作为 query 分隔符应被放行，不因命令注入检查被误杀。"""
         result = validate_url('https://example.com/stream?key=value&token=abc')
+        assert result['valid'] is True
+
+    def test_command_injection_dollar_brace(self):
+        # ${...} 变量展开在 URL 中应被检测为命令注入
+        result = validate_url('http://example.com/stream?x=${HOME}')
         assert result['valid'] is False
 
     def test_url_with_fragment_stripped(self):

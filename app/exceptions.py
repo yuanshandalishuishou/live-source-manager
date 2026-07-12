@@ -74,13 +74,25 @@ class LsmError(BaseAppException):
         details: dict[str, Any] | None = None,
         original: Exception | None = None,
     ):
-        super().__init__(error_code=0, message=message, suggestion=suggestion, details=details, original=original)
+        super().__init__(
+            error_code=0,
+            message=message,
+            suggestion=suggestion,
+            details=details,
+            original=original,
+        )
 
 
 class ConfigError(LsmError):
     """配置相关错误"""
 
-    def __init__(self, message: str, suggestion: str = '请检查配置文件格式和内容是否正确', details=None, original=None):
+    def __init__(
+        self,
+        message: str,
+        suggestion: str = '请检查配置文件格式和内容是否正确',
+        details=None,
+        original=None,
+    ):
         super().__init__(message=message, suggestion=suggestion, details=details, original=original)
         self.error_code = 1001
 
@@ -88,7 +100,13 @@ class ConfigError(LsmError):
 class SourceError(LsmError):
     """源处理错误"""
 
-    def __init__(self, message: str, suggestion: str = '请检查源文件格式或URL', details=None, original=None):
+    def __init__(
+        self,
+        message: str,
+        suggestion: str = '请检查源文件格式或URL',
+        details=None,
+        original=None,
+    ):
         super().__init__(message=message, suggestion=suggestion, details=details, original=original)
         self.error_code = 3001
 
@@ -96,7 +114,13 @@ class SourceError(LsmError):
 class SourceDownloadError(SourceError):
     """源下载失败"""
 
-    def __init__(self, message: str, suggestion: str = '请检查网络连接和源URL', details=None, original=None):
+    def __init__(
+        self,
+        message: str,
+        suggestion: str = '请检查网络连接和源URL',
+        details=None,
+        original=None,
+    ):
         super().__init__(message=message, suggestion=suggestion, details=details, original=original)
         self.error_code = 3002
 
@@ -105,7 +129,11 @@ class SourceParseError(SourceError):
     """源解析失败"""
 
     def __init__(
-        self, message: str, suggestion: str = '请检查文件格式是否为有效的M3U/TXT', details=None, original=None
+        self,
+        message: str,
+        suggestion: str = '请检查文件格式是否为有效的M3U/TXT',
+        details=None,
+        original=None,
     ):
         super().__init__(message=message, suggestion=suggestion, details=details, original=original)
         self.error_code = 3003
@@ -115,7 +143,11 @@ class StreamTestError(LsmError):
     """流测试错误"""
 
     def __init__(
-        self, message: str, suggestion: str = '请检查测试配置或FFprobe工具可用性', details=None, original=None
+        self,
+        message: str,
+        suggestion: str = '请检查测试配置或FFprobe工具可用性',
+        details=None,
+        original=None,
     ):
         super().__init__(message=message, suggestion=suggestion, details=details, original=original)
         self.error_code = 4001
@@ -125,7 +157,11 @@ class FileException(LsmError):
     """文件操作异常"""
 
     def __init__(
-        self, message: str, suggestion: str = '请检查文件路径和权限，确保目录存在且可读写', details=None, original=None
+        self,
+        message: str,
+        suggestion: str = '请检查文件路径和权限，确保目录存在且可读写',
+        details=None,
+        original=None,
     ):
         super().__init__(message=message, suggestion=suggestion, details=details, original=original)
         self.error_code = 5002
@@ -134,7 +170,13 @@ class FileException(LsmError):
 class OutputError(LsmError):
     """输出/文件写入错误"""
 
-    def __init__(self, message: str, suggestion: str = '请检查输出目录权限和磁盘空间', details=None, original=None):
+    def __init__(
+        self,
+        message: str,
+        suggestion: str = '请检查输出目录权限和磁盘空间',
+        details=None,
+        original=None,
+    ):
         super().__init__(message=message, suggestion=suggestion, details=details, original=original)
         self.error_code = 5001
 
@@ -185,7 +227,11 @@ class ErrorStats:
 
     def get_summary(self) -> dict[str, Any]:
         self._prune()
-        summary = {'total_count': self._total_count, 'window_minutes': self.window_minutes, 'by_type_and_module': {}}
+        summary: dict = {
+            'total_count': self._total_count,
+            'window_minutes': self.window_minutes,
+            'by_type_and_module': {},
+        }
         for (code, module), records in self._errors.items():
             key = f'code={code}, module={module}'
             summary['by_type_and_module'][key] = {
@@ -293,7 +339,12 @@ def _log_exception(logger: logging.Logger, error: Exception, module: str, func_n
 
 
 def _wrap_exception(error: Exception, module: str) -> BaseAppException:
-    return BaseAppException(error_code=0, message=str(error), suggestion='请联系管理员查看详细日志', original=error)
+    return BaseAppException(
+        error_code=0,
+        message=str(error),
+        suggestion='请联系管理员查看详细日志',
+        original=error,
+    )
 
 
 def format_error_response(error: BaseAppException, include_traceback: bool = False) -> dict[str, Any]:
@@ -309,7 +360,12 @@ def setup_global_exception_hook(logger: logging.Logger | None = None):
 
     def global_excepthook(exc_type, exc_value, exc_tb):
         if issubclass(exc_type, BaseAppException):
-            logger.critical('[%s] %s | 建议: %s', exc_value.error_code, exc_value.message, exc_value.suggestion)
+            logger.critical(
+                '[%s] %s | 建议: %s',
+                exc_value.error_code,
+                exc_value.message,
+                exc_value.suggestion,
+            )
         else:
             logger.critical(
                 '未捕获的异常 (类型: %s): %s\n%s',

@@ -41,7 +41,12 @@ async def api_config_history(
     size: int = 50,
 ):
     """返回配置变更历史（从审计日志中过滤 config_change / config_update / config_section_update 操作）"""
-    config_actions = ('config_update', 'config_section_update', 'config_change', 'config_reload')
+    config_actions = (
+        'config_update',
+        'config_section_update',
+        'config_change',
+        'config_reload',
+    )
     result = {'total': 0, 'page': page, 'size': size, 'history': []}
 
     try:
@@ -50,7 +55,8 @@ async def api_config_history(
 
         placeholders = ','.join('?' for _ in config_actions)
         total_row = conn.execute(
-            f'SELECT COUNT(*) FROM audit_logs WHERE action IN ({placeholders})', config_actions
+            f'SELECT COUNT(*) FROM audit_logs WHERE action IN ({placeholders})',
+            config_actions,
         ).fetchone()
         total = total_row[0] if total_row else 0
 
@@ -101,7 +107,10 @@ async def api_update_section(section: str, request: Request, current_user: dict 
     try:
         data = await request.json()
     except Exception:
-        raise HTTPException(status_code=400, detail='请求体必须为JSON格式（Content-Type: application/json）') from None
+        raise HTTPException(
+            status_code=400,
+            detail='请求体必须为JSON格式（Content-Type: application/json）',
+        ) from None
 
     # 校验请求体必须是键值对（非嵌套字典）
     if not isinstance(data, dict):
@@ -145,7 +154,10 @@ async def api_validate_config(request: Request, current_user: dict = Depends(get
     try:
         data = await request.json()
     except Exception:
-        raise HTTPException(status_code=400, detail='请求体必须为JSON格式（Content-Type: application/json）') from None
+        raise HTTPException(
+            status_code=400,
+            detail='请求体必须为JSON格式（Content-Type: application/json）',
+        ) from None
 
     section = data.get('section', '').strip()
     key = data.get('key', '').strip()
@@ -223,4 +235,8 @@ async def api_reload_config(request: Request, current_user: dict = Depends(requi
         target='SQLite',
         ip_address=request.client.host if request.client else '',
     )
-    return {'status': 'ok', 'message': f'配置重载完成，共 {reloaded_items} 项', 'reloaded': reloaded_items}
+    return {
+        'status': 'ok',
+        'message': f'配置重载完成，共 {reloaded_items} 项',
+        'reloaded': reloaded_items,
+    }

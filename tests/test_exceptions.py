@@ -33,7 +33,13 @@ class TestExceptionHierarchy:
 
     def test_all_inherit_from_lsm_error(self):
         """ConfigError/SourceError/StreamTestError/FileException/OutputError 都继承 LsmError"""
-        for exc_cls in [ConfigError, SourceError, StreamTestError, FileException, OutputError]:
+        for exc_cls in [
+            ConfigError,
+            SourceError,
+            StreamTestError,
+            FileException,
+            OutputError,
+        ]:
             assert issubclass(exc_cls, LsmError)
 
     def test_lsm_error_inherits_base(self):
@@ -44,7 +50,13 @@ class TestExceptionHierarchy:
         assert issubclass(SourceParseError, SourceError)
 
     def test_all_are_exceptions(self):
-        for exc_cls in [BaseAppException, LsmError, ConfigError, SourceError, StreamTestError]:
+        for exc_cls in [
+            BaseAppException,
+            LsmError,
+            ConfigError,
+            SourceError,
+            StreamTestError,
+        ]:
             assert issubclass(exc_cls, Exception)
 
 

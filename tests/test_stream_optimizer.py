@@ -29,6 +29,7 @@ def tester(tmp_path):
         'freeze_max_hours': 24,
     }
     cfg.get_filter_params.return_value = {}
+    cfg.getint.return_value = 1  # StreamTester.__init__ 调 getint('Testing', ...) 取超时/重试次数
     with patch.object(StreamTester, '_verify_ffprobe', lambda self: None):
         t = StreamTester(cfg, MagicMock())
     t._ffprobe_path = None
@@ -115,7 +116,11 @@ class TestSourceFreeze:
     def test_full_path_freezes_after_threshold(self, tester):
         src = {'name': 'd', 'url': 'http://dead3.example.com/x'}
         with (
-            patch.object(tester, 'test_stream_url', return_value=('failed', {'error_reason': 'no_valid_streams'})),
+            patch.object(
+                tester,
+                'test_stream_url',
+                return_value=('failed', {'error_reason': 'no_valid_streams'}),
+            ),
             patch.object(tester, '_check_network_compatibility', return_value=True),
         ):
             results = [tester.test_single_stream(src) for _ in range(tester._freeze_fail_threshold + 1)]
@@ -148,6 +153,7 @@ def tester_p1p2(tmp_path):
         'output_sort_by': 'speed',
     }
     cfg.get_filter_params.return_value = {}
+    cfg.getint.return_value = 1  # StreamTester.__init__ 调 getint('Testing', ...) 取超时/重试次数
     with patch.object(StreamTester, '_verify_ffprobe', lambda self: None):
         t = StreamTester(cfg, MagicMock())
     t._ffprobe_path = None
@@ -189,7 +195,11 @@ class TestAdDetect:
         )
         src = {'name': '测试卡', 'url': 'http://live.example.com/loop.m3u8'}
         with (
-            patch.object(tester_p1p2, 'test_stream_url', return_value=('success', {'resolution': '1920x1080'})),
+            patch.object(
+                tester_p1p2,
+                'test_stream_url',
+                return_value=('success', {'resolution': '1920x1080'}),
+            ),
             patch.object(tester_p1p2, '_check_network_compatibility', return_value=True),
             patch('urllib.request.urlopen', return_value=_FakeResp(loop_playlist)),
         ):
@@ -201,7 +211,11 @@ class TestAdDetect:
         live_playlist = '#EXTM3U\n#EXTINF:6.0,CCTV1\nhttp://cdn.example.com/seg.ts\n'
         src = {'name': 'CCTV1', 'url': 'http://live.example.com/cctv1.m3u8'}
         with (
-            patch.object(tester_p1p2, 'test_stream_url', return_value=('success', {'resolution': '1920x1080'})),
+            patch.object(
+                tester_p1p2,
+                'test_stream_url',
+                return_value=('success', {'resolution': '1920x1080'}),
+            ),
             patch.object(tester_p1p2, '_check_network_compatibility', return_value=True),
             patch('urllib.request.urlopen', return_value=_FakeResp(live_playlist)),
         ):
@@ -213,7 +227,11 @@ class TestAdDetect:
         # rtmp/其他非 m3u8 源不拉 playlist，直接成功
         src = {'name': 'rtmp台', 'url': 'rtmp://live.example.com/app/stream'}
         with (
-            patch.object(tester_p1p2, 'test_stream_url', return_value=('success', {'resolution': '1920x1080'})),
+            patch.object(
+                tester_p1p2,
+                'test_stream_url',
+                return_value=('success', {'resolution': '1920x1080'}),
+            ),
             patch.object(tester_p1p2, '_check_network_compatibility', return_value=True),
         ):
             r = tester_p1p2.test_single_stream(src)
@@ -233,7 +251,11 @@ class TestGlobalList:
         # keep.example.com 在白名单 → 即使命中黑名单关键字也不跳过
         src = {'name': '保留源', 'url': 'http://keep.example.com/channel'}
         with (
-            patch.object(tester_p1p2, 'test_stream_url', return_value=('success', {'resolution': '1920x1080'})),
+            patch.object(
+                tester_p1p2,
+                'test_stream_url',
+                return_value=('success', {'resolution': '1920x1080'}),
+            ),
             patch.object(tester_p1p2, '_check_network_compatibility', return_value=True),
         ):
             r = tester_p1p2.test_single_stream(src)
