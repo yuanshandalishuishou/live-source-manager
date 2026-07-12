@@ -1,0 +1,56 @@
+# =============================================================================
+# Live Source Manager — systemd 服务单元（开机自启）
+# =============================================================================
+# 本文件为模板。安装时由 setup_linux.sh 将 __PROJECT_DIR__ 替换为实际项目路径后
+# 写入 /etc/systemd/system/live-source-web.service。
+#
+# 手动安装（无需运行完整 setup_linux.sh）：
+#   sudo sed 's|__PROJECT_DIR__|/opt/live-source-manager|g' \
+#        deploy/live-source-web.service > /etc/systemd/system/live-source-web.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now live-source-web.service
+#   sudo systemctl status live-source-web
+#
+# 前提条件：
+#   - 已在 <PROJECT_DIR>/.venv 创建虚拟环境并安装依赖（见 setup_linux.sh）
+#   - 运行时可写目录 web/data、config/online、config/sources、www/output
+#     需归属运行用户 www-data，否则首启写库 / 下载源 / 生成播放列表会 PermissionError
+# =============================================================================
+
+[Unit]
+Description=Live Source Manager Web Interface
+Documentation=https://github.com/yuanshandalishuishou/live-source-manager
+# 等网络真正在线后再启动，避免开机早期 DNS / 外部源不可达触发不必要重启
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=__PROJECT_DIR__
+
+# 虚拟环境置于 PATH 最前，确保隔离依赖被正确解析
+Environment="PATH=__PROJECT_DIR__/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+# 日志实时刷入 journal，便于 journalctl -u live-source-web -f 查看
+Environment=PYTHONUNBUFFERED=1
+# 如需自定义监听端口 / 主机，取消下面注释（默认值见 web/webapp.py: WEB_PORT=23456）
+# Environment=WEB_PORT=23456
+# Environment=WEB_HOST=0.0.0.0
+
+ExecStart=__PROJECT_DIR__/.venv/bin/python -m web.webapp
+
+# 进程退出（含异常）即重启，保证 7x24 常驻
+Restart=always
+RestartSec=10
+# 禁用启动频率限制：配合 Restart=always 实现崩溃自愈（由 RestartSec 节流，无重启风暴）
+StartLimitIntervalSec=0
+# 以进程组方式清理子进程（含 ffprobe/ffmpeg 派生的解码进程），避免孤儿进程残留
+KillMode=control-group
+# 标准输出 / 错误统一进 systemd journal
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+# 多用户模式（含开机）自动启动
+WantedBy=multi-user.target

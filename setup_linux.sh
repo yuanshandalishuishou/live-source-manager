@@ -108,12 +108,31 @@ if [ -d /etc/nginx/sites-available ] && [ -f "$PROJECT_DIR/nginx.conf" ]; then
     fi
 fi
 
-# 创建 systemd 服务
-log_info "创建 systemd 服务..."
-cat > /etc/systemd/system/live-source-web.service <<EOF
+# 运行时可写目录归属 www-data（避免 systemd 以 www-data 用户运行、首启写库/下载源/生成播放列表时 PermissionError）
+log_info "修复运行时目录权限 (www-data)..."
+mkdir -p "$PROJECT_DIR/web/data" "$PROJECT_DIR/config/online" "$PROJECT_DIR/config/sources" "$PROJECT_DIR/www/output"
+chown -R www-data:www-data \
+    "$PROJECT_DIR/web/data" \
+    "$PROJECT_DIR/config/online" \
+    "$PROJECT_DIR/config/sources" \
+    "$PROJECT_DIR/www/output" 2>/dev/null || {
+    log_warn "无法 chown 运行时目录，请确认 www-data 用户对 web/data、config/online、config/sources、www/output 有写权限"
+}
+
+# 生成并启用 systemd 服务（开机自启）
+log_info "创建并启用 systemd 服务（开机自启）..."
+SERVICE_SRC="$PROJECT_DIR/deploy/live-source-web.service"
+SERVICE_DST="/etc/systemd/system/live-source-web.service"
+if [ -f "$SERVICE_SRC" ]; then
+    # 从仓库模板渲染（单一事实来源），将 __PROJECT_DIR__ 替换为实际路径
+    sed "s|__PROJECT_DIR__|$PROJECT_DIR|g" "$SERVICE_SRC" > "$SERVICE_DST"
+else
+    # 兜底：模板缺失时直接内联生成（与 deploy/live-source-web.service 内容一致）
+    cat > "$SERVICE_DST" <<EOF
 [Unit]
 Description=Live Source Manager Web Interface
-After=network.target
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
@@ -121,28 +140,34 @@ User=www-data
 Group=www-data
 WorkingDirectory=$PROJECT_DIR
 Environment="PATH=$PROJECT_DIR/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment=PYTHONUNBUFFERED=1
 ExecStart=$PROJECT_DIR/.venv/bin/python -m web.webapp
 Restart=always
 RestartSec=10
+StartLimitIntervalSec=0
+KillMode=control-group
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
 EOF
-
-# 运行时可写目录归属 www-data（避免 systemd 以 www-data 用户运行、首启写库/下载源/生成播放列表时 PermissionError）
-log_info "修复运行时目录权限 (www-data)..."
-mkdir -p "$PROJECT_DIR/web/data" "$PROJECT_DIR/config/online" "$PROJECT_DIR/www/output"
-chown -R www-data:www-data \
-    "$PROJECT_DIR/web/data" \
-    "$PROJECT_DIR/config/online" \
-    "$PROJECT_DIR/www/output" 2>/dev/null || {
-    log_warn "无法 chown 运行时目录，请确认 www-data 用户对 web/data、config/online、www/output 有写权限"
-}
+fi
 
 systemctl daemon-reload
 systemctl enable live-source-web.service
 
-log_info "✓ systemd 服务创建完成"
+# 立即启动并验证（set -e 下用 if 包裹，启动失败仅警告不中断安装）
+if systemctl start live-source-web.service 2>/dev/null; then
+    sleep 2
+    if systemctl is-active --quiet live-source-web.service; then
+        log_info "✓ systemd 服务已启动并设为开机自启"
+    else
+        log_warn "服务已设为开机自启，但当前未能运行，请排查: journalctl -u live-source-web -n 50"
+    fi
+else
+    log_warn "服务启动失败（可能端口被占用），已设为开机自启；请排查: journalctl -u live-source-web -n 50"
+fi
 
 echo ""
 echo -e "${GREEN}================================================${NC}"
