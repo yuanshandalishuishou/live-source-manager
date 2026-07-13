@@ -378,16 +378,33 @@ def init_db(admin_password: str | None = None):
         from app import Config
 
         _cfg = Config()
-        _dirs = _cfg.get_sources().get('local_dirs', [])
+        _raw = _cfg.get_sources().get('local_dirs', [])
         _out_dir = _cfg.get('Output', 'output_dir', './www/output')
         _fname = _cfg.get('Output', 'filename', 'live.m3u')
         _rel = os.path.normpath(os.path.join(_out_dir, _fname))
         if not (os.path.isabs(_rel) or _rel.startswith('.')):
             _rel = './' + _rel
-        _dirs_norm = {os.path.normpath(d) for d in _dirs}
-        if os.path.normpath(_rel) not in _dirs_norm:
-            _cfg.set('Sources', 'local_dirs', ','.join([*list(_dirs), _rel]))
-            logger.info('已将输出文件默认加入本地源: %s', _rel)
+        # 规范化：过滤空串 + 去重（保序），清理历史脏数据（如空串/重复项）
+        _seen: set[str] = set()
+        _clean: list[str] = []
+        for _d in _raw:
+            if not isinstance(_d, str) or not _d.strip():
+                continue
+            _n = os.path.normpath(_d)
+            if _n in _seen:
+                continue
+            _seen.add(_n)
+            _clean.append(_d)
+        # 确保生成的输出文件默认作为本地文件源存在
+        if os.path.normpath(_rel) not in _seen:
+            _clean.append(_rel)
+            _seen.add(os.path.normpath(_rel))
+        _new_val = ','.join(_clean)
+        # 仅当值确有变化才写回（避免无谓 DB 写与重启抖动）
+        _old_val = ','.join([_d for _d in _raw if isinstance(_d, str)])
+        if _new_val != _old_val:
+            _cfg.set('Sources', 'local_dirs', _new_val)
+            logger.info('已确保输出文件在本地源并规范化: %s', _rel)
     except Exception as _e2:
         logger.warning('输出文件加入本地源失败（忽略）: %s', _e2)
 
