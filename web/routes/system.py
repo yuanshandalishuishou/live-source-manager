@@ -236,16 +236,9 @@ async def api_trigger_test(request: Request, current_user: dict = Depends(requir
                     status_code=400,
                     content={'status': 'error', 'detail': err},
                 )
-            # 按 url 去重
+            # 按 url 去重（跨文件：相同原始地址只测一次）
             total_before_dedup = len(sources)
-            seen = set()
-            uniq = []
-            for s in sources:
-                u = s.get('url')
-                if u and u not in seen:
-                    seen.add(u)
-                    uniq.append(s)
-            sources = uniq
+            sources = dedup_sources_by_url(sources)
             total_unique = len(sources)
             truncated = False
             mode = 'file'
@@ -256,14 +249,7 @@ async def api_trigger_test(request: Request, current_user: dict = Depends(requir
 
             # 按 url 去重（测试前先去重，避免重复测试同一源浪费资源）
             total_before_dedup = len(sources)
-            seen = set()
-            uniq = []
-            for s in sources:
-                u = s.get('url')
-                if u and u not in seen:
-                    seen.add(u)
-                    uniq.append(s)
-            sources = uniq
+            sources = dedup_sources_by_url(sources)
 
             total_unique = len(sources)
             # 自定义上限：limit=None 表示全量（all）；否则按所选数量截断
@@ -543,6 +529,25 @@ def _collect_file_sources(sm, file_id: str):
         return None, 'GitHub 源暂不支持按文件测试，请先采集后再选择对应的在线/本地文件'
 
     return None, '未知源类型，无法按文件测试'
+
+
+def dedup_sources_by_url(sources: list) -> list:
+    """按频道原始地址（url）去重，避免重复测试相同地址。
+
+    - 跨文件/跨源全局去重：同一 url 只保留首次出现的源（后出现的重复项跳过）。
+    - 空 url 的源不做去重（保留并加入结果），避免静默丢弃无地址的源。
+    - 返回去重后的新列表，不修改入参。
+    """
+    seen: set = set()
+    uniq: list = []
+    for s in sources:
+        u = s.get('url') if isinstance(s, dict) else None
+        if u:
+            if u in seen:
+                continue
+            seen.add(u)
+        uniq.append(s)
+    return uniq
 
 
 # 防护：单次测试最多测这么多源。ffprobe 并发受 Testing.max_concurrent_ffprobe 限制（默认 16），

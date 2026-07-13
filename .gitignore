@@ -56,3 +56,6 @@ data/status/
 # Logs
 *.log
 web_start.log
+
+# Tool local cache (regenerable, not project source)
+.zread/

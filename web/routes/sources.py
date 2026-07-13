@@ -756,12 +756,14 @@ async def api_list_source_files(current_user: dict = Depends(get_current_user)):
     for path in local_dirs:
         file_id = _make_source_file_id('local', path)
         abs_path = _resolve_local_path(path)
-        if os.path.isfile(abs_path):
+        is_file = os.path.isfile(abs_path)
+        is_dir = os.path.isdir(abs_path)
+        if is_file:
             file_exists = True
             norm = os.path.normpath(os.path.abspath(abs_path))
             channel_count = file_channel_counts.get(norm, 0)
             file_size = os.path.getsize(abs_path)
-        elif os.path.isdir(abs_path):
+        elif is_dir:
             file_exists = True
             file_size = 0
             channel_count = 0
@@ -775,13 +777,26 @@ async def api_list_source_files(current_user: dict = Depends(get_current_user)):
             file_exists = False
             file_size = 0
             channel_count = 0
+        # 状态语义：
+        #  - 存在            -> local_exists  （绿：存在）
+        #  - 文件型条目缺失   -> local_pending （待生成，温和灰；如默认加入的输出文件
+        #                        www/output/live.m3u，首次运行尚未产出，属预期延迟生成）
+        #  - 目录型路径缺失   -> local_missing （红：路径缺失，配置有误）
+        _base = os.path.basename(path.rstrip('/\\')) or path
+        _is_file_like = _base.lower().endswith(('.m3u', '.m3u8', '.txt'))
+        if file_exists:
+            file_status = 'local_exists'
+        elif _is_file_like:
+            file_status = 'local_pending'
+        else:
+            file_status = 'local_missing'
         files.append(
             {
                 'id': file_id,
                 'name': os.path.basename(path) or path,
                 'type': 'local',
                 'url_or_path': path,
-                'file_status': 'local_exists' if file_exists else 'local_missing',
+                'file_status': file_status,
                 'file_path': abs_path,
                 'file_size': file_size,
                 'channel_count': channel_count,

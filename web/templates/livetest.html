@@ -91,15 +91,19 @@
 {% block head %}
 <style>
 .test-results-wrap { overflow-x: auto; }
-table.test-table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 780px; }
+table.test-table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 820px; table-layout: fixed; }
 table.test-table th, table.test-table td { padding: 8px 10px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--border, #eee); }
 table.test-table th { position: sticky; top: 0; background: var(--card-bg, #fff); font-weight: 600; color: var(--text-light); white-space: nowrap; z-index: 1; }
-.url-main { word-break: break-all; max-width: 480px; line-height: 1.45; }
+.url-main { word-break: break-all; max-width: 320px; line-height: 1.45; }
 .url-ua { margin-top: 4px; font-size: 11px; color: var(--text-light); word-break: break-all; }
 .src-tag { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 11px; font-weight: 600; margin-bottom: 4px; }
 .tag-online { background: rgba(34,197,94,.15); color: #16a34a; }
 .tag-local { background: rgba(59,130,246,.15); color: #2563eb; }
-.src-path { word-break: break-all; max-width: 420px; line-height: 1.45; font-size: 12px; color: var(--text-light); white-space: normal; }
+.src-path { word-break: break-all; max-width: 280px; line-height: 1.45; font-size: 12px; color: var(--text-light); white-space: normal; }
+/* 详情列：固定占比、内容换行约束，避免撑满整行 */
+.detail-cell { word-break: break-word; line-height: 1.4; font-size: 12px; }
+.detail-cell .failure-reason { color: var(--danger, #e11d48); }
+.detail-cell .retry-info { color: var(--text-light); margin-bottom: 2px; }
 
 /* 错误类别列 */
 .cat-badge { display: inline-block; padding: 2px 9px; border-radius: 12px; font-size: 11px; font-weight: 600; white-space: nowrap; }
@@ -230,7 +234,9 @@ function renderTestUI() {
     } else if (status === 'cancelled') {
         statusLabel = '⏹ 测试已取消（完成 ' + completed + '/' + total + '）';
     } else if (status === 'completed') {
-        statusLabel = '✅ 测试已完成';
+        statusLabel = (total === 0)
+            ? '⚠️ 上次测试完成，但 0 个源被测试（请先在「源管理」添加源）'
+            : '✅ 测试已完成';
     } else if (status === 'error') {
         statusLabel = '❌ 测试出错: ' + (testData.message || '');
     } else {
@@ -310,7 +316,9 @@ function renderResults() {
         return (order[a.status] || 99) - (order[b.status] || 99);
     });
 
-    let html = '<div class="test-results-wrap"><table class="test-table"><thead><tr>'
+    let html = '<div class="test-results-wrap"><table class="test-table"><colgroup>'
+        + '<col style="width:14%"><col style="width:8%"><col style="width:24%"><col style="width:20%"><col style="width:14%"><col style="width:20%">'
+        + '</colgroup><thead><tr>'
         + '<th>频道</th><th>状态</th><th>真实地址</th><th>所在源</th><th>错误类别</th><th>详情</th>'
         + '</tr></thead><tbody>';
     filtered.forEach(function(r) {
@@ -356,7 +364,7 @@ function renderResults() {
             catCls = 'cat-' + r.category;
         }
         html += '<td>' + (catLabel ? '<span class="cat-badge ' + catCls + '">' + escapeHtml(catLabel) + '</span>' : '<span class="cat-none">—</span>') + '</td>';
-        html += '<td>' + detail + '</td>';
+        html += '<td class="detail-cell">' + detail + '</td>';
         html += '</tr>';
     });
     html += '</tbody></table></div>';
@@ -417,10 +425,21 @@ function triggerTest() {
         .then(function(r) { return r.json(); })
         .then(function(data) {
             if (data.status === 'triggered') {
+                // 没有可测试的源：明确提示，不进入轮询（避免「点了没反应」的困惑）
+                if (!data.total || data.total === 0) {
+                    document.getElementById('test-status-text').textContent =
+                        '⚠️ 暂无可测试的源（当前 0 个）：请先在「源管理」添加本地源文件或订阅在线源，再点击「立即测试」。';
+                    document.getElementById('progress-fill').style.width = '0%';
+                    updateControlButtons('idle');
+                    return;
+                }
                 var total = data.total || 0;
                 var label = data.mode === 'file' ? '所选文件' : scopeLabel;
+                var dedupNote = (data.dedup_removed && data.dedup_removed > 0)
+                    ? '（已自动去重 ' + data.dedup_removed + ' 个重复地址，原始 ' + (data.total_before_dedup || '?') + ' 个）'
+                    : '';
                 document.getElementById('test-status-text').textContent =
-                    '✅ 测试已触发，正在测试 ' + label + ' 内的 ' + total + ' 个源...';
+                    '✅ 测试已触发，正在测试 ' + label + ' 内的 ' + total + ' 个源' + dedupNote + '...';
                 // 启动轮询兜底（WS 优先实时推送，轮询保证 UI 持续更新直到完成）
                 if (window.__testPoll) clearInterval(window.__testPoll);
                 window.__testPoll = setInterval(pollTestStatus, 1200);

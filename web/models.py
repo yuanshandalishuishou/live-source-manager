@@ -24,6 +24,7 @@ def invalidate_config_cache():
 import datetime
 import logging
 import os
+import re
 import secrets
 import sqlite3
 import string
@@ -201,7 +202,16 @@ def init_db(admin_password: str | None = None):
     if not existing_admin:
         if admin_password is None:
             # 首次部署且未提供密码：自动生成强随机密码（满足 GB/T 39786-2021 复杂度）
-            effective_pw = ''.join(secrets.choice(string.ascii_letters + string.digits + '!@#$%^&*') for _ in range(16))
+            # 保证 16 位密码覆盖 4 类字符（大小写/数字/特殊）各至少 1 个，避免偶发不达标
+            _pw_pool = string.ascii_letters + string.digits + '!@#$%^&*'
+            _pw_classes = [string.ascii_lowercase, string.ascii_uppercase, string.digits, '!@#$%^&*']
+            _pw = [secrets.choice(c) for c in _pw_classes]
+            _pw += [secrets.choice(_pw_pool) for _ in range(16 - len(_pw_classes))]
+            # 密码学安全洗牌（Fisher-Yates），避免前 4 位恒为各类代表字符
+            for _i in range(len(_pw) - 1, 0, -1):
+                _j = secrets.randbelow(_i + 1)
+                _pw[_i], _pw[_j] = _pw[_j], _pw[_i]
+            effective_pw = ''.join(_pw)
         else:
             effective_pw = admin_password
         admin_hash = bcrypt.hashpw(effective_pw.encode(), bcrypt.gensalt()).decode()
@@ -381,24 +391,45 @@ def init_db(admin_password: str | None = None):
         _raw = _cfg.get_sources().get('local_dirs', [])
         _out_dir = _cfg.get('Output', 'output_dir', './www/output')
         _fname = _cfg.get('Output', 'filename', 'live.m3u')
-        _rel = os.path.normpath(os.path.join(_out_dir, _fname))
-        if not (os.path.isabs(_rel) or _rel.startswith('.')):
+        # 统一正斜杠：保证 Windows/Linux/Docker 跨平台一致，
+        # 避免 Windows 反斜杠在 Linux 部署时被误当作文件名一部分导致永久缺失。
+        _rel = (_out_dir.rstrip('/\\') + '/' + _fname).strip()
+        _rel = re.sub(r'[/\\]+', '/', _rel)
+        if not _rel.startswith('.'):
             _rel = './' + _rel
-        # 规范化：过滤空串 + 去重（保序），清理历史脏数据（如空串/重复项）
+        # 规范化：过滤空串 + 去重（保序），并将历史脏值（含 Windows 反斜杠）重写为 / 版本
         _seen: set[str] = set()
         _clean: list[str] = []
         for _d in _raw:
             if not isinstance(_d, str) or not _d.strip():
                 continue
-            _n = os.path.normpath(_d)
-            if _n in _seen:
+            _norm = re.sub(r'[/\\]+', '/', _d.strip())  # 统一分隔符后参与比对与存储
+            if _norm in _seen:
                 continue
-            _seen.add(_n)
-            _clean.append(_d)
-        # 确保生成的输出文件默认作为本地文件源存在
-        if os.path.normpath(_rel) not in _seen:
+            _seen.add(_norm)
+            _clean.append(_norm)
+        # 确保「规范默认本地源目录」始终存在（如 ./config/sources）。
+        # 该目录是种子默认值，是本地源的主位置；输出文件 live.m3u 只是「附加」的其中一个源。
+        # 历史上 ensure 曾在 local_dirs 退化时把该默认目录整体覆盖丢失，导致用户放进 config/sources 的源解析不到。
+        # 此处强制保证其存在，且缺失时自动建目录，避免界面误报「路径缺失」。
+        _default_local = Config._DEFAULT_VALUES.get('Sources.local_dirs', './config/sources')
+        _default_local_norm = re.sub(r'[/\\]+', '/', str(_default_local).strip())
+        if not _default_local_norm.startswith('.'):
+            _default_local_norm = './' + _default_local_norm
+        if _default_local_norm not in _seen:
+            _clean.insert(0, _default_local_norm)
+            _seen.add(_default_local_norm)
+            try:
+                _abs = os.path.abspath(_default_local_norm)
+                if not os.path.isdir(_abs):
+                    os.makedirs(_abs, exist_ok=True)
+                    logger.info('已自动创建默认本地源目录: %s', _default_local_norm)
+            except Exception as _mk_e:
+                logger.warning('创建默认本地源目录失败（忽略）: %s', _mk_e)
+        # 确保生成的输出文件默认作为本地文件源存在（规范 / 版本）
+        if _rel not in _seen:
             _clean.append(_rel)
-            _seen.add(os.path.normpath(_rel))
+            _seen.add(_rel)
         _new_val = ','.join(_clean)
         # 仅当值确有变化才写回（避免无谓 DB 写与重启抖动）
         _old_val = ','.join([_d for _d in _raw if isinstance(_d, str)])

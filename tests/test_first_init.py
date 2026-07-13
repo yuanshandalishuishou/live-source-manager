@@ -258,10 +258,17 @@ class TestOutputFileInLocalSources:
         dirs = cfg.get_sources().get('local_dirs', [])
         out_dir = cfg.get('Output', 'output_dir', './www/output')
         fname = cfg.get('Output', 'filename', 'live.m3u')
-        rel = os.path.normpath(os.path.join(out_dir, fname))
-        if not (os.path.isabs(rel) or rel.startswith('.')):
+        rel = (out_dir.rstrip('/\\') + '/' + fname).strip()
+        rel = re.sub(r'[/\\]+', '/', rel)
+        if not rel.startswith('.'):
             rel = './' + rel
         assert rel in dirs, f'首启未将输出文件默认加入本地源: 期望 {rel!r} 在 {dirs!r} 中'
+        # canonical 默认本地源目录必须始终存在（live.m3u 只是「附加」源之一，绝不能覆盖默认目录）
+        _def = Config._DEFAULT_VALUES.get('Sources.local_dirs', './config/sources')
+        _def = re.sub(r'[/\\]+', '/', str(_def).strip())
+        if not _def.startswith('.'):
+            _def = './' + _def
+        assert _def in dirs, f'首启丢失规范默认本地源目录: 期望 {_def!r} 在 {dirs!r} 中'
 
     def test_output_file_addition_idempotent(self, first_init_db):
         """重复首启不应重复添加输出文件（local_dirs 中仅出现一次）。"""
@@ -273,15 +280,22 @@ class TestOutputFileInLocalSources:
         models.seed_app_config_defaults()
         models.fill_missing_app_config_defaults()
         dirs2 = cfg.get_sources().get('local_dirs', [])
-        rel = os.path.normpath(
-            os.path.join(
-                cfg.get('Output', 'output_dir', './www/output'),
-                cfg.get('Output', 'filename', 'live.m3u'),
-            )
-        )
-        if not (os.path.isabs(rel) or rel.startswith('.')):
+        rel = (
+            cfg.get('Output', 'output_dir', './www/output').rstrip('/\\')
+            + '/'
+            + cfg.get('Output', 'filename', 'live.m3u')
+        ).strip()
+        rel = re.sub(r'[/\\]+', '/', rel)
+        if not rel.startswith('.'):
             rel = './' + rel
         assert dirs2.count(rel) == 1, f'输出文件路径在 local_dirs 应只出现一次，实为 {dirs2.count(rel)} 次: {dirs2!r}'
+        # canonical 默认本地源目录也只应出现一次，且两次首启均存在（防止被覆盖丢失）
+        _def = Config._DEFAULT_VALUES.get('Sources.local_dirs', './config/sources')
+        _def = re.sub(r'[/\\]+', '/', str(_def).strip())
+        if not _def.startswith('.'):
+            _def = './' + _def
+        assert dirs1.count(_def) == 1, f'首次首启后默认本地源目录应只出现一次: {dirs1!r}'
+        assert dirs2.count(_def) == 1, f'二次首启后默认本地源目录应只出现一次: {dirs2!r}'
         # 列表长度不应因二次首启增长（仅可能追加一次，但这里首次已含）
         assert len(dirs2) == len(dirs1), f'二次首启改变 local_dirs 长度: {dirs1} -> {dirs2}'
 

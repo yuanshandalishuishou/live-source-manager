@@ -254,6 +254,7 @@ function renderSourceFiles(data) {
         }
         else if (f.file_status === 'github_pending') { statusLabel = '待展开'; statusClass = 'badge badge-gray'; }
         else if (f.file_status === 'local_exists') { statusLabel = '存在'; statusClass = 'badge badge-green'; }
+        else if (f.file_status === 'local_pending') { statusLabel = '待生成'; statusClass = 'badge badge-gray'; }
         else if (f.file_status === 'local_missing') { statusLabel = '路径缺失'; statusClass = 'badge badge-red'; }
         else { statusLabel = '未知'; statusClass = 'badge badge-gray'; }
 
