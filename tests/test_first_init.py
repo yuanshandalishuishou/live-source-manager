@@ -245,3 +245,102 @@ class TestFirstInitIdempotency:
         finally:
             conn.close()
         assert after == before, f'重复首启后 app_config 行数变化: {before} -> {after}'
+
+
+@pytest.mark.integration
+class TestOutputFileInLocalSources:
+    """⑦ 首启默认将生成的输出文件加入本地文件源（Sources.local_dirs）"""
+
+    def test_output_file_added_to_local_dirs(self, first_init_db):
+        """首启后 Sources.local_dirs 必须包含 ./www/output/<Output.filename>。"""
+        _run_first_init()
+        cfg = Config()
+        dirs = cfg.get_sources().get('local_dirs', [])
+        out_dir = cfg.get('Output', 'output_dir', './www/output')
+        fname = cfg.get('Output', 'filename', 'live.m3u')
+        rel = os.path.normpath(os.path.join(out_dir, fname))
+        if not (os.path.isabs(rel) or rel.startswith('.')):
+            rel = './' + rel
+        assert rel in dirs, f'首启未将输出文件默认加入本地源: 期望 {rel!r} 在 {dirs!r} 中'
+
+    def test_output_file_addition_idempotent(self, first_init_db):
+        """重复首启不应重复添加输出文件（local_dirs 中仅出现一次）。"""
+        _run_first_init()
+        cfg = Config()
+        dirs1 = cfg.get_sources().get('local_dirs', [])
+        # 二次首启
+        models.init_db(None)
+        models.seed_app_config_defaults()
+        models.fill_missing_app_config_defaults()
+        dirs2 = cfg.get_sources().get('local_dirs', [])
+        rel = os.path.normpath(
+            os.path.join(
+                cfg.get('Output', 'output_dir', './www/output'),
+                cfg.get('Output', 'filename', 'live.m3u'),
+            )
+        )
+        if not (os.path.isabs(rel) or rel.startswith('.')):
+            rel = './' + rel
+        assert dirs2.count(rel) == 1, f'输出文件路径在 local_dirs 应只出现一次，实为 {dirs2.count(rel)} 次: {dirs2!r}'
+        # 列表长度不应因二次首启增长（仅可能追加一次，但这里首次已含）
+        assert len(dirs2) == len(dirs1), f'二次首启改变 local_dirs 长度: {dirs1} -> {dirs2}'
+
+
+import tempfile as _tf
+
+from app.source_manager import SourceManager
+
+
+@pytest.mark.integration
+class TestParseLocalFilesSupportsFilePath:
+    """parse_local_files 应同时支持目录与单个源文件路径"""
+
+    def _make_sm(self):
+        from app import ChannelRules
+
+        cfg = Config()
+        import logging as _logging
+
+        _logging.basicConfig(level=_logging.CRITICAL)
+        sm = SourceManager(cfg, _logging.getLogger('test'), ChannelRules())
+        return sm
+
+    def test_parse_single_m3u_file(self):
+        """传入单个 .m3u 文件路径应直接解析并返回频道，不抛 NotADirectoryError。"""
+        d = _tf.mkdtemp(prefix='parse_file_test_')
+        try:
+            fpath = os.path.join(d, 'sample.m3u')
+            with open(fpath, 'w', encoding='utf-8') as fh:
+                fh.write(
+                    '#EXTM3U\n'
+                    '#EXTINF:-1 tvg-name="CCTV1" group-title="央视",CCTV1\n'
+                    'http://example.com/cctv1.m3u8\n'
+                    '#EXTINF:-1 tvg-name="CCTV2" group-title="央视",CCTV2\n'
+                    'http://example.com/cctv2.m3u8\n'
+                )
+            sm = self._make_sm()
+            sources = sm.parse_local_files(fpath)
+            assert len(sources) == 2, f'应解析出 2 个频道，实为 {len(sources)}'
+            names = {s['name'] for s in sources}
+            assert names == {'CCTV1', 'CCTV2'}, f'频道名不匹配: {names}'
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_parse_directory_unchanged(self):
+        """目录仍按原行为遍历解析。"""
+        d = _tf.mkdtemp(prefix='parse_dir_test_')
+        try:
+            os.makedirs(os.path.join(d, 'sub'))
+            with open(os.path.join(d, 'sub', 'a.m3u'), 'w', encoding='utf-8') as fh:
+                fh.write('#EXTM3U\n#EXTINF:-1,C1\nhttp://example.com/c1.m3u8\n')
+            sm = self._make_sm()
+            sources = sm.parse_local_files(d)
+            assert len(sources) == 1, f'目录解析应返回 1 个频道，实为 {len(sources)}'
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_parse_nonexistent_path_returns_empty(self):
+        """不存在的路径应安全返回空列表而非抛错。"""
+        sm = self._make_sm()
+        sources = sm.parse_local_files('/nonexistent/path/that/should/not/exist')
+        assert sources == [], f'不存在路径应返回空列表，实为 {sources!r}'

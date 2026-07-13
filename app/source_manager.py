@@ -714,10 +714,15 @@ class SourceManager:
 
     def parse_local_files(self, directory: str, exclusions: list | None = None) -> list[dict]:
         """
-        解析本地目录中的所有源文件
+        解析本地目录或单个源文件中的所有源
+
+        支持两种输入：
+        - 目录路径：遍历目录下所有 .m3u/.m3u8/.txt 文件（原行为）
+        - 单个源文件路径：直接解析该文件（允许 local_dirs 混入具体源文件，
+          如默认加入的生成输出文件 ./www/output/live.m3u）
 
         Args:
-            directory: 目录路径
+            directory: 目录路径或单个源文件路径
             exclusions: 可选，被「窄门禁」排除的 URL 记录列表（累计用）
 
         Returns:
@@ -727,7 +732,19 @@ class SourceManager:
         if exclusions is None:
             exclusions = []
 
-        # 遍历目录中的所有文件
+        # 单个文件路径：直接解析（不走 os.walk，避免 NotADirectoryError）
+        if os.path.isfile(directory):
+            try:
+                sources = self.parse_file(directory, exclusions=exclusions)
+                self.logger.debug(f'成功解析文件 {directory}: {len(sources)} 个源')
+            except Exception as e:
+                self.logger.error(f'解析文件失败 {directory}: {e}')
+            return sources
+
+        # 目录：遍历所有支持的源文件
+        if not os.path.isdir(directory):
+            self.logger.warning(f'本地路径不存在，跳过: {directory}')
+            return sources
         for root, _, files in os.walk(directory):
             for file in files:
                 # 只处理支持的源文件格式

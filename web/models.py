@@ -369,6 +369,28 @@ def init_db(admin_password: str | None = None):
     except Exception as _e:
         logger.warning('应用配置默认值种子失败（Web 启动时会重试）: %s', _e)
 
+    # ── 默认将生成的输出文件加入本地文件源 ───────────
+    # 确保 <Output.output_dir>/<Output.filename>（默认 ./www/output/live.m3u）作为本地
+    # 文件源存在于 Sources.local_dirs，使产出文件默认即可被解析与源管理展示。
+    # 幂等：已包含则跳过；文件名跟随 Output.filename 设置变化。每次 init_db（含 Web 启动）
+    # 都会执行，保证「默认加入」语义始终成立。
+    try:
+        from app import Config
+
+        _cfg = Config()
+        _dirs = _cfg.get_sources().get('local_dirs', [])
+        _out_dir = _cfg.get('Output', 'output_dir', './www/output')
+        _fname = _cfg.get('Output', 'filename', 'live.m3u')
+        _rel = os.path.normpath(os.path.join(_out_dir, _fname))
+        if not (os.path.isabs(_rel) or _rel.startswith('.')):
+            _rel = './' + _rel
+        _dirs_norm = {os.path.normpath(d) for d in _dirs}
+        if os.path.normpath(_rel) not in _dirs_norm:
+            _cfg.set('Sources', 'local_dirs', ','.join([*list(_dirs), _rel]))
+            logger.info('已将输出文件默认加入本地源: %s', _rel)
+    except Exception as _e2:
+        logger.warning('输出文件加入本地源失败（忽略）: %s', _e2)
+
     logger.info('init_db 完成')
     return effective_pw
 
