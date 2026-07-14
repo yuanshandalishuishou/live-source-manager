@@ -1,0 +1,39 @@
+# =============================================================
+# .dockerignore — 缩减 Docker 构建上下文
+# 仅排除「运行期产物 / 无关目录」，绝不排除 Dockerfile 依赖的文件：
+#   requirements.txt  app/  web/  config/channel_rules.yml
+#   start_docker.sh  nginx.conf  healthcheck.sh
+#   app/data/seed_classification_rules.sql
+# =============================================================
+
+# ===== 版本控制 / 编辑器 / 本机工作目录 =====
+.git/
+.gitignore
+.idea/
+.vscode/
+.workbuddy/
+
+# ===== Python 缓存与虚拟环境 =====
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.venv/
+app/.venv/
+web/.venv/
+
+# ===== 运行期产物（容器首次启动会自行生成/下载，勿进构建上下文）=====
+log/
+*.log
+data/
+config/online/
+config/sources/
+www/output/
+
+# ===== 文档 / 测试 / 部署脚本（非镜像必需，加速构建）=====
+*.md
+tests/
+deploy/
+tools/
+.zread/
+node_modules/

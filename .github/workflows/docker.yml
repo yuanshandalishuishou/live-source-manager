@@ -1,0 +1,102 @@
+# =============================================================
+# GitHub Actions — 自动构建并推送 Docker 镜像到 GHCR
+# =============================================================
+# 触发：
+#   - push 到 master 分支（且仅当相关文件变更时）
+#   - 手动触发（workflow_dispatch）
+#
+# 镜像产物：
+#   ghcr.io/yuanshandalishuishou/live-source-manager:latest
+#   ghcr.io/yuanshandalishuishou/live-source-manager:master
+#   ghcr.io/yuanshandalishuishou/live-source-manager:sha-<commit>
+#
+# 权限：使用仓库内置 GITHUB_TOKEN（packages: write），无需任何 PAT。
+# =============================================================
+
+name: Build and Push Docker Image
+
+on:
+  push:
+    branches: ["master"]
+    paths:
+      - "Dockerfile"
+      - "docker-compose.yml"
+      - ".dockerignore"
+      - "start_docker.sh"
+      - "nginx.conf"
+      - "healthcheck.sh"
+      - "requirements.txt"
+      - "app/**"
+      - "web/**"
+      - "config/**"
+      - ".github/workflows/docker.yml"
+  workflow_dispatch:
+
+# 防止并发 push 互相干扰：同一分支排队执行
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Restore official mirrors (GitHub Runner is outside CN)
+        # Dockerfile 默认把 deb.debian.org / pypi.tuna 替换为清华镜像源以加速国内
+        # 本地构建；但在 GitHub 境外 Runner 上清华源不可达，会导致 apt-get update /
+        # pip install 失败。构建前在「工作区」内还原为官方源（不改动提交、不影响
+        # 国内用户本地 docker build 体验）。
+        run: |
+          sed -i 's#mirrors.tuna.tsinghua.edu.cn#deb.debian.org#g' Dockerfile
+          sed -i 's#pypi.tuna.tsinghua.edu.cn#pypi.org#g' Dockerfile
+          echo "--- Dockerfile 镜像源行（确认已还原为官方源）---"
+          grep -nE "deb.debian.org|pypi.org|tuna" Dockerfile || true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable={{is_default_branch}}
+          labels: |
+            org.opencontainers.image.title=Live Source Manager
+            org.opencontainers.image.description=Live source manager (FastAPI + Nginx + SQLite)
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          # ffmpeg 静态构建为 linux64(amd64)；固定 amd64 避免架构不匹配
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            BASE_IMAGE=python:3.13-slim-bookworm
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
