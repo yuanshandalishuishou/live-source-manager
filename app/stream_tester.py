@@ -348,14 +348,18 @@ class StreamTester:
                         self.logger.info('✓ FFprobe 支持 -rw_timeout（细化 read 超时生效）')
                 else:
                     self.logger.warning(f'⚠ FFprobe执行返回非零: {result.stderr}')
-                    StreamTester._ffprobe_verified = False
+                    # 不立即设为 False——先尝试 ffmpeg 降级（见下方）
                     self.ffprobe_available = False
             except (subprocess.TimeoutExpired, FileNotFoundError, Exception) as e:
                 self.logger.warning(f'⚠ FFprobe工具不可用: {e}')
-                StreamTester._ffprobe_verified = False
                 self.ffprobe_available = False
-        elif StreamTester._ffmpeg_path:
-            # 降级：没有 ffprobe 但有 ffmpeg，验证 ffmpeg 可用
+        else:
+            # ffprobe 未找到 → 标记不可用，后续尝试 ffmpeg 降级
+            self.ffprobe_available = False
+        # 注意：此处将原 elif 改为 if——即使 ffprobe 路径存在但验证失败，
+        # 也应尝试 ffmpeg 降级，避免"找到但坏掉的 ffprobe"阻断所有测试
+        if not self.ffprobe_available and StreamTester._ffmpeg_path:
+            # 降级：ffprobe 不可用或验证失败，尝试 ffmpeg
             try:
                 result = subprocess.run(
                     [StreamTester._ffmpeg_path, '-version'],
@@ -768,7 +772,7 @@ class StreamTester:
             connect_us = int((connect_timeout if connect_timeout is not None else self.connect_timeout) * 1_000_000)
             read_us = int((read_timeout if read_timeout is not None else self.read_timeout) * 1_000_000)
 
-            if StreamTester._ffprobe_path:
+            if StreamTester._ffprobe_path and self.ffprobe_available:
                 # 优先使用 ffprobe（完整元数据）
                 ffprobe_cmd = StreamTester._ffprobe_path
                 cmd = [

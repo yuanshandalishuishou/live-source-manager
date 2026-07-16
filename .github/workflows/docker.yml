@@ -117,3 +117,19 @@ jobs:
           # 关闭 provenance/sbom 证明生成，避免需要额外权限导致推送阶段失败
           provenance: false
           sbom: false
+
+      # 构建并推送成功后，自动将包设为 public，
+      # 这样其他人无需登录 ghcr.io 即可 `docker pull` 直接运行（李总要求）。
+      # 用仓库内置 GITHUB_TOKEN（含 packages: write），不依赖任何 PAT。
+      - name: Make package public (others can docker pull without auth)
+        if: success()
+        run: |
+          echo "Setting package visibility to public..."
+          curl -sS -X PATCH \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/user/packages/container/${{ github.event.repository.name }}/visibility" \
+            -d '{"visibility":"public"}' \
+            -w "PATCH_HTTP %{http_code}\n" \
+            || echo "set-public skipped (manual action needed)"
+
