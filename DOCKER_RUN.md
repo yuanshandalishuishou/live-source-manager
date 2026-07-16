@@ -69,7 +69,8 @@ docker build -t lsm:latest .
 docker build --build-arg BASE_IMAGE=python:3.13-slim-bookworm -t lsm:latest .
 ```
 
-镜像内已预装：全部 Python 依赖（独立 venv）、Nginx、cron、ffmpeg/ffprobe。
+镜像内已预装：全部 Python 依赖（独立 venv）、Nginx、cron。
+FFmpeg/ffprobe 为**可选组件**——构建时从 GitHub 下载静态构建，若网络不可达则自动跳过（流测试功能受限，Web/Nginx/SQLite 正常运行）。
 入口脚本 `start_docker.sh` 会在首次启动时自动建库、建表、灌入默认值。
 
 > 提示：仓库根目录已含 `.dockerignore`，可避免把 `.venv`、`log`、`config/online` 等运行期产物打进构建上下文，加快构建速度。
@@ -95,27 +96,36 @@ curl -I http://localhost:12345/    # 文件服务：返回 200
 
 ---
 
-## 五、推送到 GHCR（发布镜像给他人用）
+## 五、获取 GHCR 镜像（他人直接使用）
 
-需要先 `docker login ghcr.io`（用带 `write:packages` 权限的 GitHub Personal Access Token）：
+本项目已配置 GitHub Actions（`.github/workflows/docker.yml`）：每次推送到 `master` 分支时自动构建镜像并发布到 GHCR，无需手动操作。
+
+### 他人使用（推荐）
 
 ```bash
-# 登录（token 通过 stdin 传入，不回显）
+# 直接拉取（公开镜像无需登录）
+docker pull ghcr.io/yuanshandalishuishou/live-source-manager:latest
+# 然后执行「第二节」的 docker run 命令（把镜像名换成上面的地址）
+```
+
+> 若 pull 报 `denied`，说明镜像尚未构建完成或包可见性为 private。
+> 前往 https://github.com/yuanshandalishuishou/live-source-manager/actions 查看构建状态；
+> 构建成功后可在 https://github.com/users/yuanshandalishuishou/packages 把镜像设为 Public。
+
+### 手动推送（备选，需本机有 Docker）
+
+如果需要在本地构建并手动推送：
+
+```bash
+# 登录（用带 write:packages 权限的 GitHub Token）
 echo $GITHUB_TOKEN | docker login ghcr.io -u yuanshandalishuishou --password-stdin
 
 # 打标签并推送
 docker tag lsm:latest ghcr.io/yuanshandalishuishou/live-source-manager:latest
 docker push ghcr.io/yuanshandalishuishou/live-source-manager:latest
 
-# 推送完成后登出，清理本地凭证
+# 推送完成后登出
 docker logout ghcr.io
-```
-
-他人只需：
-
-```bash
-docker pull ghcr.io/yuanshandalishuishou/live-source-manager:latest
-# 然后执行「第二节」的 docker run 命令
 ```
 
 ---

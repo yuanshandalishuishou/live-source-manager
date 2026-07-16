@@ -12,6 +12,7 @@
 .idea/
 .vscode/
 .workbuddy/
+.github/
 
 # ===== Python 缓存与虚拟环境 =====
 __pycache__/

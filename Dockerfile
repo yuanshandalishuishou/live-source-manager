@@ -16,7 +16,7 @@ FROM ${BASE_IMAGE} AS builder
 # 优先使用清华镜像源加速国内构建
 RUN sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
     sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list && \
-    apt-get update && \
+    apt-get -o Acquire::Retries=3 update && \
     apt-get install -y --no-install-recommends \
         curl \
         ca-certificates \
@@ -51,7 +51,7 @@ LABEL maintainer="Live Source Manager <admin@example.com>" \
 # 优先使用清华镜像源加速国内构建
 RUN sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
     sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list && \
-    apt-get update && \
+    apt-get -o Acquire::Retries=3 update && \
     apt-get install -y --no-install-recommends \
         tzdata \
         cron \
@@ -73,15 +73,22 @@ RUN sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.li
     chown -R www-data:www-data /www/output /var/log/nginx
 
 # 安装 FFmpeg 静态构建（包含 ffmpeg + ffprobe）
+# FFmpeg 为「可选组件」：下载/解压失败仅告警跳过，不阻断镜像构建
+# （start_docker.sh 中 check_ffmpeg 失败也仅 warning —— 流媒体测试功能受限，但 Web/Nginx/SQLite 服务可正常启动）
+# 关键修复：原写法 curl 缺少 -f 且用 && 链式，遇到 404 会保存错误页并被 tar 解压失败导致整个构建失败。
 RUN cd /tmp && \
-    curl -sL https://github.com/BtbN/FFmpeg-Builds/releases/download/master/ffmpeg-master-latest-linux64-gpl.tar.xz -o ffmpeg.tar.xz || \
-    curl -sL https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz -o ffmpeg.tar.xz && \
-    tar -xf ffmpeg.tar.xz && \
-    cp ffmpeg-*/ffmpeg /usr/local/bin/ && \
-    cp ffmpeg-*/ffprobe /usr/local/bin/ && \
-    chmod +x /usr/local/bin/ffmpeg /usr/local/bin/ffprobe && \
-    rm -rf /tmp/ffmpeg* && \
-    echo "FFmpeg installed: $(ffmpeg -version | head -1)"
+    ( curl -fsSL https://github.com/BtbN/FFmpeg-Builds/releases/download/master/ffmpeg-master-latest-linux64-gpl.tar.xz -o ffmpeg.tar.xz || \
+      curl -fsSL https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz -o ffmpeg.tar.xz ) ; \
+    if tar -tf ffmpeg.tar.xz >/dev/null 2>&1; then \
+      tar -xf ffmpeg.tar.xz && \
+      cp ffmpeg-*/ffmpeg /usr/local/bin/ && \
+      cp ffmpeg-*/ffprobe /usr/local/bin/ && \
+      chmod +x /usr/local/bin/ffmpeg /usr/local/bin/ffprobe && \
+      echo "FFmpeg installed: $(ffmpeg -version | head -1)" ; \
+    else \
+      echo "WARN: FFmpeg download/extract failed, skipping (optional component)" ; \
+    fi ; \
+    rm -rf /tmp/ffmpeg* || true
 
 # ── 构建期创建带全部依赖的虚拟环境 ──────────────
 # start_docker.sh 默认以 /app/.venv/bin/python 启动 Web 服务；
@@ -93,7 +100,7 @@ COPY requirements.txt /tmp/requirements.txt
 RUN python3 -m venv /app/.venv && \
     /app/.venv/bin/pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple && \
     /app/.venv/bin/pip config set global.trusted-host pypi.tuna.tsinghua.edu.cn && \
-    /app/.venv/bin/pip install --no-cache-dir -r /tmp/requirements.txt && \
+    /app/.venv/bin/pip install --no-cache-dir --retries 5 --timeout 60 -r /tmp/requirements.txt && \
     rm -rf /tmp/requirements.txt ~/.cache/pip
 # 复制 requirements.txt 供容器运行时依赖自检（check_python_deps 命中即跳过安装）
 COPY requirements.txt /app/requirements.txt
