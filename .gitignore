@@ -52,6 +52,8 @@ tools/ffmpeg/
 
 # Runtime-generated artifacts (regenerable)
 data/status/
+# Web 层运行时状态文件（冻结源列表等，非源码）
+web/data/status/
 
 # Logs
 *.log
