@@ -62,6 +62,7 @@ RUN sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.li
         dos2unix \
         gettext-base \
         python3-venv \
+        ffmpeg \
         && \
     ln -snf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
     echo "Asia/Shanghai" > /etc/timezone && \
@@ -72,23 +73,13 @@ RUN sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.li
     mkdir -p /app /config /log /www/output /data /var/log/nginx /tmp/livesourcemanager && \
     chown -R www-data:www-data /www/output /var/log/nginx
 
-# 安装 FFmpeg 静态构建（包含 ffmpeg + ffprobe）
-# FFmpeg 为「可选组件」：下载/解压失败仅告警跳过，不阻断镜像构建
-# （start_docker.sh 中 check_ffmpeg 失败也仅 warning —— 流媒体测试功能受限，但 Web/Nginx/SQLite 服务可正常启动）
-# 关键修复：原写法 curl 缺少 -f 且用 && 链式，遇到 404 会保存错误页并被 tar 解压失败导致整个构建失败。
-RUN cd /tmp && \
-    ( curl -fsSL https://github.com/BtbN/FFmpeg-Builds/releases/download/master/ffmpeg-master-latest-linux64-gpl.tar.xz -o ffmpeg.tar.xz || \
-      curl -fsSL https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz -o ffmpeg.tar.xz ) ; \
-    if tar -tf ffmpeg.tar.xz >/dev/null 2>&1; then \
-      tar -xf ffmpeg.tar.xz && \
-      cp ffmpeg-*/ffmpeg /usr/local/bin/ && \
-      cp ffmpeg-*/ffprobe /usr/local/bin/ && \
-      chmod +x /usr/local/bin/ffmpeg /usr/local/bin/ffprobe && \
-      echo "FFmpeg installed: $(ffmpeg -version | head -1)" ; \
-    else \
-      echo "WARN: FFmpeg download/extract failed, skipping (optional component)" ; \
-    fi ; \
-    rm -rf /tmp/ffmpeg* || true
+# FFmpeg 已通过上方 apt-get install 安装（Debian 官方仓库 ffmpeg 包，稳定，无需 GitHub 下载）。
+# 双保险：软链 /app/tools/ffmpeg/{ffmpeg,ffprobe} -> /usr/bin
+# 兼容程序「项目内 tools/ffmpeg 目录」查找逻辑，也方便用户挂载宿主二进制到该目录。
+RUN mkdir -p /app/tools/ffmpeg \
+    && ln -sf /usr/bin/ffmpeg /app/tools/ffmpeg/ffmpeg \
+    && ln -sf /usr/bin/ffprobe /app/tools/ffmpeg/ffprobe \
+    && echo "FFmpeg ready: $(ffmpeg -version | head -1)"
 
 # ── 构建期创建带全部依赖的虚拟环境 ──────────────
 # start_docker.sh 默认以 /app/.venv/bin/python 启动 Web 服务；
