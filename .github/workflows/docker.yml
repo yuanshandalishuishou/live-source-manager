@@ -2,7 +2,7 @@
 # GitHub Actions — 自动构建并推送 Docker 镜像到 GHCR
 # =============================================================
 # 触发：
-#   - push 到 master 分支（且仅当相关文件变更时）
+#   - push 到 master 分支（每次推送代码都会重新构建镜像）
 #   - 手动触发（workflow_dispatch）
 #
 # 镜像产物：
@@ -18,21 +18,8 @@ name: Build and Push Docker Image
 on:
   push:
     branches: ["master"]
-    paths:
-      - "Dockerfile"
-      - "docker-compose.yml"
-      - ".dockerignore"
-      - "start_docker.sh"
-      - "nginx.conf"
-      - "healthcheck.sh"
-      - "requirements.txt"
-      - "app/**"
-      - "web/**"
-      - "config/**"
-      - ".github/workflows/docker.yml"
   workflow_dispatch:
 
-# 防止并发 push 互相干扰：同一分支排队执行
 concurrency:
   group: docker-${{ github.ref }}
   cancel-in-progress: false
@@ -125,11 +112,12 @@ jobs:
         if: success()
         run: |
           echo "Setting package visibility to public..."
+          PKG_FULL="${{ github.repository }}"
+          PKG_ENC="$(echo "$PKG_FULL" | sed 's#/#%2F#g')"
           curl -sS -X PATCH \
             -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/user/packages/container/${{ github.event.repository.name }}/visibility" \
+            "https://api.github.com/user/packages/container/${PKG_ENC}/visibility" \
             -d '{"visibility":"public"}' \
             -w "PATCH_HTTP %{http_code}\n" \
             || echo "set-public skipped (manual action needed)"
-
