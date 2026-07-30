@@ -608,11 +608,11 @@ except Exception as e:
     # 初始化数据库：建表 + 创建默认用户
     log_info "正在初始化 SQLite 数据库表结构..."
     local init_output
-    # 从环境变量读取管理员密码；未设置时由 init_db 自动生成强随机密码（零配置首次部署）
+    # 从环境变量读取管理员密码；未设置时由 init_db 使用默认初始密码 Admin@123（零配置首次部署）
     local ADMIN_PW="${WEB_ADMIN_PASSWORD:-}"
 
     if [ -z "$ADMIN_PW" ]; then
-        log_info "环境变量 WEB_ADMIN_PASSWORD 未设置，首次部署将由 init_db 自动生成强随机管理员密码"
+        log_info "环境变量 WEB_ADMIN_PASSWORD 未设置，首次部署将使用默认初始密码 Admin@123（登录后请立即修改）"
     else
         log_info "使用环境变量 WEB_ADMIN_PASSWORD 作为管理员密码"
         # 复杂度提示（不强制阻断，兼容历史部署；建议 ≥8 位且含字母与数字）
@@ -625,7 +625,7 @@ except Exception as e:
 
     init_output=$(cd /app && /app/.venv/bin/python <<PYEOF 2>&1
 from web.models import init_db
-# 留空则传 None，由 init_db 自动生成强密码（项目仅保留 admin 用户，无 viewer）
+# 留空则传 None，由 init_db 使用默认初始密码 Admin@123（项目仅保留 admin 用户，无 viewer）
 init_db('$ADMIN_PW' if '$ADMIN_PW' else None)
 print('DB_INIT_OK')
 PYEOF

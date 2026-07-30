@@ -80,8 +80,8 @@ def main():
         sys.exit(1)
 
     logger.info(f'🌐 Web 管理界面启动: http://{host}:{port}')
-    logger.info('   首次启动密码由 WEB_ADMIN_PASSWORD / WEB_VIEWER_PASSWORD 环境变量设置')
-    logger.info('   未设置时自动生成随机密码，请查看启动日志')
+    logger.info('   首次启动密码由 WEB_ADMIN_PASSWORD 环境变量设置')
+    logger.info('   未设置时使用默认初始密码 Admin@123（首次登录后请立即修改）')
     uvicorn.run(app, host=host, port=port, log_level='info')
 
 

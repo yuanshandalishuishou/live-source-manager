@@ -774,8 +774,8 @@ async def lifespan(app_instance: FastAPI):
     # ── startup ────────────────────────────────
     admin_pw = os.environ.get('WEB_ADMIN_PASSWORD')
     if admin_pw is not None:
-        # 仅当用户显式设置了密码时才校验复杂度；未设置则交由 init_db 自动生成强密码
-        # （首次部署零配置即可用，仍满足合规复杂度要求）
+        # 仅当用户显式设置了密码时才校验复杂度；未设置则由 init_db 使用默认初始密码 Admin@123
+        # （首次部署零配置即可用，默认密码满足合规复杂度，首次登录强制修改）
         _pw = admin_pw
         _categories = 0
         if re.search(r'[A-Z]', _pw):
@@ -792,7 +792,7 @@ async def lifespan(app_instance: FastAPI):
                 f'  当前长度: {len(_pw)}, 包含字符类别数: {_categories}（至少需要3类，长度≥8）\n'
                 f'  密码需含大写字母、小写字母、数字、特殊符号中的至少三类。'
             )
-    # 首次部署：未设置 WEB_ADMIN_PASSWORD 时 init_db 自动生成强密码并写入日志
+    # 首次部署：未设置 WEB_ADMIN_PASSWORD 时 init_db 使用默认初始密码 Admin@123 并写入日志
     effective_pw = await asyncio.to_thread(models.init_db, admin_password=admin_pw)
     if effective_pw is not None:
         logger.info(

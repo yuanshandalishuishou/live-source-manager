@@ -122,17 +122,19 @@ class StreamTester:
         4. imageio-ffmpeg pip 包（仅 ffmpeg）
         5. static_ffmpeg pip 包（ffmpeg + ffprobe）
         """
-        # 1. 项目本地目录
+        # 1. 项目本地目录（兼容 Linux 无扩展名 / Windows .exe）
         project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        local_path = os.path.join(project_root, 'tools', 'ffmpeg', f'{name}.exe')
-        if os.path.exists(local_path):
-            return local_path
+        for cand in (name, f'{name}.exe'):
+            local_path = os.path.join(project_root, 'tools', 'ffmpeg', cand)
+            if os.path.exists(local_path):
+                return local_path
 
-        # 2. 系统 PATH
+        # 2. 系统 PATH（兼容 Linux 无扩展名 / Windows .exe）
         for path_dir in os.environ.get('PATH', '').split(os.pathsep):
-            exe_path = os.path.join(path_dir, f'{name}.exe')
-            if os.path.exists(exe_path):
-                return exe_path
+            for cand in (name, f'{name}.exe'):
+                exe_path = os.path.join(path_dir, cand)
+                if os.path.exists(exe_path):
+                    return exe_path
 
         # 3. 常见安装目录（Windows）
         common_dirs = [

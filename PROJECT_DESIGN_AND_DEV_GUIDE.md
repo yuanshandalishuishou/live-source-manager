@@ -632,7 +632,7 @@ def reset_source_manager_cache()               # 配置变更后调用
 @app.on_event 等效 → @asynccontextmanager lifespan(app):
     # startup:
     # 1) 校验 WEB_ADMIN_PASSWORD 复杂度（GB/T 39786-2021：≥8 位 + 3 类字符；不合规直接 RuntimeError 拒绝启动）
-    # 2) models.init_db(admin_password) → 自动建库 + 自动生成强密码（首次部署零配置）
+    # 2) models.init_db(admin_password) → 自动建库 + 默认初始密码 Admin@123（首次部署零配置）
     # 3) cleanup_expired_sessions / cleanup_audit_logs(max_days=180)
     # 4) set_password_change_required('admin', True)（首次登录强制改密）
     # 5) init_login_lockout_table()
@@ -797,7 +797,7 @@ def main():
 **自动建库幂等**：
 - `has_app_config_data()` 为空 → `seed_app_config_defaults()`（约 61 键）
 - 始终 `fill_missing_app_config_defaults()`（补全 schema 新增键，不覆盖已有值）
-- `init_db(admin_password)`：首次生成强随机 admin 密码并写日志（`ADMIN_PASSWORD_INITIALIZED=...`），后续仅校验。
+- `init_db(admin_password)`：首次使用默认初始密码 Admin@123 并写日志（`ADMIN_PASSWORD_INITIALIZED=...`），后续仅校验。
 - 输出文件（`Output.output_dir/Output.filename`）默认加入 `local_dirs`（`init_db` 幂等 ensure：过滤空串 + 去重，仅值变化才写回）。
 
 ---

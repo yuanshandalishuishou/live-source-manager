@@ -6,7 +6,7 @@
 
 覆盖：
   1. 自动建库建表（所有业务表齐全）
-  2. 首次部署自动创建 admin 用户并生成强随机密码（满足 GB/T 39786-2021 复杂度）
+  2. 首次部署自动创建 admin 用户并使用默认初始密码 Admin@123（满足 GB/T 39786-2021 复杂度）
   3. app_config 写入全部 Config._DEFAULT_VALUES 作为默认值
   4. 自动扫描 4 字段默认值正确
   5. 默认值键的 section 前缀必须存在于 web.core.SECTION_SCHEMA（防『加了默认值却漏 schema』漂移）
@@ -78,7 +78,7 @@ def _run_first_init():
     注意：init_db 现已自包含写入 app_config 默认值（首次部署无需等待 Web 启动），
     故显式 seed_app_config_defaults() 在表非空时幂等跳过；seed_n 取首启后 DB 实际行数。
     """
-    pw = models.init_db(None)  # 首次部署：不传密码 -> 自动生成强密码 + 自包含灌入默认值
+    pw = models.init_db(None)  # 首次部署：不传密码 -> 默认初始密码 Admin@123 + 自包含灌入默认值
     models.seed_app_config_defaults()  # 幂等：表非空时跳过
     fill_n = models.fill_missing_app_config_defaults()
     conn = sqlite3.connect(models.DB_PATH)
@@ -149,7 +149,8 @@ class TestFirstInitTablesAndUser:
         match = re.search(r'^ADMIN_PASSWORD_INITIALIZED=(\S+)$', captured, re.MULTILINE)
         assert match, '首启未通过 stdout 输出 ADMIN_PASSWORD_INITIALIZED='
         pw = match.group(1)
-        assert _password_complexity_ok(pw), f'自动生成的密码复杂度不足: {pw}'
+        assert pw == 'Admin@123', f'默认初始密码应为 Admin@123，实为: {pw}'
+        assert _password_complexity_ok(pw), f'默认初始密码复杂度不足: {pw}'
 
 
 @pytest.mark.integration

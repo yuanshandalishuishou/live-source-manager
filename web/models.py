@@ -25,10 +25,7 @@ import datetime
 import logging
 import os
 import re
-import secrets
 import sqlite3
-import string
-import threading
 from contextlib import contextmanager, suppress
 
 import bcrypt
@@ -136,11 +133,12 @@ def _execute(sql: str, params=()):
 def init_db(admin_password: str | None = None):
     """建表 + 默认管理员用户。
 
-    - admin_password 为 None 且用户表为空（首次部署）：自动生成强随机密码并创建 admin。
+    - admin_password 为 None 且用户表为空（首次部署）：使用默认初始密码
+      ``Admin@123``（李总指定，与 Go 版一致；启动后可在 Web 端修改）。
     - admin_password 提供：首次部署时使用该密码创建 admin（调用方应保证复杂度合规）。
     - 用户已存在：保留现有密码不变（幂等，不覆盖用户已修改的密码）。
 
-    返回实际生效的管理员密码（生成或提供）；若用户已存在则返回 None。
+    返回实际生效的管理员密码（默认或提供）；若用户已存在则返回 None。
     首次创建时会向 stdout 打印 ``ADMIN_PASSWORD_INITIALIZED=xxx`` 供部署脚本捕获。
     """
     conn = get_conn()
@@ -201,17 +199,11 @@ def init_db(admin_password: str | None = None):
     effective_pw = None
     if not existing_admin:
         if admin_password is None:
-            # 首次部署且未提供密码：自动生成强随机密码（满足 GB/T 39786-2021 复杂度）
-            # 保证 16 位密码覆盖 4 类字符（大小写/数字/特殊）各至少 1 个，避免偶发不达标
-            _pw_pool = string.ascii_letters + string.digits + '!@#$%^&*'
-            _pw_classes = [string.ascii_lowercase, string.ascii_uppercase, string.digits, '!@#$%^&*']
-            _pw = [secrets.choice(c) for c in _pw_classes]
-            _pw += [secrets.choice(_pw_pool) for _ in range(16 - len(_pw_classes))]
-            # 密码学安全洗牌（Fisher-Yates），避免前 4 位恒为各类代表字符
-            for _i in range(len(_pw) - 1, 0, -1):
-                _j = secrets.randbelow(_i + 1)
-                _pw[_i], _pw[_j] = _pw[_j], _pw[_i]
-            effective_pw = ''.join(_pw)
+            # 首次部署且未提供密码：使用默认初始密码 Admin@123
+            # （李总指定，与 Go 版一致；9 位含大写/小写/数字/特殊符号 4 类字符，
+            #   满足 GB/T 39786-2021 复杂度；首次登录会强制要求修改密码）
+            effective_pw = 'Admin@123'
+            logger.warning('未设置 WEB_ADMIN_PASSWORD，使用默认初始密码 Admin@123（首次登录后请立即修改）')
         else:
             effective_pw = admin_password
         admin_hash = bcrypt.hashpw(effective_pw.encode(), bcrypt.gensalt()).decode()

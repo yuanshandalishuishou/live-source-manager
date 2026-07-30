@@ -72,7 +72,7 @@ log_info "初始化 SQLite 数据库..."
 cd "$PROJECT_DIR"
 DB_INIT_OUTPUT=$("$PROJECT_DIR/.venv/bin/python" -c "
 from web.models import init_db
-init_db(None)  # 传 None：未设置自定义密码时自动生成强随机密码（零配置首启）
+init_db(None)  # 传 None：未设置自定义密码时使用默认初始密码 Admin@123（零配置首启，登录后请修改）
 print('DB_INIT_OK')
 " 2>&1 || true)
 echo "$DB_INIT_OUTPUT" | grep -q "DB_INIT_OK" && {
@@ -81,7 +81,7 @@ echo "$DB_INIT_OUTPUT" | grep -q "DB_INIT_OK" && {
     GEN_PW=$(echo "$DB_INIT_OUTPUT" | grep '^ADMIN_PASSWORD_INITIALIZED=' | head -1 | cut -d= -f2-)
     if [ -n "$GEN_PW" ]; then
         log_warn "============================================================"
-        log_warn "⚠️  已自动生成管理员密码，请立即记录并尽快在「配置中心」修改！"
+        log_warn "⚠️  管理员初始密码如下（默认 Admin@123），首次登录后请立即修改！"
         log_warn "    管理员账号: admin"
         log_warn "    管理员密码: $GEN_PW"
         log_warn "============================================================"

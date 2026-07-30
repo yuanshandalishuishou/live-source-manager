@@ -474,11 +474,11 @@ OUTPUT_FILENAME=live.m3u
 # 定时任务（每天 6:00、12:00、18:00、22:00 执行）
 UPDATE_CRON=0 6,12,18,22 * * *
 
-# 密码（留空则首次启动时自动生成随机密码）
+# 密码（留空则使用默认初始密码 Admin@123，登录后请立即修改）
 WEB_ADMIN_PASSWORD=
 ```
 
-> ⚠️ `WEB_ADMIN_PASSWORD` 留空时，系统会自动生成一个 16 位强随机密码（包含大小写字母、数字和特殊字符），首次启动时会打印到容器日志中。这是零配置设计的核心特性。
+> ⚠️ `WEB_ADMIN_PASSWORD` 留空时，系统使用默认初始密码 `Admin@123`（满足 GB/T 39786-2021 复杂度），并打印到容器日志中；首次登录会强制要求修改密码。
 
 #### 步骤 2：启动服务
 
@@ -504,7 +504,7 @@ live-source-manager  | [INFO] 初始管理员密码（请妥善保存）: Ab3#kL
 打开浏览器访问 `http://localhost:23456`，使用以下凭据登录：
 
 - **用户名**：`admin`
-- **密码**：启动日志中打印的随机密码（见上一步）
+- **密码**：默认初始密码 `Admin@123`（或你在环境变量中自定义的密码）
 
 登录后你将看到仪表盘（Dashboard），其中展示了源的统计信息、系统资源使用情况和定时任务状态。
 
@@ -609,7 +609,7 @@ Sources: [setup_linux.sh](setup_linux.sh#L1-L189), [deploy/live-source-web.servi
 
 #### 1️⃣ 修改默认管理员密码
 
-进入 **「配置中心 → 密码管理」**，立即修改自动生成的随机密码。
+进入 **「配置中心 → 密码管理」**，立即修改默认初始密码 `Admin@123`。
 
 #### 2️⃣ 配置加密密钥
 
@@ -900,7 +900,7 @@ CONFIG_ENCRYPT_KEY=                        # 配置加密密钥，留空则自�
 | `CONCURRENT_THREADS` | `50` | 流测试最大并发数 |
 | `OUTPUT_FILENAME` | `live.m3u` | 生成的播放列表文件名 |
 | `UPDATE_CRON` | `"0 6,12,18,22 * * *"` | 定时更新源的 Cron 表达式 |
-| `WEB_ADMIN_PASSWORD` | 空（自动生成） | Web 管理员密码。留空则首次启动自动生成强随机密码 |
+| `WEB_ADMIN_PASSWORD` | 空（默认 Admin@123） | Web 管理员密码。留空则使用默认初始密码 Admin@123 |
 | `CONFIG_ENCRYPT_KEY` | 空（自动生成） | 配置加密密钥。留空则首次启动自动生成 |
 | `CONFIG_DIR` | `./config` | 配置文件目录映射（可修改为本机其他路径） |
 | `LOG_DIR` | `./logs` | 日志目录映射 |
@@ -950,7 +950,7 @@ Sources: [docker-compose.yml](docker-compose.yml#L17-L30), [Dockerfile](Dockerfi
 
 #### 第 4 步：查看并记录初始密码
 
-如果 `.env` 中未设置 `WEB_ADMIN_PASSWORD`，系统会在首次启动时自动生成强随机密码。查看日志获取密码：
+如果 `.env` 中未设置 `WEB_ADMIN_PASSWORD`，系统使用默认初始密码 `Admin@123`。可在日志中确认：
 
 ```bash
 # 查看启动日志，搜索 ADMIN_PASSWORD_INITIALIZED
@@ -1488,9 +1488,9 @@ Sources: [setup_windows.ps1](E:\工作空间\live-source-manager/setup_windows.p
 **步骤 6：数据库初始化**
 调用 `web.models.init_db(None)` 执行以下操作：
 1. 建表：`users`、`audit_logs`、`app_config`、`sessions`、`classification_dimensions`、`classification_rules`、`province_exclusion_map` 等
-2. 首次部署（用户表为空）时自动生成**符合 GB/T 39786-2021 复杂度要求的 16 位强随机密码**
+2. 首次部署（用户表为空）时使用**默认初始密码 Admin@123（满足 GB/T 39786-2021 复杂度要求）**
 3. 密码输出到控制台（格式 `ADMIN_PASSWORD_INITIALIZED=xxx`），同时写入日志
-4. 若 `WEB_ADMIN_PASSWORD` 环境变量已设置，则使用该值覆盖自动生成
+4. 若 `WEB_ADMIN_PASSWORD` 环境变量已设置，则使用该值覆盖默认密码
 
 ```python
 # 密码生成策略（web/models.py:204-214）
@@ -1647,7 +1647,7 @@ Sources: [web/webapp.py](E:\工作空间\live-source-manager/web/webapp.py#L56-L
 
 #### 自定义初始密码
 
-通过设置环境变量 `WEB_ADMIN_PASSWORD` 可跳过随机密码生成：
+通过设置环境变量 `WEB_ADMIN_PASSWORD` 可覆盖默认初始密码 Admin@123：
 
 ```powershell
 # 在启动前设置
@@ -1881,8 +1881,8 @@ sequenceDiagram
     S->>PY: 创建 .venv + pip install -r requirements.txt
     PY-->>S: 依赖就绪
     S->>DB: python -c "from web.models import init_db; init_db(None)"
-    DB-->>S: 数据库初始化成功 + 自动生成管理员密码
-    Note over S,U: 首次运行自动生成强随机密码，记录在控制台输出
+    DB-->>S: 数据库初始化成功 + 默认初始密码 Admin@123
+    Note over S,U: 首次运行使用默认初始密码 Admin@123，记录在控制台输出
     S->>OS: chown -R www-data web/data config/online config/sources www/output
     S->>NG: 复制 nginx.conf 并启用站点
     S->>SD: sed 渲染 service 模板 → systemctl enable --now
@@ -1893,7 +1893,7 @@ sequenceDiagram
 **脚本核心行为说明**：
 
 - **环境检测复用**：`setup_linux.sh` 在内部 `source` 了 `start_docker.sh`，复用了其中的 `setup_environment()` 函数，该函数自动安装 Python 3.13（如需）、pip 依赖、ffmpeg 和 Nginx
-- **零配置首启**：数据库初始化时若 `WEB_ADMIN_PASSWORD` 环境变量未设置，`init_db(None)` 会自动生成 16 字节强随机密码并打印到控制台——**首次务必记录此密码**
+- **零配置首启**：数据库初始化时若 `WEB_ADMIN_PASSWORD` 环境变量未设置，`init_db(None)` 使用默认初始密码 Admin@123 并打印到控制台——**首次登录后请立即修改**
 - **权限修正**：脚本创建并 `chown` 四个关键运行时目录为 `www-data:www-data`，避免 systemd 以 `www-data` 用户运行时因无权写入而崩溃
 - **Nginx 站点启用**：从项目根 `nginx.conf` 复制到 `/etc/nginx/sites-available/` 并创建符号链接，覆盖默认站点
 
@@ -2273,7 +2273,7 @@ Sources: [setup_linux.sh](setup_linux.sh#L130-L135), [live-source-web.service](d
 
 ### 安全加固建议
 
-1. **管理员密码**：首次启动后立即登录 Web 界面，在「配置中心」修改默认管理员密码。自动生成的随机密码会打印在 `setup_linux.sh` 的控制台输出中，安装完成后请及时记录
+1. **管理员密码**：首次启动后立即登录 Web 界面，在「配置中心」修改默认管理员密码。默认初始密码 Admin@123 会打印在 `setup_linux.sh` 的控制台输出中，登录后请立即修改
 2. **加密密钥**：在 Web 界面「配置中心」生成或导入 `CONFIG_ENCRYPT_KEY`（32字节 base64 编码），用于敏感配置字段（如 GitHub Token）的 Fernet (AES-128-CBC) 加密存储
 3. **Nginx 访问控制**：`location /status` 限制仅 `127.0.0.1` 和 Docker 内网段（172.16.0.0/12、10.0.0.0/8）可访问，如需开放公网，建议配合防火墙白名单
 4. **隐藏文件拦截**：Nginx 已配置 `location ~ /\.` 拒绝以点号开头的隐藏文件访问，保护 `.env`、`.git` 等敏感路径
@@ -6478,7 +6478,7 @@ if len(_pw) < 8 or _categories < 3:
     )
 ```
 
-当未设置 `WEB_ADMIN_PASSWORD` 时，系统自动生成 16 位**密码学安全随机密码**（通过 `secrets.choice` 组合 4 类字符各至少 1 个 + Fisher-Yates 洗牌），并在启动日志中打印。此机制确保了"零配置首次部署"场景下仍然满足合规要求。
+当未设置 `WEB_ADMIN_PASSWORD` 时，系统使用**默认初始密码 Admin@123**（含大写/小写/数字/特殊符号 4 类字符，满足复杂度要求），并在启动日志中打印；配合首次登录强制改密策略，保证"零配置首次部署"仍然合规。
 
 Sources: [web/core.py](web/core.py#L736-L756), [web/models.py](web/models.py#L171-L192)
 
@@ -9277,7 +9277,7 @@ def tester(tmp_path):
 
 `test_first_init.py` 中的 `@pytest.mark.integration` 测试是**回归保护的哨兵**。它们模拟完整的第一启动流程：
 
-1. `init_db(None)` → 自动创建所有业务表、生成强随机 admin 密码
+1. `init_db(None)` → 自动创建所有业务表、设置默认初始密码 Admin@123
 2. `seed_app_config_defaults()` → 写入全部 `Config._DEFAULT_VALUES`（约 70+ 个键值对）
 3. `fill_missing_app_config_defaults()` → 补全缺失的默认值
 

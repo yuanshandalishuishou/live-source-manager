@@ -75,8 +75,7 @@ docker build -t lsm:latest .
 docker build --build-arg BASE_IMAGE=python:3.13-slim-bookworm -t lsm:latest .
 ```
 
-镜像内已预装：全部 Python 依赖（独立 venv）、Nginx、cron。
-FFmpeg/ffprobe 为**可选组件**——构建时从 GitHub 下载静态构建，若网络不可达则自动跳过（流测试功能受限，Web/Nginx/SQLite 正常运行）。
+镜像内已预装：全部 Python 依赖（独立 venv）、Nginx、cron，以及 **FFmpeg/FFprobe**（通过 `apt-get install ffmpeg` 装进镜像层，二进制位于 `/usr/bin/ffmpeg`、`/usr/bin/ffprobe`，并软链到 `/app/tools/ffmpeg/` 供程序内部查找逻辑命中）。流测试功能默认可用，无需运行时下载。
 入口脚本 `start_docker.sh` 会在首次启动时自动建库、建表、灌入默认值。
 
 > 提示：仓库根目录已含 `.dockerignore`，可避免把 `.venv`、`log`、`config/online` 等运行期产物打进构建上下文，加快构建速度。

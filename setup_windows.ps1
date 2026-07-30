@@ -344,7 +344,7 @@ function Initialize-Database {
     
     $PythonScript = @"
 from web.models import init_db
-init_db(None)  # 传 None：未设置自定义密码时自动生成强随机密码（零配置首启）
+init_db(None)  # 传 None：未设置自定义密码时使用默认初始密码 Admin@123（零配置首启，登录后请修改）
 print('DB_INIT_OK')
 "@
     
@@ -355,7 +355,7 @@ print('DB_INIT_OK')
         $genPw = ($result | Where-Object { $_ -match '^ADMIN_PASSWORD_INITIALIZED=' } | Select-Object -First 1) -replace '^ADMIN_PASSWORD_INITIALIZED=' , ''
         if ($genPw) {
             Write-Warn "============================================================"
-            Write-Warn "⚠️  已自动生成管理员密码，请立即记录并尽快在「配置中心」修改！"
+            Write-Warn "⚠️  管理员初始密码如下（默认 Admin@123），首次登录后请立即修改！"
             Write-Warn "    管理员账号: admin"
             Write-Warn "    管理员密码: $genPw"
             Write-Warn "============================================================"
