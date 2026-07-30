@@ -75,6 +75,10 @@ class Config:
         'Network.proxy_password': '',
         'Network.github_mirror': 'https://ghproxy.com/',
         'Network.ipv6_enabled': 'True',
+        # [Network] 下载性能调优：短超时 + 高并发，让不可达源快速失败（秒）
+        'Network.download_connect_timeout': '10',
+        'Network.download_total_timeout': '30',
+        'Network.download_batch_size': '12',
         # [HTTPServer]
         'HTTPServer.enabled': 'True',
         'HTTPServer.host': '0.0.0.0',
@@ -246,6 +250,15 @@ class Config:
             'proxy_password': self.get('Network', 'proxy_password', self._default('Network', 'proxy_password')),
             'github_mirror': self.get('Network', 'github_mirror', self._default('Network', 'github_mirror')),
             'ipv6_enabled': self.getboolean('Network', 'ipv6_enabled', self._default_bool('Network', 'ipv6_enabled')),
+            'download_connect_timeout': self.getint(
+                'Network', 'download_connect_timeout', self._default_int('Network', 'download_connect_timeout')
+            ),
+            'download_total_timeout': self.getint(
+                'Network', 'download_total_timeout', self._default_int('Network', 'download_total_timeout')
+            ),
+            'download_batch_size': self.getint(
+                'Network', 'download_batch_size', self._default_int('Network', 'download_batch_size')
+            ),
         }
 
     def get_github_config(self) -> dict:

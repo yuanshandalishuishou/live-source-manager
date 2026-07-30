@@ -157,8 +157,8 @@ class SourceManager:
 
             connector = None
 
-            # 设置更宽松的超时配置
-            timeout = aiohttp.ClientTimeout(total=60, connect=30, sock_connect=30, sock_read=30)
+            # 共享会话默认超时（短一点，死源快速失败；实际下载在 download_file 另设）
+            timeout = aiohttp.ClientTimeout(total=30, connect=10, sock_connect=10, sock_read=20)
 
             # 设置地址族(支持IPv6)
             family = socket.AF_INET
@@ -227,8 +227,8 @@ class SourceManager:
 
         self.logger.info(f'开始下载 {len(online_urls)} 个源文件')
 
-        # 分批下载,避免过多并发
-        batch_size = 3
+        # 分批下载，并发大小由 Network.download_batch_size 控制（默认12，死源快速失败）
+        batch_size = self.network_config.get('download_batch_size', 12)
         total_batches = (len(online_urls) - 1) // batch_size + 1
 
         for i in range(0, len(online_urls), batch_size):
@@ -270,8 +270,8 @@ class SourceManager:
                         if fname not in self._github_entry_map[item['entry']]:
                             self._github_entry_map[item['entry']].append(fname)
 
-            # 批次之间短暂暂停,避免过于频繁的请求
-            await asyncio.sleep(1)
+            # 批次之间短暂暂停,避免过于频繁的请求（高并发下缩短间隔）
+            await asyncio.sleep(0.3)
 
         # 持久化 GitHub 条目映射（供文件级 UA 精确匹配）
         self._save_github_entry_map()
@@ -477,11 +477,17 @@ class SourceManager:
                 {'type': 'mirror', 'use_proxy': False},
             ]
         else:
-            # raw 方式（默认）
-            strategies = [
-                {'type': 'direct', 'use_proxy': False},
-                {'type': 'proxy', 'use_proxy': True},
-            ]
+            # raw 方式（默认）：已配置代理则优先走代理，避免直连白等超时；未配置则先直连再代理
+            if self.network_config.get('proxy_enabled'):
+                strategies = [
+                    {'type': 'proxy', 'use_proxy': True},
+                    {'type': 'direct', 'use_proxy': False},
+                ]
+            else:
+                strategies = [
+                    {'type': 'direct', 'use_proxy': False},
+                    {'type': 'proxy', 'use_proxy': True},
+                ]
 
         # 尝试不同的下载策略
         for strategy in strategies:
@@ -514,16 +520,15 @@ class SourceManager:
         try:
             self.logger.info(f'尝试下载 [{strategy["type"]}] (method={method}): {url}')
 
-            # 为GitHub源设置更长的超时时间
-            if 'github.com' in url or 'raw.githubusercontent.com' in url:
-                timeout_config = aiohttp.ClientTimeout(
-                    total=120,  # 总超时120秒
-                    connect=60,  # 连接超时60秒
-                    sock_connect=60,  # socket连接超时60秒
-                    sock_read=60,  # socket读取超时60秒
-                )
-            else:
-                timeout_config = aiohttp.ClientTimeout(total=60, connect=30, sock_connect=30, sock_read=30)
+            # 下载超时由 Network.download_* 配置控制（默认连接10s/总30s），死源快速失败
+            _conn_to = self.network_config.get('download_connect_timeout', 10)
+            _total_to = self.network_config.get('download_total_timeout', 30)
+            timeout_config = aiohttp.ClientTimeout(
+                total=_total_to,
+                connect=_conn_to,
+                sock_connect=_conn_to,
+                sock_read=_total_to,
+            )
 
             # M4: 使用共享session替代每次创建销毁
             session = await self.get_session(strategy['use_proxy'])
