@@ -55,6 +55,12 @@ docker run -d \
 | `/log` | 运行日志 | 建议 |
 | `/config/sources` | 本地源文件（只读） | 可选 |
 
+> **持久化原理（务必挂载卷）**：镜像内已将应用运行时目录软链到上述卷目录——
+> `/app/www/output → /www/output`、`/app/config → /config`、`/app/log → /log`，
+> 数据库由 `WEB_DATA_DIR=/data` 指向 `/data`。**只要按上表挂载 `./data ./config ./output ./logs`，
+> 容器重建后配置（含 GitHub Token、在线源/本地源列表）、已生成播放列表、日志全部保留，不会丢源。**
+> 不挂载则数据随容器销毁而丢失。
+
 ---
 
 ## 三、自己构建镜像

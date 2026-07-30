@@ -24,9 +24,12 @@ app/.venv/
 web/.venv/
 
 # ===== 运行期产物（容器首次启动会自行生成/下载，勿进构建上下文）=====
-log/
+# 注意：data/ 与 log/ 必须带前导斜杠锚定到「仓库根」，
+# 否则会递归排除 app/data/（含 seed_classification_rules.sql 种子脚本），
+# 导致 Dockerfile 的 COPY app/data/seed_classification_rules.sql 失败、镜像构建中断。
+/log/
 *.log
-data/
+/data/
 config/online/
 config/sources/
 www/output/

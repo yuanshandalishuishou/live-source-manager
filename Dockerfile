@@ -35,6 +35,7 @@ ENV TZ=Asia/Shanghai \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/ \
     PROJECT_DIR=/app \
+    WEB_DATA_DIR=/data \
     DEBIAN_FRONTEND=noninteractive \
     NGINX_PORT=12345 \
     WEB_PORT=23456 \
@@ -101,7 +102,8 @@ WORKDIR /
 # 复制应用文件
 COPY app/ /app/app/
 # 分类规则种子 SQL 脚本（替代 YAML）
-COPY app/data/seed_classification_rules.sql /app/data/seed_classification_rules.sql
+# 注意：web.models 中 PROJECT_ROOT=/app，种子路径为 /app/app/data/seed_classification_rules.sql
+COPY app/data/seed_classification_rules.sql /app/app/data/seed_classification_rules.sql
 # 所有配置走 SQLite app_config 表（无 config.ini 依赖）
 COPY config/channel_rules.yml /config/channel_rules.yml
 COPY web/ /app/web/
@@ -110,7 +112,10 @@ COPY nginx.conf /etc/nginx/nginx.conf
 COPY healthcheck.sh /healthcheck.sh
 
 # 权限 & 初始化（单 RUN 层）
-# P3-新-4: 创建 /app/config/channel_rules.yml → /config/channel_rules.yml 软链接
+# 将应用运行时目录软链到卷目录，使 docker-compose 的 ./data ./config ./output ./logs 挂载生效：
+#   /app/www/output → /www/output（nginx 服务目录，M3U 由此发布）
+#   /app/config     → /config    （channel_rules / online / sources）
+#   /app/log        → /log       （应用日志）
 RUN chmod +x /start_docker.sh /healthcheck.sh && \
     find /app -name "*.py" -exec chmod 644 {} \; && \
     chown -R www-data:www-data /www/output /var/log/nginx && \
@@ -122,8 +127,10 @@ RUN chmod +x /start_docker.sh /healthcheck.sh && \
     chown www-data:www-data /www/output/health /www/output/index.html && \
     ln -sf /dev/stdout /var/log/nginx/access.log && \
     ln -sf /dev/stderr /var/log/nginx/error.log && \
-    mkdir -p /app/config && \
-    ln -sf /config/channel_rules.yml /app/config/channel_rules.yml
+    mkdir -p /app/www && \
+    ln -sfn /www/output /app/www/output && \
+    rm -rf /app/config && ln -sfn /config /app/config && \
+    ln -sfn /log /app/log
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD /healthcheck.sh
