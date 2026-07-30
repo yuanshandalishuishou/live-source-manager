@@ -84,11 +84,12 @@ docker build --build-arg BASE_IMAGE=python:3.13-slim-bookworm -t lsm:latest .
 
 ## 四、首次启动后获取管理员密码
 
-- 若启动时**未设置** `WEB_ADMIN_PASSWORD`，容器会随机生成一个强密码并打印到日志，账号固定为 `admin`：
+- 若启动时**未设置** `WEB_ADMIN_PASSWORD`，则使用**默认初始密码 `Admin@123`**（与 Go 版一致，满足 GB/T 39786‑2021 复杂度），账号固定为 `admin`，首次登录会强制要求修改密码。该默认密码也会打印到日志（仅首次建库时出现）：
 
   ```bash
   docker logs live-source-manager | grep ADMIN_PASSWORD_INITIALIZED
   ```
+  > 若已挂载旧库（`/data` 中已有 `web.db`），不会重复打印，直接用 `admin / Admin@123` 登录即可。
 
 - 若已设置 `WEB_ADMIN_PASSWORD`，则使用该密码登录（账号 `admin`）。
 
@@ -137,7 +138,7 @@ docker logout ghcr.io
 
 ## 六、⚠️ 两个关键安全 / 稳定注意事项
 
-1. **`WEB_ADMIN_PASSWORD`**：不设置则每次全新部署随机生成（日志可见）。要可复现就显式设一个 ≥8 位、含字母+数字的强密码。
+1. **`WEB_ADMIN_PASSWORD`**：不设置则使用默认初始密码 `Admin@123`（首次登录强制改密，日志可见 `ADMIN_PASSWORD_INITIALIZED=Admin@123`）。建议显式设一个 ≥8 位、含字母+数字的强密码以便复现。
 2. **`CONFIG_ENCRYPT_KEY`**：不设置则每次启动随机生成 → 重启后**无法解密之前加密过的配置**。稳定部署必须固定一个 Fernet 密钥。生成方式：
 
    ```bash

@@ -91,7 +91,7 @@ class Config:
         'Testing.max_concurrent_ffprobe': '16',
         'Testing.cache_ttl': '120',
         'Testing.enable_speed_test': 'True',
-        'Testing.speed_test_duration': '6',
+        'Testing.speed_test_duration': '3',  # 单源下载测速时长(秒)；降为3s可显著缩短整体检测耗时（原6s）
         'Testing.auto_scan_enabled': 'False',
         'Testing.auto_scan_mode': 'interval',
         'Testing.auto_scan_interval_hours': '24',

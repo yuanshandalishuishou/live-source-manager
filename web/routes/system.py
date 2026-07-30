@@ -1026,9 +1026,14 @@ def _run_test_task(sources: list[dict], limit: int | None = None, gen: int = 0) 
                     r = fut.result(timeout=TEST_SOURCE_TIMEOUT)
                 except concurrent.futures.TimeoutError:
                     # 单源测试无界阻塞（如 DNS/连接被黑洞）兜底：超时不拖垮整轮，
-                    # 标记失败并尽量终止其在跑的 ffprobe，随后继续后续源
+                    # 标记失败并仅终止在跑的 ffprobe 子进程，随后继续后续源。
+                    # 注意：此处绝不能用 tester.abort() —— abort() 会置全局 _abort 标志，
+                    # 导致本批次内其他并发源的 ffprobe 被一并杀掉后，后续所有源都立即返回
+                    # 'interrupted' 且永远不被计入 done，造成「完成数卡死 < 总数」的死循环。
+                    # 这里只杀进程、随后清除中断标志，下一轮批次即可正常重测被中断的源。
                     with contextlib.suppress(Exception):
-                        tester.abort()
+                        tester.terminate_active_procs()
+                    tester.clear_abort()
                     r = {
                         **sources[bi],
                         'status': 'failed',

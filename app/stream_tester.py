@@ -785,6 +785,10 @@ class StreamTester:
                     'json',  # JSON输出格式
                     '-show_streams',  # 显示流信息
                     '-show_format',  # 显示格式信息
+                    '-analyzeduration',
+                    '3000000',  # 限制分析时长(3s)，加速直播流探测，避免 ffprobe 长时间缓冲
+                    '-probesize',
+                    '3000000',  # 限制探测读取量(3MB)，单源耗时显著下降
                     '-timeout',
                     str(connect_us),  # 连接超时（微秒）
                     url,
