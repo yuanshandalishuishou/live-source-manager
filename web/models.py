@@ -130,6 +130,22 @@ def _execute(sql: str, params=()):
                     logger.warning(f'关闭数据库连接异常: {_re}')
 
 
+def password_complexity_ok(pw: str) -> bool:
+    """校验密码是否满足 GB/T 39786-2021 复杂度要求（长度≥8 且含大写/小写/数字/特殊符号中至少3类）。"""
+    if not pw or len(pw) < 8:
+        return False
+    cats = 0
+    if re.search(r'[A-Z]', pw):
+        cats += 1
+    if re.search(r'[a-z]', pw):
+        cats += 1
+    if re.search(r'[0-9]', pw):
+        cats += 1
+    if re.search(r'[^A-Za-z0-9]', pw):
+        cats += 1
+    return cats >= 3
+
+
 def init_db(admin_password: str | None = None):
     """建表 + 默认管理员用户。
 
@@ -217,7 +233,24 @@ def init_db(admin_password: str | None = None):
             print('ADMIN_PASSWORD_INITIALIZED=' + effective_pw, flush=True)
             logger.info('初始管理员密码（请妥善保存）: %s', effective_pw)
     else:
-        logger.info('管理员用户已存在，保留现有密码')
+        # 用户已存在：默认保留现有密码（不覆盖用户在 Web 端修改的密码）。
+        # 例外：若环境变量显式提供了【合规】且与库内当前密码【不同】的密码，
+        # 则强制更新为环境变量密码——救活“弱密码写库→每次启动被合规校验拒绝”的死锁，
+        # 并支持部署时通过环境变量修改管理员密码（env 密码与库一致则幂等跳过）。
+        # 注意：env 密码不合规时不更新，交由 lifespan 拒绝启动，避免弱密码落地。
+        if admin_password is not None and password_complexity_ok(admin_password):
+            if not verify_password('admin', admin_password):
+                new_hash = bcrypt.hashpw(admin_password.encode(), bcrypt.gensalt()).decode()
+                conn.execute(
+                    "UPDATE users SET password_hash=?, updated_at=CURRENT_TIMESTAMP WHERE username='admin'",
+                    (new_hash,),
+                )
+                conn.commit()
+                logger.info('环境变量提供了合规密码，已更新管理员密码（覆盖旧密码）')
+            else:
+                logger.info('环境变量密码与库内一致，无需更新')
+        else:
+            logger.info('管理员用户已存在，保留现有密码')
     # 删除 viewer 用户（如存在）
     conn.execute("DELETE FROM users WHERE username='viewer'")
     if conn.total_changes > 0:
