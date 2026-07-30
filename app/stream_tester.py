@@ -360,7 +360,10 @@ class StreamTester:
             self.ffprobe_available = False
         # 注意：此处将原 elif 改为 if——即使 ffprobe 路径存在但验证失败，
         # 也应尝试 ffmpeg 降级，避免"找到但坏掉的 ffprobe"阻断所有测试
-        if not self.ffprobe_available and StreamTester._ffmpeg_path:
+        # ffprobe 已验证可用：无需降级，直接返回（避免误报“FFprobe和FFmpeg均未找到”）
+        if self.ffprobe_available:
+            return
+        if StreamTester._ffmpeg_path:
             # 降级：ffprobe 不可用或验证失败，尝试 ffmpeg
             try:
                 result = subprocess.run(
