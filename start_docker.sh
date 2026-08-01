@@ -297,43 +297,85 @@ install_python_deps() {
 }
 
 # 检查 FFmpeg/FFprobe
+# 认可两种就绪形态：系统 PATH 中可用，或项目本地 tools/ffmpeg/ 下已就位
+# （后者对应 app/stream_tester.py::_find_executable 的第 1 优先级查找路径）
 check_ffmpeg() {
     if command -v ffmpeg >/dev/null 2>&1 && command -v ffprobe >/dev/null 2>&1; then
         log_info "FFmpeg 已安装: $(ffmpeg -version 2>&1 | head -1)"
         return 0
+    fi
+
+    local proj="${PROJECT_DIR:-$(pwd)}"
+    if [ -x "$proj/tools/ffmpeg/ffprobe" ] && [ -x "$proj/tools/ffmpeg/ffmpeg" ]; then
+        log_info "FFmpeg 已就位(项目本地): $proj/tools/ffmpeg/"
+        return 0
+    fi
+
+    log_warn "FFmpeg/FFprobe 未安装"
+    return 1
+}
+
+# 静态构建兜底：下载 johnvansickle 静态包
+# 优先装到 /usr/local/bin（全局可用）；无写权限则落到项目 tools/ffmpeg/
+_install_ffmpeg_static() {
+    local proj="${PROJECT_DIR:-$(pwd)}"
+    local tmp
+    tmp="$(mktemp -d)" || return 1
+    local url="https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz"
+
+    log_info "从静态构建安装 FFmpeg..."
+
+    # 兼容只装了 curl 或只装了 wget 的环境
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL --connect-timeout 20 --max-time 600 -o "$tmp/ffmpeg.tar.xz" "$url" || { rm -rf "$tmp"; return 1; }
+    elif command -v wget >/dev/null 2>&1; then
+        wget -q -O "$tmp/ffmpeg.tar.xz" "$url" || { rm -rf "$tmp"; return 1; }
     else
-        log_warn "FFmpeg/FFprobe 未安装"
+        log_error "缺少 curl/wget，无法下载 FFmpeg 静态构建"
+        rm -rf "$tmp"
         return 1
     fi
+
+    tar -xf "$tmp/ffmpeg.tar.xz" -C "$tmp" || { rm -rf "$tmp"; return 1; }
+
+    local dest
+    if [ -w /usr/local/bin ] 2>/dev/null || [ "$(id -u)" = "0" ]; then
+        dest="/usr/local/bin"
+    else
+        dest="$proj/tools/ffmpeg"
+        mkdir -p "$dest"
+        log_warn "无 /usr/local/bin 写权限，改装到项目本地: $dest"
+    fi
+
+    cp "$tmp"/ffmpeg-*/ffmpeg "$tmp"/ffmpeg-*/ffprobe "$dest/" || { rm -rf "$tmp"; return 1; }
+    chmod +x "$dest/ffmpeg" "$dest/ffprobe"
+    rm -rf "$tmp"
+    log_info "FFmpeg 静态构建已就位: $dest"
+    return 0
 }
 
 # 安装 FFmpeg
+# 策略：包管理器优先 → 失败或仍不可用时自动回落到静态构建（原实现 apt 失败即无解）
 install_ffmpeg() {
-    local pkg_mgr=$(detect_package_manager)
-    
-    log_info "安装 FFmpeg..."
-    
-    if [ "$pkg_mgr" = "apt" ]; then
-        apt-get update
-        apt-get install -y ffmpeg
-    elif [ "$pkg_mgr" = "yum" ]; then
-        yum install -y ffmpeg
-    elif [ "$pkg_mgr" = "dnf" ]; then
-        dnf install -y ffmpeg
-    elif [ "$pkg_mgr" = "apk" ]; then
-        apk add ffmpeg
-    else
-        # 从静态构建安装
-        log_info "从静态构建安装 FFmpeg..."
-        cd /tmp
-        wget -O ffmpeg.tar.xz https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz
-        tar -xf ffmpeg.tar.xz
-        cp ffmpeg-*/ffmpeg /usr/local/bin/
-        cp ffmpeg-*/ffprobe /usr/local/bin/
-        chmod +x /usr/local/bin/ffmpeg /usr/local/bin/ffprobe
-        rm -rf /tmp/ffmpeg*
+    local pkg_mgr
+    pkg_mgr=$(detect_package_manager)
+
+    log_info "安装 FFmpeg (包管理器: ${pkg_mgr:-none})..."
+
+    case "$pkg_mgr" in
+        apt) apt-get update -qq || true; apt-get install -y ffmpeg || true ;;
+        yum) yum install -y ffmpeg || true ;;
+        dnf) dnf install -y ffmpeg || true ;;
+        apk) apk add --no-cache ffmpeg || true ;;
+        *)   log_warn "未识别包管理器，直接走静态构建" ;;
+    esac
+
+    # 包管理器路线失败(源里没有 ffmpeg / 网络不通 / 无 root)时兜底静态构建
+    if ! check_ffmpeg >/dev/null 2>&1; then
+        log_warn "包管理器安装未生效，回落静态构建..."
+        _install_ffmpeg_static || true
     fi
-    
+
     if check_ffmpeg; then
         log_info "✓ FFmpeg 安装成功"
         return 0

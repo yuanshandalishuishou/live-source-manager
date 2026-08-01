@@ -300,28 +300,32 @@ function Get-FFmpeg {
     if (Test-Path $TempDir) { Remove-Item $TempDir -Recurse -Force }
     Expand-Archive -Path $FFmpegZip -DestinationPath $TempDir -Force
     
-    # 移动到正确位置
-    $ExtractedDir = Get-ChildItem -Path $TempDir -Directory | Select-Object -First 1
+    # 摊平复制到 tools\ffmpeg\ 根目录
+    # 关键：程序（app/stream_tester.py::_find_executable）优先查找 tools\ffmpeg\ffprobe.exe，
+    # 而官方 zip 解压后的布局是 <包名>\bin\ffprobe.exe。直接整包 Move-Item 会导致路径不匹配，
+    # 流测试被误判为"FFmpeg 未安装"。此处显式摊平，保证不依赖 PATH 也能命中。
     $TargetDir = "$ToolsDir\ffmpeg"
     if (Test-Path $TargetDir) { Remove-Item $TargetDir -Recurse -Force }
-    Move-Item "$TempDir\$ExtractedDir" $TargetDir
+    New-Item -ItemType Directory -Path $TargetDir -Force | Out-Null
+
+    $SrcFFmpeg  = Get-ChildItem -Path $TempDir -Filter "ffmpeg.exe"  -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+    $SrcFFprobe = Get-ChildItem -Path $TempDir -Filter "ffprobe.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+
+    if ($SrcFFmpeg)  { Copy-Item $SrcFFmpeg.FullName  (Join-Path $TargetDir 'ffmpeg.exe')  -Force }
+    if ($SrcFFprobe) { Copy-Item $SrcFFprobe.FullName (Join-Path $TargetDir 'ffprobe.exe') -Force }
+
     Remove-Item $TempDir -Recurse -Force
     Remove-Item $FFmpegZip -Force
-    
-    # 添加到 PATH
-    $FFmpegBin = "$TargetDir\bin"
-    if (-not (Test-Path $FFmpegBin)) {
-        $FFmpegBin = (Get-ChildItem -Path $TargetDir -Filter "bin" -Directory).FullName
+
+    if (-not (Test-Path (Join-Path $TargetDir 'ffprobe.exe'))) {
+        Write-Error "✗ FFmpeg 安装失败：压缩包内未找到 ffprobe.exe"
+        return $false
     }
-    
-    if (-not $FFmpegBin) {
-        # 尝试查找 ffmpeg.exe
-        $FFmpegExe = Get-ChildItem -Path $TargetDir -Filter "ffmpeg.exe" -Recurse | Select-Object -First 1
-        if ($FFmpegExe) {
-            $FFmpegBin = $FFmpegExe.DirectoryName
-        }
-    }
-    
+    Write-Info "ffmpeg.exe / ffprobe.exe 已就位: $TargetDir"
+
+    # 追加到用户 PATH（锦上添花：命令行也能直接调用；程序本身已不依赖 PATH）
+    $FFmpegBin = $TargetDir
+
     if ($FFmpegBin) {
         $CurrentPath = [System.Environment]::GetEnvironmentVariable("Path", "User")
         if ($CurrentPath -notlike "*$FFmpegBin*") {

@@ -32,6 +32,53 @@ if (-not (Test-Path $BatPath)) {
     exit 1
 }
 
+# ---- 确保 ffmpeg/ffprobe 可用（流测试依赖，三平台部署硬性要求）----
+# 说明：用户可能跳过 setup_windows.ps1 直接跑本脚本注册自启，此处独立保障 FFmpeg，
+#      并摊平落到 tools\ffmpeg\ 根（与 app/stream_tester.py::_find_executable 查找路径一致）。
+function Test-FFmpegReady {
+    param($Root)
+    if (Test-Path (Join-Path $Root 'tools\ffmpeg\ffprobe.exe')) { return $true }
+    if (Test-Path (Join-Path $Root 'tools\ffmpeg\bin\ffprobe.exe')) { return $true }
+    if (Get-Command ffprobe -ErrorAction SilentlyContinue) { return $true }
+    return $false
+}
+
+if (Test-FFmpegReady $ProjectDir) {
+    Write-Info "FFmpeg/FFprobe 已就绪"
+} else {
+    Write-Warn "未检测到 ffprobe，尝试下载 FFmpeg 静态构建到 tools\ffmpeg\ ..."
+    $ToolsDir = Join-Path $ProjectDir 'tools\ffmpeg'
+    New-Item -ItemType Directory -Force -Path $ToolsDir | Out-Null
+    $Zip = Join-Path $env:TEMP 'lsm-ffmpeg.zip'
+    $Urls = @(
+        'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip',
+        'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip'
+    )
+    $ok = $false
+    foreach ($u in $Urls) {
+        try {
+            Invoke-WebRequest -Uri $u -OutFile $Zip -UseBasicParsing -TimeoutSec 300
+            $Extract = Join-Path $env:TEMP 'lsm-ffmpeg-extract'
+            if (Test-Path $Extract) { Remove-Item -Recurse -Force $Extract }
+            Expand-Archive -Path $Zip -DestinationPath $Extract -Force
+            $ff = Get-ChildItem -Path $Extract -Recurse -Filter 'ffmpeg.exe'  -ErrorAction SilentlyContinue | Select-Object -First 1
+            $fp = Get-ChildItem -Path $Extract -Recurse -Filter 'ffprobe.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($ff -and $fp) {
+                Copy-Item $ff.FullName (Join-Path $ToolsDir 'ffmpeg.exe')  -Force
+                Copy-Item $fp.FullName (Join-Path $ToolsDir 'ffprobe.exe') -Force
+                Remove-Item -Recurse -Force $Extract
+                Remove-Item -Force $Zip
+                Write-Info "FFmpeg 已安装到 $ToolsDir"
+                $ok = $true; break
+            }
+        } catch { Write-Warn "下载失败: $u ($_)" }
+    }
+    if (-not $ok) {
+        Write-Warn "FFmpeg 自动安装失败，流测试功能将不可用。"
+        Write-Warn "请手动下载并将 ffmpeg.exe / ffprobe.exe 放入 $ToolsDir"
+    }
+}
+
 # 幂等：已存在则先移除旧任务
 if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false

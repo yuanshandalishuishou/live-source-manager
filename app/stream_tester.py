@@ -116,18 +116,33 @@ class StreamTester:
         """查找可执行文件的完整路径
 
         搜索顺序:
-        1. tools/ffmpeg/ 目录（项目本地）
+        1. tools/ffmpeg/ 目录（项目本地，含官方发行包的 bin/ 子目录布局）
         2. 系统 PATH
         3. 常见安装目录
         4. imageio-ffmpeg pip 包（仅 ffmpeg）
         5. static_ffmpeg pip 包（ffmpeg + ffprobe）
         """
         # 1. 项目本地目录（兼容 Linux 无扩展名 / Windows .exe）
+        #    同时兼容三种落盘布局：
+        #      tools/ffmpeg/ffprobe.exe            —— 摊平复制（安装脚本首选）
+        #      tools/ffmpeg/bin/ffprobe.exe        —— BtbN/gyan 官方 zip 解压后的原始布局
+        #      tools/ffmpeg/<任意子目录>/bin/...    —— 用户手动整包解压
         project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        for cand in (name, f'{name}.exe'):
-            local_path = os.path.join(project_root, 'tools', 'ffmpeg', cand)
-            if os.path.exists(local_path):
-                return local_path
+        ffmpeg_root = os.path.join(project_root, 'tools', 'ffmpeg')
+        search_dirs = [ffmpeg_root, os.path.join(ffmpeg_root, 'bin')]
+        try:
+            # 只下探一层子目录的 bin/，避免深度递归拖慢启动
+            for entry in os.listdir(ffmpeg_root):
+                sub_bin = os.path.join(ffmpeg_root, entry, 'bin')
+                if os.path.isdir(sub_bin):
+                    search_dirs.append(sub_bin)
+        except OSError:
+            pass
+        for dir_path in search_dirs:
+            for cand in (name, f'{name}.exe'):
+                local_path = os.path.join(dir_path, cand)
+                if os.path.exists(local_path):
+                    return local_path
 
         # 2. 系统 PATH（兼容 Linux 无扩展名 / Windows .exe）
         for path_dir in os.environ.get('PATH', '').split(os.pathsep):
