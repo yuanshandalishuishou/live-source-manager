@@ -2,6 +2,18 @@
 # 本文件由 app.config.Config._DEFAULT_VALUES 自动同步生成，作为 SECTION_SCHEMA 默认值的覆盖源。
 # 单一事实来源是 app/config.py 的 _DEFAULT_VALUES；修改默认值请改那里，本文件保持一致。
 
+EPG:
+  enabled: 'True'
+  fetch_timeout: '60'
+  inject_into_m3u: 'True'
+  keep_days: '7'
+  output_filename: epg.xml.gz
+  past_hours: '6'
+  refresh_at: 03:30
+  refresh_minutes: '360'
+  refresh_mode: daily
+  timezone: Asia/Shanghai
+  web_base_url: ''
 Filter:
   max_latency: '4000'
   max_resolution: 4k
@@ -27,6 +39,9 @@ Logging:
   level: INFO
   max_size: '10'
 Network:
+  download_batch_size: '12'
+  download_connect_timeout: '10'
+  download_total_timeout: '30'
   github_mirror: https://ghproxy.com/
   ipv6_enabled: 'True'
   proxy_enabled: 'False'
@@ -124,7 +139,7 @@ Testing:
   max_concurrent_ffprobe: '16'
   max_test_attempts: '1'
   output_sort_by: speed
-  speed_test_duration: '6'
+  speed_test_duration: '3'
   timeout: '10'
 UserAgents:
   ua_enabled: 'False'

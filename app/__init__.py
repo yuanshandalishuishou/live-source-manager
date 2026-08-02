@@ -24,6 +24,12 @@
 # ═══════════════════════════════════════════════════
 # --- config ---
 from app.config import Config
+
+# ═══════════════════════════════════════════════════
+# L2 业务层
+# ═══════════════════════════════════════════════════
+# --- epg（电子节目单） ---
+from app.epg import EPGFetcher, EPGManager, XMLTVParser
 from app.exceptions import (
     ERROR_CODE_SUGGESTIONS,
     BaseAppException,
@@ -64,9 +70,6 @@ from app.m3u_generator import M3UGenerator
 # --- manager ---
 from app.manager import EnhancedLiveSourceManager, main
 
-# ═══════════════════════════════════════════════════
-# L2 业务层
-# ═══════════════════════════════════════════════════
 # --- rules ---
 from app.rules import (
     _DEFAULT_NEGATIVE_KEYWORDS,
@@ -178,6 +181,8 @@ __all__ = [
     'ChannelRules',
     'Config',
     'ConfigError',
+    'EPGFetcher',
+    'EPGManager',
     'EnhancedLiveSourceManager',
     'ErrorStats',
     'FileException',
@@ -192,6 +197,7 @@ __all__ = [
     'SourceParseError',
     'StreamTestError',
     'StreamTester',
+    'XMLTVParser',
     '_backup_file',
     '_check_command_injection',
     '_check_path_traversal',

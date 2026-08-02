@@ -351,6 +351,15 @@ def init_db(admin_password: str | None = None):
         );
     """)
     conn.commit()
+    # 老库自愈：为频道映射补 EPG 对齐列（tvg_id / tvg_logo）
+    _ensure_columns(
+        conn,
+        'channel_name_mapping',
+        {
+            'tvg_id': "TEXT NOT NULL DEFAULT ''",
+            'tvg_logo': "TEXT NOT NULL DEFAULT ''",
+        },
+    )
     logger.info('channel_name_mapping 表已就绪')
 
     # ── 分类字典表 ────────────────────────────────
@@ -390,6 +399,73 @@ def init_db(admin_password: str | None = None):
     """)
     conn.commit()
     logger.info('github_download_cache 表已就绪')
+
+    # ── EPG（电子节目单）三表 ──────────────────────
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS epg_sources (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL DEFAULT '',
+            url TEXT NOT NULL UNIQUE,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            priority INTEGER NOT NULL DEFAULT 100,
+            refresh_mode TEXT NOT NULL DEFAULT '',
+            refresh_at TEXT NOT NULL DEFAULT '',
+            refresh_minutes INTEGER NOT NULL DEFAULT 0,
+            remark TEXT NOT NULL DEFAULT '',
+            last_fetch_at TEXT,
+            last_status TEXT NOT NULL DEFAULT '',
+            last_error TEXT NOT NULL DEFAULT '',
+            last_channel_count INTEGER NOT NULL DEFAULT 0,
+            last_programme_count INTEGER NOT NULL DEFAULT 0,
+            last_duration_ms INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT,
+            updated_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_epg_sources_enabled
+        ON epg_sources(enabled, priority);
+
+        CREATE TABLE IF NOT EXISTS epg_channels (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_id INTEGER NOT NULL,
+            tvg_id TEXT NOT NULL,
+            display_name TEXT NOT NULL DEFAULT '',
+            icon TEXT NOT NULL DEFAULT '',
+            matched_channel TEXT NOT NULL DEFAULT '',
+            updated_at TEXT,
+            UNIQUE(source_id, tvg_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_epg_channels_tvg ON epg_channels(tvg_id);
+        CREATE INDEX IF NOT EXISTS idx_epg_channels_matched
+        ON epg_channels(matched_channel);
+
+        CREATE TABLE IF NOT EXISTS epg_programmes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_id INTEGER NOT NULL,
+            tvg_id TEXT NOT NULL,
+            start_utc TEXT NOT NULL,
+            stop_utc TEXT NOT NULL,
+            title TEXT NOT NULL DEFAULT '',
+            sub_title TEXT NOT NULL DEFAULT '',
+            description TEXT NOT NULL DEFAULT '',
+            category TEXT NOT NULL DEFAULT '',
+            episode TEXT NOT NULL DEFAULT '',
+            icon TEXT NOT NULL DEFAULT '',
+            UNIQUE(source_id, tvg_id, start_utc)
+        );
+        CREATE INDEX IF NOT EXISTS idx_epg_prog_lookup
+        ON epg_programmes(tvg_id, start_utc);
+        CREATE INDEX IF NOT EXISTS idx_epg_prog_range
+        ON epg_programmes(start_utc, stop_utc);
+        CREATE INDEX IF NOT EXISTS idx_epg_prog_source
+        ON epg_programmes(source_id);
+    """)
+    conn.commit()
+    logger.info('EPG 三表（epg_sources/epg_channels/epg_programmes）已就绪')
+
+    # ── 种子数据：预置 EPG 源（仅空表时写入） ────────
+    row = conn.execute('SELECT COUNT(*) FROM epg_sources').fetchone()
+    if row and row[0] == 0:
+        _seed_epg_sources(conn)
 
     # ── 从 YAML 导入种子数据 ──────────────────────
     _seed_from_yaml(conn)
@@ -745,6 +821,115 @@ def fill_missing_app_config_defaults() -> int:
         return 0
     finally:
         conn.close()
+
+
+def _ensure_columns(conn: sqlite3.Connection, table: str, columns: dict[str, str]) -> list[str]:
+    """幂等补列：老库升级时为已存在的表补上新增列。
+
+    Args:
+        conn: 已打开的连接
+        table: 表名
+        columns: {列名: "TYPE NOT NULL DEFAULT ''"} 形式的列定义
+
+    Returns:
+        实际新增的列名列表
+    """
+    added: list[str] = []
+    try:
+        existing = {r[1] for r in conn.execute(f'PRAGMA table_info({table})').fetchall()}
+    except sqlite3.Error as e:
+        logger.warning(f'读取 {table} 表结构失败: {e}')
+        return added
+    if not existing:
+        return added
+    for col, ddl in columns.items():
+        if col in existing:
+            continue
+        try:
+            conn.execute(f'ALTER TABLE {table} ADD COLUMN {col} {ddl}')
+            added.append(col)
+        except sqlite3.Error as e:
+            logger.warning(f'{table} 补列 {col} 失败: {e}')
+    if added:
+        conn.commit()
+        logger.info(f'{table} 已补列: ' + ', '.join(added))
+    return added
+
+
+# 预置 EPG 源清单（首次建库时写入 epg_sources）
+# 字段：(名称, URL, 是否默认启用, 优先级[越小越优先], 备注)
+DEFAULT_EPG_SOURCES: list[tuple[str, str, int, int, str]] = [
+    (
+        '51zmt',
+        'http://epg.51zmt.top:8000/e.xml',
+        1,
+        10,
+        '国内直连，每日 0 点更新，覆盖央视/卫视/地方台',
+    ),
+    (
+        'Meroser 稳定版',
+        'https://mirror.ghproxy.com/https://raw.githubusercontent.com/Meroser/IPTV/main/tvxml.xml',
+        1,
+        20,
+        '稳定维护，每天 00:25 左右更新',
+    ),
+    (
+        'Meroser 详情版',
+        'https://mirror.ghproxy.com/https://raw.githubusercontent.com/Meroser/EPG-test/main/tvxml-test.xml.gz',
+        0,
+        15,
+        '含剧情简介、演职员信息，体积较大',
+    ),
+    (
+        'zbds',
+        'https://epg.zbds.top/t.xml.gz',
+        0,
+        30,
+        '备用源，gz 压缩',
+    ),
+    (
+        'BurningC4 (jsDelivr)',
+        'https://cdn.jsdelivr.net/gh/BurningC4/Chinese-IPTV@master/guide.xml',
+        0,
+        40,
+        'Chinese-IPTV 的 CDN 加速地址，国内可达性较好',
+    ),
+    (
+        'BurningC4 (GitHub)',
+        'https://raw.githubusercontent.com/BurningC4/Chinese-IPTV/master/guide.xml',
+        0,
+        50,
+        'Chinese-IPTV 原始地址，需能直连 GitHub',
+    ),
+    (
+        'epg.pw',
+        'https://epg.pw/xmltv/epg.xml',
+        0,
+        60,
+        '可在 https://epg.pw 自定义频道后取专属地址',
+    ),
+]
+
+
+def _seed_epg_sources(conn: sqlite3.Connection) -> int:
+    """首次建库写入预置 EPG 源（幂等：URL 唯一，已存在则跳过）"""
+    now = datetime.datetime.now().isoformat(timespec='seconds')
+    rows = [
+        (name, url, enabled, priority, remark, now, now) for name, url, enabled, priority, remark in DEFAULT_EPG_SOURCES
+    ]
+    try:
+        conn.executemany(
+            'INSERT OR IGNORE INTO epg_sources '
+            '(name, url, enabled, priority, remark, created_at, updated_at) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?)',
+            rows,
+        )
+        conn.commit()
+        logger.info(f'已写入 {len(rows)} 条预置 EPG 源')
+        return len(rows)
+    except sqlite3.Error as e:
+        logger.warning(f'写入预置 EPG 源失败: {e}')
+        return 0
 
 
 def _seed_from_yaml(conn: sqlite3.Connection):
@@ -1660,7 +1845,8 @@ def get_channel_name_mapping(channel_name: str) -> dict[str, str] | None:
     """查频道全名映射，返回各维度分类字典，不存在返回 None"""
     conn = get_conn()
     row = conn.execute(
-        'SELECT content, region, language, quality, media_type, genre FROM channel_name_mapping WHERE channel_name = ?',
+        'SELECT content, region, language, quality, media_type, genre, tvg_id, tvg_logo '
+        'FROM channel_name_mapping WHERE channel_name = ?',
         (channel_name,),
     ).fetchone()
     conn.close()
@@ -1668,15 +1854,24 @@ def get_channel_name_mapping(channel_name: str) -> dict[str, str] | None:
 
 
 def save_channel_name_mapping(channel_name: str, categories: dict[str, str]) -> bool:
-    """保存或更新频道全名映射（INSERT OR REPLACE）"""
+    """保存或更新频道全名映射（UPSERT，保留 EPG 列 tvg_id / tvg_logo 不被抹除）"""
     conn = None
     try:
         conn = get_conn()
         conn.execute(
             """
-            INSERT OR REPLACE INTO channel_name_mapping
-                (channel_name, content, region, language, quality, media_type, genre, is_manual, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 1, datetime('now'))
+            INSERT INTO channel_name_mapping
+                (channel_name, content, region, language, quality, media_type, genre, is_manual, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 1, datetime('now'), datetime('now'))
+            ON CONFLICT(channel_name) DO UPDATE SET
+                content = excluded.content,
+                region = excluded.region,
+                language = excluded.language,
+                quality = excluded.quality,
+                media_type = excluded.media_type,
+                genre = excluded.genre,
+                is_manual = 1,
+                updated_at = datetime('now')
         """,
             (
                 channel_name,
@@ -1723,12 +1918,54 @@ def list_channel_name_mappings(page: int = 1, page_size: int = 50) -> tuple[list
     offset = (page - 1) * page_size
     rows = conn.execute(
         'SELECT channel_name, content, region, language, quality, media_type, genre, '
-        'is_manual, created_at, updated_at '
+        'tvg_id, tvg_logo, is_manual, created_at, updated_at '
         'FROM channel_name_mapping ORDER BY channel_name LIMIT ? OFFSET ?',
         (page_size, offset),
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows], total
+
+
+def set_channel_tvg_info(channel_name: str, tvg_id: str = '', tvg_logo: str = '') -> bool:
+    """写入/更新频道的 EPG 对齐信息（tvg_id / tvg_logo），不影响分类维度。
+
+    传空字符串表示"不修改该字段"，便于只补 logo 或只补 id。
+    """
+    if not channel_name or (not tvg_id and not tvg_logo):
+        return False
+    try:
+        _execute(
+            """
+            INSERT INTO channel_name_mapping (channel_name, tvg_id, tvg_logo, is_manual, created_at, updated_at)
+            VALUES (?, ?, ?, 0, datetime('now'), datetime('now'))
+            ON CONFLICT(channel_name) DO UPDATE SET
+                tvg_id = CASE WHEN excluded.tvg_id != '' THEN excluded.tvg_id ELSE channel_name_mapping.tvg_id END,
+                tvg_logo = CASE WHEN excluded.tvg_logo != '' THEN excluded.tvg_logo ELSE channel_name_mapping.tvg_logo END,
+                updated_at = datetime('now')
+            """,
+            (channel_name, tvg_id, tvg_logo),
+        )
+        return True
+    except Exception as e:
+        logger.error(f'写入频道 EPG 映射失败 [{channel_name}]: {e}')
+        return False
+
+
+def get_all_channel_tvg_map() -> dict[str, dict[str, str]]:
+    """一次性取全部频道的 tvg_id / tvg_logo 映射，供 M3U 生成时批量注入。
+
+    Returns: {channel_name: {'tvg_id': ..., 'tvg_logo': ...}}
+    """
+    try:
+        conn = get_conn()
+        rows = conn.execute(
+            "SELECT channel_name, tvg_id, tvg_logo FROM channel_name_mapping WHERE tvg_id != '' OR tvg_logo != ''"
+        ).fetchall()
+        conn.close()
+        return {r['channel_name']: {'tvg_id': r['tvg_id'] or '', 'tvg_logo': r['tvg_logo'] or ''} for r in rows}
+    except Exception as e:
+        logger.warning(f'读取频道 EPG 映射失败: {e}')
+        return {}
 
 
 def batch_import_mappings_from_current_sources() -> int:
@@ -1994,3 +2231,429 @@ def record_login_failure(username: str):
 def reset_login_lockout(username: str):
     """登录成功后重置锁定计数器"""
     _execute('DELETE FROM login_lockout WHERE username = ?', (username,))
+
+
+# ══════════════════════════════════════════════════════════
+# EPG（电子节目单）数据访问
+# ══════════════════════════════════════════════════════════
+
+EPG_SOURCE_FIELDS = (
+    'id, name, url, enabled, priority, refresh_mode, refresh_at, refresh_minutes, remark, '
+    'last_fetch_at, last_status, last_error, last_channel_count, last_programme_count, '
+    'last_duration_ms, created_at, updated_at'
+)
+
+
+def list_epg_sources(enabled_only: bool = False) -> list[dict]:
+    """列出 EPG 源，按 priority 升序（越小越优先）"""
+    conn = get_conn()
+    try:
+        sql = f'SELECT {EPG_SOURCE_FIELDS} FROM epg_sources'
+        if enabled_only:
+            sql += ' WHERE enabled = 1'
+        sql += ' ORDER BY priority ASC, id ASC'
+        return [dict(r) for r in conn.execute(sql).fetchall()]
+    except Exception as e:
+        logger.error(f'列出 EPG 源失败: {e}')
+        return []
+    finally:
+        conn.close()
+
+
+def get_epg_source(source_id: int) -> dict | None:
+    """按 ID 取单个 EPG 源"""
+    conn = get_conn()
+    try:
+        row = conn.execute(
+            f'SELECT {EPG_SOURCE_FIELDS} FROM epg_sources WHERE id = ?',
+            (source_id,),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def add_epg_source(
+    name: str,
+    url: str,
+    enabled: bool = True,
+    priority: int = 100,
+    refresh_mode: str = '',
+    refresh_at: str = '',
+    refresh_minutes: int = 0,
+    remark: str = '',
+) -> int:
+    """新增 EPG 源，返回新 ID；URL 重复返回 0"""
+    url = (url or '').strip()
+    if not url:
+        return 0
+    now = datetime.datetime.now().isoformat(timespec='seconds')
+    try:
+        cursor = _execute(
+            'INSERT INTO epg_sources (name, url, enabled, priority, refresh_mode, refresh_at, '
+            'refresh_minutes, remark, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            (
+                (name or url)[:120],
+                url,
+                1 if enabled else 0,
+                int(priority),
+                refresh_mode or '',
+                refresh_at or '',
+                int(refresh_minutes or 0),
+                remark or '',
+                now,
+                now,
+            ),
+        )
+        return int(cursor.lastrowid or 0)
+    except sqlite3.IntegrityError:
+        logger.warning(f'EPG 源已存在，跳过: {url}')
+        return 0
+    except Exception as e:
+        logger.error(f'新增 EPG 源失败: {e}')
+        return 0
+
+
+_EPG_SOURCE_EDITABLE = {
+    'name',
+    'url',
+    'enabled',
+    'priority',
+    'refresh_mode',
+    'refresh_at',
+    'refresh_minutes',
+    'remark',
+}
+
+
+def update_epg_source(source_id: int, **fields) -> bool:
+    """更新 EPG 源（只接受白名单字段）"""
+    sets: list[str] = []
+    params: list = []
+    for key, value in fields.items():
+        if key not in _EPG_SOURCE_EDITABLE:
+            continue
+        if key == 'enabled':
+            value = 1 if value in (True, 1, '1', 'true', 'True', 'on') else 0
+        elif key in ('priority', 'refresh_minutes'):
+            try:
+                value = int(value)
+            except (TypeError, ValueError):
+                continue
+        elif isinstance(value, str):
+            value = value.strip()
+        sets.append(f'{key} = ?')
+        params.append(value)
+    if not sets:
+        return False
+    sets.append('updated_at = ?')
+    params.append(datetime.datetime.now().isoformat(timespec='seconds'))
+    params.append(source_id)
+    try:
+        cursor = _execute(f'UPDATE epg_sources SET {", ".join(sets)} WHERE id = ?', tuple(params))
+        return cursor.rowcount > 0
+    except sqlite3.IntegrityError:
+        logger.warning(f'更新 EPG 源冲突（URL 重复）: id={source_id}')
+        return False
+    except Exception as e:
+        logger.error(f'更新 EPG 源失败 [{source_id}]: {e}')
+        return False
+
+
+def delete_epg_source(source_id: int) -> bool:
+    """删除 EPG 源，并级联清掉其频道与节目数据"""
+    conn = None
+    try:
+        conn = get_conn()
+        conn.execute('DELETE FROM epg_programmes WHERE source_id = ?', (source_id,))
+        conn.execute('DELETE FROM epg_channels WHERE source_id = ?', (source_id,))
+        cursor = conn.execute('DELETE FROM epg_sources WHERE id = ?', (source_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+    except Exception as e:
+        logger.error(f'删除 EPG 源失败 [{source_id}]: {e}')
+        if conn:
+            with suppress(Exception):
+                conn.rollback()
+        return False
+    finally:
+        if conn:
+            with suppress(Exception):
+                conn.close()
+
+
+def mark_epg_source_result(
+    source_id: int,
+    status: str,
+    error: str = '',
+    channel_count: int = 0,
+    programme_count: int = 0,
+    duration_ms: int = 0,
+) -> None:
+    """记录一次抓取结果（成功/失败）到源上"""
+    with suppress(Exception):
+        _execute(
+            'UPDATE epg_sources SET last_fetch_at = ?, last_status = ?, last_error = ?, '
+            'last_channel_count = ?, last_programme_count = ?, last_duration_ms = ? WHERE id = ?',
+            (
+                datetime.datetime.now().isoformat(timespec='seconds'),
+                status,
+                (error or '')[:500],
+                int(channel_count),
+                int(programme_count),
+                int(duration_ms),
+                source_id,
+            ),
+        )
+
+
+def replace_epg_data(source_id: int, channels: list[dict], programmes: list[dict]) -> tuple[int, int]:
+    """整源替换 EPG 数据：先删旧数据再批量写入（单事务）。
+
+    Args:
+        source_id: 源 ID
+        channels: [{'tvg_id','display_name','icon'}]
+        programmes: [{'tvg_id','start_utc','stop_utc','title',...}]
+
+    Returns:
+        (写入频道数, 写入节目数)
+    """
+    conn = None
+    try:
+        conn = get_conn()
+        now = datetime.datetime.now().isoformat(timespec='seconds')
+        conn.execute('DELETE FROM epg_programmes WHERE source_id = ?', (source_id,))
+        conn.execute('DELETE FROM epg_channels WHERE source_id = ?', (source_id,))
+        ch_rows = [
+            (source_id, c.get('tvg_id', ''), c.get('display_name', ''), c.get('icon', ''), now)
+            for c in channels
+            if c.get('tvg_id')
+        ]
+        if ch_rows:
+            conn.executemany(
+                'INSERT OR REPLACE INTO epg_channels (source_id, tvg_id, display_name, icon, updated_at) '
+                'VALUES (?, ?, ?, ?, ?)',
+                ch_rows,
+            )
+        pg_rows = [
+            (
+                source_id,
+                p.get('tvg_id', ''),
+                p.get('start_utc', ''),
+                p.get('stop_utc', ''),
+                p.get('title', ''),
+                p.get('sub_title', ''),
+                p.get('description', ''),
+                p.get('category', ''),
+                p.get('episode', ''),
+                p.get('icon', ''),
+            )
+            for p in programmes
+            if p.get('tvg_id') and p.get('start_utc')
+        ]
+        if pg_rows:
+            conn.executemany(
+                'INSERT OR IGNORE INTO epg_programmes (source_id, tvg_id, start_utc, stop_utc, title, '
+                'sub_title, description, category, episode, icon) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                pg_rows,
+            )
+        conn.commit()
+        return len(ch_rows), len(pg_rows)
+    except Exception as e:
+        logger.error(f'写入 EPG 数据失败 [source={source_id}]: {e}')
+        if conn:
+            with suppress(Exception):
+                conn.rollback()
+        return 0, 0
+    finally:
+        if conn:
+            with suppress(Exception):
+                conn.close()
+
+
+def set_epg_channel_match(source_id: int, tvg_id: str, matched_channel: str) -> bool:
+    """把 EPG 频道对齐到本地频道名"""
+    try:
+        cursor = _execute(
+            'UPDATE epg_channels SET matched_channel = ? WHERE source_id = ? AND tvg_id = ?',
+            (matched_channel, source_id, tvg_id),
+        )
+        return cursor.rowcount > 0
+    except Exception as e:
+        logger.error(f'设置 EPG 频道匹配失败: {e}')
+        return False
+
+
+def get_epg_channel(channel_id: int) -> dict | None:
+    """按 epg_channels.id 取单个频道"""
+    conn = get_conn()
+    try:
+        row = conn.execute(
+            'SELECT id, source_id, tvg_id, display_name, icon, matched_channel FROM epg_channels WHERE id = ?',
+            (channel_id,),
+        ).fetchone()
+        return dict(row) if row else None
+    except Exception as e:
+        logger.error(f'读取 EPG 频道失败: {e}')
+        return None
+    finally:
+        if conn:
+            with suppress(Exception):
+                conn.close()
+
+
+def set_epg_channel_match_by_id(channel_id: int, matched_channel: str, tvg_id: str | None = None) -> bool:
+    """按 epg_channels.id 设置对齐（matched_channel；tvg_id 可选覆盖）"""
+    try:
+        if tvg_id is not None:
+            cursor = _execute(
+                'UPDATE epg_channels SET matched_channel = ?, tvg_id = ? WHERE id = ?',
+                (matched_channel, tvg_id, channel_id),
+            )
+        else:
+            cursor = _execute(
+                'UPDATE epg_channels SET matched_channel = ? WHERE id = ?',
+                (matched_channel, channel_id),
+            )
+        return cursor.rowcount > 0
+    except Exception as e:
+        logger.error(f'设置 EPG 频道对齐失败: {e}')
+        return False
+
+
+def bulk_set_epg_channel_match(pairs: list[tuple[int, str, str]]) -> int:
+    """批量对齐：[(source_id, tvg_id, matched_channel), ...]"""
+    if not pairs:
+        return 0
+    conn = None
+    try:
+        conn = get_conn()
+        conn.executemany(
+            'UPDATE epg_channels SET matched_channel = ? WHERE source_id = ? AND tvg_id = ?',
+            [(m, s, t) for s, t, m in pairs],
+        )
+        conn.commit()
+        return len(pairs)
+    except Exception as e:
+        logger.error(f'批量对齐 EPG 频道失败: {e}')
+        if conn:
+            with suppress(Exception):
+                conn.rollback()
+        return 0
+    finally:
+        if conn:
+            with suppress(Exception):
+                conn.close()
+
+
+def list_epg_channels(
+    source_id: int | None = None,
+    keyword: str = '',
+    matched_only: bool = False,
+    limit: int = 500,
+    offset: int = 0,
+) -> tuple[list[dict], int]:
+    """分页列出 EPG 频道（含所属源名）"""
+    conn = get_conn()
+    try:
+        where: list[str] = []
+        params: list = []
+        if source_id:
+            where.append('c.source_id = ?')
+            params.append(source_id)
+        if keyword:
+            where.append('(c.tvg_id LIKE ? OR c.display_name LIKE ? OR c.matched_channel LIKE ?)')
+            like = f'%{keyword}%'
+            params.extend([like, like, like])
+        if matched_only:
+            where.append("c.matched_channel != ''")
+        clause = (' WHERE ' + ' AND '.join(where)) if where else ''
+        total = conn.execute(f'SELECT COUNT(*) FROM epg_channels c{clause}', tuple(params)).fetchone()[0]
+        rows = conn.execute(
+            'SELECT c.id, c.source_id, c.tvg_id, c.display_name, c.icon, c.matched_channel, '
+            's.name AS source_name FROM epg_channels c '
+            f'LEFT JOIN epg_sources s ON s.id = c.source_id{clause} '
+            'ORDER BY c.display_name LIMIT ? OFFSET ?',
+            (*params, limit, offset),
+        ).fetchall()
+        return [dict(r) for r in rows], total
+    except Exception as e:
+        logger.error(f'列出 EPG 频道失败: {e}')
+        return [], 0
+    finally:
+        conn.close()
+
+
+def query_epg_programmes(tvg_ids: list[str], start_utc: str, end_utc: str) -> list[dict]:
+    """按 tvg_id 列表与时间窗查询节目（UTC 字符串）。
+
+    重叠判定：programme.start < end AND programme.stop > start。
+    多源冲突时按源 priority 保留优先级最高的一份。
+    """
+    if not tvg_ids:
+        return []
+    conn = get_conn()
+    try:
+        result: list[dict] = []
+        seen: set[tuple[str, str]] = set()
+        # SQLite 变量上限 999，分批查询
+        chunk = 400
+        for i in range(0, len(tvg_ids), chunk):
+            batch = tvg_ids[i : i + chunk]
+            placeholders = ','.join('?' * len(batch))
+            rows = conn.execute(
+                'SELECT p.tvg_id, p.start_utc, p.stop_utc, p.title, p.sub_title, p.description, '
+                'p.category, p.episode, p.icon, p.source_id, s.priority '
+                'FROM epg_programmes p LEFT JOIN epg_sources s ON s.id = p.source_id '
+                f'WHERE p.tvg_id IN ({placeholders}) AND p.start_utc < ? AND p.stop_utc > ? '
+                'ORDER BY p.tvg_id, p.start_utc, s.priority ASC',
+                (*batch, end_utc, start_utc),
+            ).fetchall()
+            for r in rows:
+                key = (r['tvg_id'], r['start_utc'])
+                if key in seen:
+                    continue
+                seen.add(key)
+                result.append(dict(r))
+        return result
+    except Exception as e:
+        logger.error(f'查询 EPG 节目失败: {e}')
+        return []
+    finally:
+        conn.close()
+
+
+def cleanup_epg_programmes(before_utc: str) -> int:
+    """清理 stop_utc 早于给定 UTC 时间的历史节目，返回删除条数"""
+    try:
+        cursor = _execute('DELETE FROM epg_programmes WHERE stop_utc < ?', (before_utc,))
+        return cursor.rowcount or 0
+    except Exception as e:
+        logger.error(f'清理 EPG 历史节目失败: {e}')
+        return 0
+
+
+def get_epg_stats() -> dict:
+    """EPG 概览统计"""
+    conn = get_conn()
+    try:
+        stats: dict = {
+            'sources': conn.execute('SELECT COUNT(*) FROM epg_sources').fetchone()[0],
+            'sources_enabled': conn.execute('SELECT COUNT(*) FROM epg_sources WHERE enabled = 1').fetchone()[0],
+            'channels': conn.execute('SELECT COUNT(*) FROM epg_channels').fetchone()[0],
+            'channels_matched': conn.execute(
+                "SELECT COUNT(*) FROM epg_channels WHERE matched_channel != ''"
+            ).fetchone()[0],
+            'programmes': conn.execute('SELECT COUNT(*) FROM epg_programmes').fetchone()[0],
+        }
+        row = conn.execute('SELECT MAX(last_fetch_at) FROM epg_sources').fetchone()
+        stats['last_fetch_at'] = row[0] if row else None
+        row = conn.execute('SELECT MIN(start_utc), MAX(stop_utc) FROM epg_programmes').fetchone()
+        stats['range_start_utc'] = row[0] if row else None
+        stats['range_stop_utc'] = row[1] if row else None
+        return stats
+    except Exception as e:
+        logger.error(f'读取 EPG 统计失败: {e}')
+        return {}
+    finally:
+        conn.close()

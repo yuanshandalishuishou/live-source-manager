@@ -78,7 +78,9 @@ docker build --build-arg BASE_IMAGE=python:3.13-slim-bookworm -t lsm:latest .
 镜像内已预装：全部 Python 依赖（独立 venv）、Nginx、cron，以及 **FFmpeg/FFprobe**（通过 `apt-get install ffmpeg` 装进镜像层，二进制位于 `/usr/bin/ffmpeg`、`/usr/bin/ffprobe`，并软链到 `/app/tools/ffmpeg/` 供程序内部查找逻辑命中）。流测试功能默认可用，无需运行时下载。
 入口脚本 `start_docker.sh` 会在首次启动时自动建库、建表、灌入默认值。
 
-> 提示：仓库根目录已含 `.dockerignore`，可避免把 `.venv`、`log`、`config/online` 等运行期产物打进构建上下文，加快构建速度。
+> 提示：仓库根目录已含 `.dockerignore`，除了排除 `.venv`、`log`、`config/online` 等运行期产物以加快构建外，还**显式排除了 `web/data/`、`*.db`、`.env`**。
+> 这一条是安全红线：`COPY web/ /app/web/` 会连同本机 `web/data/web.db` 一起打包，而该库含 admin 密码哈希、会话记录与加密后的 API Key，
+> 一旦烘进镜像并推到公共 Registry 就等同于泄露。排除后不影响运行——容器首启由 `init_db()` 自建目录重新建库，且 `WEB_DATA_DIR=/data` 已指向持久卷。
 
 ---
 
@@ -157,10 +159,47 @@ docker logout ghcr.io
 | `CONFIG_ENCRYPT_KEY` | 空（自动生成） | 配置加密密钥（务必固定） |
 | `NGINX_PORT` | `12345` | Nginx 文件服务端口 |
 | `WEB_PORT` | `23456` | Web 管理端口 |
-| `TEST_TIMEOUT` | `10` | 流测试超时（秒） |
-| `CONCURRENT_THREADS` | `50` | 并发线程数 |
+| `TEST_TIMEOUT` | `30` | 流测试超时（秒） |
+| `CONCURRENT_THREADS` | `10` | 并发线程数 |
+| `WEB_DATA_DIR` | `/data` | SQLite 数据库目录（指向持久卷） |
+| `PROJECT_DIR` | `/app` | 应用根目录 |
 | `OUTPUT_FILENAME` | `live.m3u` | 输出文件名 |
 | `UPDATE_CRON` | `0 6,12,18,22 * * *` | 定时更新 Cron 表达式 |
 | `TZ` | `Asia/Shanghai` | 时区 |
 
 > 注意：若通过环境变量修改 `NGINX_PORT` / `WEB_PORT`，`docker run -p` 的宿主机:容器映射需与容器实际监听端口保持一致。
+
+---
+
+## 八、EPG（电子节目单）开箱即用
+
+镜像已内置完整 EPG 能力，**无需额外配置**：生成的 `live.m3u` 自带 EPG 指向，播放器（TiviMate / DIYP / Kodi / PotPlayer 等）导入后可直接看到节目单。
+
+### 工作方式
+
+1. **预置 7 个稳定 EPG 源**，容器首启建库时自动写入 `epg_sources` 表。
+2. **后台调度器**常驻运行，按每个源配置的 `daily` / `interval` 策略自动抓取 XMLTV，抓完**立即生成** `epg.xml.gz`。
+3. 生成物落在 `/www/output/epg.xml.gz`，与 `live.m3u` 同目录，由 Nginx 的 `12345` 端口一并对外发布。
+4. `live.m3u` 的首行 `#EXTM3U` 自动注入：
+
+   ```
+   #EXTM3U url-tvg="http://<你的IP>:12345/epg.xml.gz" x-tvg-url="http://<你的IP>:12345/epg.xml.gz"
+   ```
+
+   每条频道再注入 `tvg-id`（按频道名匹配 EPG 库，未匹配则回退 slug）与 `tvg-logo`。
+
+### 验证 EPG 是否生效
+
+```bash
+# 1. 看 m3u 头是否带 url-tvg
+curl -s http://localhost:12345/live.m3u | head -1
+
+# 2. 看 epg.xml.gz 是否已生成
+curl -sI http://localhost:12345/epg.xml.gz
+```
+
+### 手动触发
+
+Web 后台 `http://localhost:23456/epg`（节目单网格视图）与 `/epg/sources`（源管理）可手动刷新、生成、增删源。
+
+> 提示：`epg.xml.gz` 属运行期产物，必须挂载 `-v ./output:/www/output` 才能在容器重建后保留。

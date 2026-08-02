@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}EPG 节目单{% endblock %}
+{% block head %}
+    <link rel="stylesheet" href="/static/css/epg.css">
+{% endblock %}
+{% block page_title %}📺 EPG 节目单{% endblock %}
+{% block content %}
+<div class="epg-page">
+    <div class="epg-toolbar">
+        <span class="epg-title">节目单网格</span>
+        <input id="epgSearch" class="epg-search" type="text" placeholder="搜索频道 / 节目…" />
+        <select id="epgHours" class="epg-select">
+            <option value="6">6 小时</option>
+            <option value="12" selected>12 小时</option>
+            <option value="24">24 小时</option>
+        </select>
+        <button id="epgRefresh" class="epg-btn">🔄 刷新</button>
+        <button id="epgThemeBtn" class="epg-theme-toggle">🌗 跟随系统</button>
+        <span id="epgStatus" class="epg-status"></span>
+    </div>
+
+    <div class="epg-scroll">
+        <div id="epgInner" class="epg-inner">
+            <div id="epgLoading" class="epg-loading">正在加载节目单…</div>
+            <div id="epgEmpty" class="epg-empty" style="display:none;"></div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="/static/js/epg.js"></script>
+{% endblock %}

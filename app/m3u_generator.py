@@ -32,6 +32,57 @@ class M3UGenerator:
         self._whitelist_entries = self._parse_list(
             config.get('Testing', 'global_whitelist', '') if hasattr(config, 'get') else ''
         )
+        # EPG 注入相关缓存（L2 不硬依赖 web/app.epg，懒加载）
+        self._tvg_map_cache: dict[str, dict[str, str]] | None = None
+
+    def _load_tvg_map(self) -> dict[str, dict[str, str]]:
+        """懒加载频道名 → EPG(tvg_id/tvg_logo) 映射，供 EXTINF 注入。
+
+        L2 模块不硬依赖 web 层，故在调用处按需导入；异常时回退空表。
+        """
+        if self._tvg_map_cache is None:
+            try:
+                from web.models import get_all_channel_tvg_map
+
+                self._tvg_map_cache = get_all_channel_tvg_map() or {}
+            except Exception as e:
+                self.logger.warning(f'加载频道 EPG 映射失败，跳过 tvg 注入: {e}')
+                self._tvg_map_cache = {}
+        return self._tvg_map_cache
+
+    def _epg_url_attr(self, config) -> str:
+        """生成 #EXTM3U 头的 url-tvg / x-tvg-url 属性串（url 先用 http）。
+
+        返回形如 ' url-tvg="..." x-tvg-url="..."'，无可用地址时返回空串。
+        失败静默回退，绝不阻断主流程。
+        """
+        try:
+            from app.epg import EPGManager
+
+            epg_cfg = config.get_epg_config() if hasattr(config, 'get_epg_config') else {}
+            inject = epg_cfg.get('inject_into_m3u')
+            # 必须是真实布尔 True 才注入（避免测试 Mock / 非法值误触发）
+            if not isinstance(inject, bool) or not inject:
+                return ''
+            # EPG 总开关关闭时，调度器不会抓取、epg.xml.gz 不会生成。
+            # 此时仍注入 url-tvg 只会让播放器拉到 404，反而比不注入更糟，故一并拦掉。
+            enabled = epg_cfg.get('enabled')
+            if not isinstance(enabled, bool) or not enabled:
+                self.logger.info('EPG 总开关未启用，跳过 url-tvg 注入')
+                return ''
+            url = EPGManager(config).get_epg_url()
+            if not url:
+                return ''
+            safe = url.replace('"', '')
+            return f' url-tvg="{safe}" x-tvg-url="{safe}"'
+        except Exception as e:
+            self.logger.warning(f'生成 EPG url-tvg 失败，跳过注入: {e}')
+            return ''
+
+    @staticmethod
+    def _attr_escape(value: str) -> str:
+        """M3U 属性值转义：去掉会破坏 EXTINF 行的双引号/换行。"""
+        return (value or '').replace('"', '').replace('\n', '').replace('\r', '')
 
     def _resolve_ua_position(self, source: dict) -> str:
         """校验并归一化 ua_position：非法值（非 extinf/url）回退默认并告警，避免 UA 静默丢失。
@@ -71,6 +122,14 @@ class M3UGenerator:
             str: M3U文件内容
         """
         output_lines = ['#EXTM3U']
+
+        # ── EPG 注入：#EXTM3U 头追加 url-tvg / x-tvg-url（url 先用 http，受 inject_into_m3u 控制）──
+        epg_attr = self._epg_url_attr(self.config)
+        if epg_attr:
+            output_lines[0] = '#EXTM3U' + epg_attr
+
+        # 一次性加载频道 → EPG(tvg_id/tvg_logo) 映射，供 EXTINF 注入
+        tvg_map = self._load_tvg_map()
 
         # 根据层级决定筛选策略
         if level == 'base':
@@ -125,7 +184,7 @@ class M3UGenerator:
                             if dim_key == 'content':
                                 source['category'] = dim_value
 
-                extinf = self.build_enhanced_extinf(source, level)
+                extinf = self.build_enhanced_extinf(source, level, tvg_map)
                 output_lines.append(extinf)
 
                 # 构建URL
@@ -415,12 +474,13 @@ class M3UGenerator:
             # 如果格式包含不支持的字段，回退到默认
             return source.get('content') or source.get('category') or source.get('group', 'Unknown')
 
-    def build_enhanced_extinf(self, source: dict, level: str) -> str:
+    def build_enhanced_extinf(self, source: dict, level: str, tvg_map: dict[str, dict[str, str]] | None = None) -> str:
         """构建增强版EXTINF行
 
         Args:
             source: 源数据字典
             level: 层级标识
+            tvg_map: 频道名 → EPG(tvg_id/tvg_logo) 映射，用于注入对齐后的 tvg 信息
 
         Returns:
             str: EXTINF行内容
@@ -429,14 +489,17 @@ class M3UGenerator:
 
         # M2: 修复 source['name'] 可能 KeyError
         channel_name = source.get('name', 'Unknown')
-        # 基本信息
-        tvg_id = re.sub(r'[^a-zA-Z0-9]', '_', channel_name).lower()
+        # 基本信息：优先使用频道映射中对齐到的 EPG tvg_id，否则回退 slug
+        mapped = (tvg_map or {}).get(channel_name) or {}
+        slug_id = re.sub(r'[^a-zA-Z0-9]', '_', channel_name).lower()
+        tvg_id = self._attr_escape(mapped.get('tvg_id') or slug_id)
         parts.append(f'tvg-id="{tvg_id}"')
-        parts.append(f'tvg-name="{channel_name}"')
+        parts.append(f'tvg-name="{self._attr_escape(channel_name)}"')
 
-        # 图标
-        if source.get('logo'):
-            parts.append(f'tvg-logo="{source["logo"]}"')
+        # 图标：源自带 logo 优先；否则用 EPG 对齐到的 tvg_logo
+        logo = source.get('logo') or mapped.get('tvg_logo') or ''
+        if logo:
+            parts.append(f'tvg-logo="{self._attr_escape(logo)}"')
 
         # 分组标题（支持多维格式化）
         group_title = self._build_group_title(source)

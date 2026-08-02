@@ -34,6 +34,7 @@ from web.core import (
 from web.routes.auth import router as auth_router
 from web.routes.config_api import router as config_router
 from web.routes.dashboard import router as dashboard_router
+from web.routes.epg import router as epg_router
 
 # ── 导入路由模块并挂载到 app ──────────────────────
 from web.routes.pages import router as pages_router
@@ -48,6 +49,7 @@ app.include_router(sources_router)
 app.include_router(config_router)
 app.include_router(rules_router)
 app.include_router(system_router)
+app.include_router(epg_router)
 
 
 # ══════════════════════════════════════════════════

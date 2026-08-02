@@ -17,7 +17,9 @@ name: Build and Push Docker Image
 
 on:
   push:
-    branches: ["master"]
+    # 每次推送代码到主干都会重新构建并推送镜像。
+    # 同时监听 main：若日后把默认分支从 master 改名为 main，自动化不会断。
+    branches: ["master", "main"]
   workflow_dispatch:
 
 concurrency:

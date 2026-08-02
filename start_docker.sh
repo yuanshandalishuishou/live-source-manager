@@ -315,28 +315,68 @@ check_ffmpeg() {
     return 1
 }
 
-# 静态构建兜底：下载 johnvansickle 静态包
+# 单地址下载（curl 优先，wget 兜底）；成功返回 0
+_download_to() {
+    local url="$1" out="$2"
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL --connect-timeout 20 --max-time 900 -o "$out" "$url" && return 0
+    fi
+    if command -v wget >/dev/null 2>&1; then
+        wget -q --timeout=30 --tries=2 -O "$out" "$url" && return 0
+    fi
+    return 1
+}
+
+# 静态构建兜底：多镜像顺序尝试，任一成功即止
 # 优先装到 /usr/local/bin（全局可用）；无写权限则落到项目 tools/ffmpeg/
+# 说明：原实现只挂 johnvansickle 单一地址，该站点在国内/CI 环境常年不稳定，
+# 一旦不通就彻底没有 FFmpeg，流测试全线失效。此处补 BtbN 与 ghproxy 两条备线。
 _install_ffmpeg_static() {
     local proj="${PROJECT_DIR:-$(pwd)}"
     local tmp
     tmp="$(mktemp -d)" || return 1
-    local url="https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz"
 
-    log_info "从静态构建安装 FFmpeg..."
+    # tar.xz 系（johnvansickle，解包后为 ffmpeg-*/ 目录）
+    local urls_txz=(
+        "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz"
+        "https://www.johnvansickle.com/ffmpeg/old-releases/ffmpeg-6.1-amd64-static.tar.xz"
+    )
+    # tar.xz 系（BtbN GitHub Releases，解包后为 ffmpeg-*/bin/）
+    local urls_btbn=(
+        "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz"
+        "https://ghproxy.net/https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz"
+    )
 
-    # 兼容只装了 curl 或只装了 wget 的环境
-    if command -v curl >/dev/null 2>&1; then
-        curl -fsSL --connect-timeout 20 --max-time 600 -o "$tmp/ffmpeg.tar.xz" "$url" || { rm -rf "$tmp"; return 1; }
-    elif command -v wget >/dev/null 2>&1; then
-        wget -q -O "$tmp/ffmpeg.tar.xz" "$url" || { rm -rf "$tmp"; return 1; }
-    else
-        log_error "缺少 curl/wget，无法下载 FFmpeg 静态构建"
+    log_info "从静态构建安装 FFmpeg（将依次尝试多个镜像）..."
+
+    local got=""
+    local u
+    for u in "${urls_txz[@]}" "${urls_btbn[@]}"; do
+        log_info "  尝试: $u"
+        if _download_to "$u" "$tmp/ffmpeg.tar.xz"; then
+            got="$u"
+            break
+        fi
+        log_warn "  该地址不可用，换下一个"
+    done
+
+    if [ -z "$got" ]; then
+        log_error "所有 FFmpeg 静态构建镜像均不可达（也可能缺少 curl/wget）"
         rm -rf "$tmp"
         return 1
     fi
 
     tar -xf "$tmp/ffmpeg.tar.xz" -C "$tmp" || { rm -rf "$tmp"; return 1; }
+
+    # 两种解包布局都兼容：ffmpeg-*/ffmpeg 与 ffmpeg-*/bin/ffmpeg
+    local src_ffmpeg src_ffprobe
+    src_ffmpeg="$(find "$tmp" -type f -name ffmpeg  -perm -u+x 2>/dev/null | head -1)"
+    src_ffprobe="$(find "$tmp" -type f -name ffprobe -perm -u+x 2>/dev/null | head -1)"
+    if [ -z "$src_ffmpeg" ] || [ -z "$src_ffprobe" ]; then
+        log_error "静态包内未找到 ffmpeg/ffprobe 可执行文件"
+        rm -rf "$tmp"
+        return 1
+    fi
 
     local dest
     if [ -w /usr/local/bin ] 2>/dev/null || [ "$(id -u)" = "0" ]; then
@@ -347,10 +387,10 @@ _install_ffmpeg_static() {
         log_warn "无 /usr/local/bin 写权限，改装到项目本地: $dest"
     fi
 
-    cp "$tmp"/ffmpeg-*/ffmpeg "$tmp"/ffmpeg-*/ffprobe "$dest/" || { rm -rf "$tmp"; return 1; }
+    cp "$src_ffmpeg" "$dest/ffmpeg" && cp "$src_ffprobe" "$dest/ffprobe" || { rm -rf "$tmp"; return 1; }
     chmod +x "$dest/ffmpeg" "$dest/ffprobe"
     rm -rf "$tmp"
-    log_info "FFmpeg 静态构建已就位: $dest"
+    log_info "FFmpeg 静态构建已就位: $dest (来源: $got)"
     return 0
 }
 

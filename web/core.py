@@ -301,6 +301,19 @@ SECTION_SCHEMA: dict[str, dict[str, tuple]] = {
         'ua_position': ('str', 'extinf', 'UA位置'),
         'ua_enabled': ('bool', 'False', '启用UA'),
     },
+    'EPG': {
+        'enabled': ('bool', 'True', '启用EPG', '开启后按调度抓取节目单并生成 XMLTV'),
+        'output_filename': ('str', 'epg.xml.gz', 'EPG输出文件名', '生成到输出目录，供播放器拉取'),
+        'refresh_mode': ('str', 'daily', '刷新方式', 'daily=每天定点；interval=按间隔分钟'),
+        'refresh_at': ('str', '03:30', '每日刷新时刻', 'refresh_mode=daily 时生效，格式 HH:MM'),
+        'refresh_minutes': ('int', '360', '刷新间隔(分钟)', 'refresh_mode=interval 时生效，最小5'),
+        'timezone': ('str', 'Asia/Shanghai', '时区', '节目单展示时区'),
+        'keep_days': ('int', '7', '保留天数', '仅保留未来 N 天的节目'),
+        'past_hours': ('int', '6', '保留过去小时数', '保留过去 N 小时节目，供"正在播"回看'),
+        'fetch_timeout': ('int', '60', '抓取超时(秒)', '单个 EPG 源下载超时'),
+        'web_base_url': ('str', '', 'EPG外链基址', '留空自动探测 http://<host>:<发布端口>'),
+        'inject_into_m3u': ('bool', 'True', '注入M3U头', '在 #EXTM3U 注入 url-tvg 指向 EPG 文件'),
+    },
 }
 
 # 从 YAML 加载外部化默认值，覆盖 SECTION_SCHEMA 中的硬编码默认值
@@ -1009,6 +1022,12 @@ category_keywords:
     auto_scan_task = asyncio.create_task(_auto_scan_scheduler())
     logger.info('自动扫描调度任务已启动（配置中心「测试」可设置间隔/每日定时）')
 
+    # ── EPG 定时刷新调度任务（按各源 refresh_mode/refresh_at/refresh_minutes 触发）──
+    from web.routes import epg as _epg_routes
+
+    epg_sched_task = asyncio.create_task(_epg_routes.epg_scheduler())
+    logger.info('EPG 定时刷新调度任务已启动（EPG.enabled 且源已启用后按配置时间抓取）')
+
     # ── 源文件缓存预热（后台线程，不阻塞启动）────────────
     # 30,000+ 源的全量解析约需 3 分钟，预热后页面请求直接命中缓存
     async def _prewarm_parse_cache():
@@ -1044,6 +1063,12 @@ category_keywords:
         auto_scan_task.cancel()
         with suppress(asyncio.CancelledError):
             await auto_scan_task
+    except Exception:
+        pass
+    try:
+        epg_sched_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await epg_sched_task
     except Exception:
         pass
     logger.info('Web 服务关闭，清理资源...')

@@ -138,6 +138,21 @@ class Config:
         # [UserAgents]
         'UserAgents.ua_position': 'extinf',
         'UserAgents.ua_enabled': 'False',
+        # [EPG] 电子节目单
+        # 默认开启：必须与 EPG.inject_into_m3u='True' 配套。若此处为 False，
+        # 调度器（web/routes/epg.py::epg_scheduler）会空转不抓取，epg.xml.gz 永不生成，
+        # 而 m3u 头已注入 url-tvg 指向该文件 → 播放器拉到 404，EPG 形同虚设。
+        'EPG.enabled': 'True',
+        'EPG.output_filename': 'epg.xml.gz',
+        'EPG.refresh_mode': 'daily',  # daily=每天定点; interval=按间隔分钟
+        'EPG.refresh_at': '03:30',  # refresh_mode=daily 时的触发时刻 HH:MM
+        'EPG.refresh_minutes': '360',  # refresh_mode=interval 时的间隔分钟
+        'EPG.timezone': 'Asia/Shanghai',
+        'EPG.keep_days': '7',  # 保留未来多少天节目
+        'EPG.past_hours': '6',  # 保留过去多少小时节目（供"正在播"回看）
+        'EPG.fetch_timeout': '60',  # 单个 EPG 源下载超时(秒)
+        'EPG.web_base_url': '',  # 留空自动探测 http://<host>:<fileshare_port>
+        'EPG.inject_into_m3u': 'True',  # 在 #EXTM3U 头注入 url-tvg
     }
 
     def __init__(self):
@@ -404,6 +419,49 @@ class Config:
         if config['document_root'] and not os.path.isabs(config['document_root']):
             config['document_root'] = os.path.abspath(config['document_root'])
         return config
+
+    def get_epg_config(self) -> dict:
+        """读取 EPG 段配置（电子节目单）。
+
+        返回归一化后的字典，供 app.epg / web.routes.epg / m3u_generator 共用。
+        """
+
+        def _s(key: str) -> str:
+            return self.get('EPG', key, self._default('EPG', key)) or ''
+
+        def _i(key: str) -> int:
+            return self.getint('EPG', key, self._default_int('EPG', key))
+
+        def _b(key: str) -> bool:
+            return self.getboolean('EPG', key, self._default_bool('EPG', key))
+
+        refresh_mode = (_s('refresh_mode') or 'daily').strip().lower()
+        if refresh_mode not in ('daily', 'interval'):
+            refresh_mode = 'daily'
+
+        refresh_at = (_s('refresh_at') or '03:30').strip()
+        # 兜底非法时刻，避免调度器炸掉
+        try:
+            hh, mm = refresh_at.split(':')
+            if not (0 <= int(hh) <= 23 and 0 <= int(mm) <= 59):
+                raise ValueError(refresh_at)
+            refresh_at = f'{int(hh):02d}:{int(mm):02d}'
+        except Exception:
+            refresh_at = '03:30'
+
+        return {
+            'enabled': _b('enabled'),
+            'output_filename': _s('output_filename') or 'epg.xml.gz',
+            'refresh_mode': refresh_mode,
+            'refresh_at': refresh_at,
+            'refresh_minutes': max(5, _i('refresh_minutes')),
+            'timezone': _s('timezone') or 'Asia/Shanghai',
+            'keep_days': max(1, _i('keep_days')),
+            'past_hours': max(0, _i('past_hours')),
+            'fetch_timeout': max(5, _i('fetch_timeout')),
+            'web_base_url': _s('web_base_url').strip().rstrip('/'),
+            'inject_into_m3u': _b('inject_into_m3u'),
+        }
 
     def get_ua_position(self) -> str:
         return self.get('UserAgents', 'ua_position', self._default('UserAgents', 'ua_position')) or ''

@@ -34,6 +34,8 @@
                 <li><a href="/config" class="nav-item {% if request.url.path == '/config' %}active{% endif %}">⚙️ 配置中心</a></li>
                 <li><a href="/rules" class="nav-item {% if request.url.path == '/rules' %}active{% endif %}">🏷️ 分类规则</a></li>
                 <li><a href="/test" class="nav-item {% if request.url.path == '/test' %}active{% endif %}">🧪 实时测试</a></li>
+                <li><a href="/epg" class="nav-item {% if request.url.path == '/epg' %}active{% endif %}">📺 EPG 节目单</a></li>
+                <li><a href="/epg/sources" class="nav-item {% if request.url.path == '/epg/sources' %}active{% endif %}">🛰️ EPG 源</a></li>
                 <li><a href="/logs" class="nav-item {% if request.url.path == '/logs' %}active{% endif %}">📋 日志查看</a></li>
                 {% if user.role == 'admin' %}
                 <li><a href="/users" class="nav-item {% if request.url.path == '/users' %}active{% endif %}">👥 用户管理</a></li>
@@ -59,5 +61,6 @@
             </div>
         </main>
     </div>
+    {% block scripts %}{% endblock %}
 </body>
 </html>

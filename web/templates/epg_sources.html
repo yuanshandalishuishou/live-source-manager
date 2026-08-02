@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}EPG 源管理{% endblock %}
+{% block head %}
+    <link rel="stylesheet" href="/static/css/epg.css">
+{% endblock %}
+{% block page_title %}🛰️ EPG 源管理{% endblock %}
+{% block content %}
+<div class="epg-page">
+    <div class="epg-toolbar">
+        <span class="epg-title">EPG 数据源</span>
+        <button id="epgAddBtn" class="epg-btn epg-btn-primary">＋ 添加源</button>
+        <button id="epgRefreshAll" class="epg-btn">🔄 全量抓取</button>
+        <button id="epgGenerate" class="epg-btn">📦 生成 epg.xml.gz</button>
+        <button id="epgCopyUrl" class="epg-btn">🔗 复制 EPG 地址</button>
+        <span id="epgStatus" class="epg-status"></span>
+    </div>
+
+    <div class="epg-table-wrap">
+        <table class="epg-table">
+            <thead>
+                <tr>
+                    <th>名称</th>
+                    <th>地址</th>
+                    <th>启用</th>
+                    <th>优先级</th>
+                    <th>更新时间</th>
+                    <th>上次抓取</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody id="epgSrcBody"></tbody>
+        </table>
+    </div>
+</div>
+
+<!-- 编辑弹层 -->
+<div id="epgModal" class="epg-modal-mask">
+    <div class="epg-modal">
+        <h3 id="epgModalTitle">添加 EPG 源</h3>
+        <input type="hidden" id="f_id" />
+        <div class="epg-field">
+            <label>名称</label>
+            <input id="f_name" placeholder="例如：51zmt" />
+        </div>
+        <div class="epg-field">
+            <label>XMLTV 地址（url）</label>
+            <input id="f_url" placeholder="https://epg.51zmt.top:8000/e.xml.gz" />
+        </div>
+        <div class="epg-field-row">
+            <div class="epg-field">
+                <label>启用</label>
+                <select id="f_enabled"><option value="1">启用</option><option value="0">禁用</option></select>
+            </div>
+            <div class="epg-field">
+                <label>优先级（越小越优先）</label>
+                <input id="f_priority" type="number" value="100" />
+            </div>
+        </div>
+        <div class="epg-field-row">
+            <div class="epg-field">
+                <label>更新模式（留空=跟随全局）</label>
+                <select id="f_refresh_mode">
+                    <option value="">跟随全局</option>
+                    <option value="daily">每天定点</option>
+                    <option value="interval">按间隔分钟</option>
+                </select>
+            </div>
+            <div class="epg-field">
+                <label>定时(HH:MM) / 间隔(分钟)</label>
+                <input id="f_refresh_when" placeholder="03:30 或 360" />
+            </div>
+        </div>
+        <div class="epg-modal-actions">
+            <button class="epg-mini" id="epgModalCancel">取消</button>
+            <button class="epg-mini epg-btn-primary" id="epgModalSave">保存</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="/static/js/epg_sources.js"></script>
+{% endblock %}
