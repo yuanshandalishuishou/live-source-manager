@@ -328,14 +328,39 @@ class EPGFetcher:
         if not url:
             raise ValueError('EPG 源地址为空')
 
-        # 本地文件直读（便于离线/内网部署）
+        # ── 本地文件校验（I3修复）：仅允许白名单目录内的文件，杜绝任意文件读取 ──
+        # 离线/内网部署可把 EPG 文件放入允许目录；协议仍以 http(s) 为主。
         local_path = url[7:] if url.lower().startswith('file://') else url
-        if not re.match(r'^[a-zA-Z][a-zA-Z0-9+.-]*://', url) and os.path.isfile(local_path):
-            return local_path
-        if url.lower().startswith('file://'):
-            if not os.path.isfile(local_path):
-                raise RuntimeError(f'本地 EPG 文件不存在: {local_path}')
-            return local_path
+        is_file_scheme = url.lower().startswith('file://')
+        # 允许的本地目录白名单（应用运行时数据目录，相对当前工作目录解析）
+        candidate_roots = [
+            './config/sources',
+            './config/online',
+            './www/output',
+            './data',
+            './web/data',
+        ]
+        allowed_roots = []
+        for _cand in candidate_roots:
+            _abs = os.path.realpath(os.path.abspath(_cand))
+            if os.path.isdir(_abs):
+                allowed_roots.append(_abs)
+        allowed_roots = list(set(allowed_roots))
+
+        # 任意 scheme 裸路径或 file:// 均按“本地文件”处理前，先判白名单
+        looks_local = is_file_scheme or not re.match(r'^[a-zA-Z][a-zA-Z0-9+.-]*://', url)
+        if looks_local:
+            abs_local = os.path.realpath(os.path.abspath(local_path))
+            in_allowed = any(
+                abs_local == root or abs_local.startswith(root + os.sep) for root in allowed_roots
+            )
+            if not in_allowed:
+                raise ValueError(
+                    'EPG 本地文件不在允许目录内（已拒绝任意文件读取）：仅允许 config/sources、config/online、www/output、data 等应用数据目录，请改用 http(s) 源'
+                )
+            if not os.path.isfile(abs_local):
+                raise RuntimeError(f'本地 EPG 文件不存在: {abs_local}')
+            return abs_local
 
         from app.security import is_static_safe
 

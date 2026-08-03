@@ -91,7 +91,7 @@ class Config:
         'GitHub.rate_limit': '5000',
         # [Testing]
         'Testing.timeout': '10',
-        'Testing.concurrent_threads': '40',
+        'Testing.concurrent_threads': '50',
         'Testing.max_concurrent_ffprobe': '16',
         'Testing.cache_ttl': '120',
         'Testing.enable_speed_test': 'True',

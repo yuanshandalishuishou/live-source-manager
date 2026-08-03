@@ -1114,10 +1114,10 @@ sequenceDiagram
 | `NGINX_PORT` | `12345` | `${NGINX_PORT:-12345}` | 通过 `envsubst` 注入 nginx.conf |
 | `WEB_PORT` | `23456` | `${WEB_PORT:-23456}` | Uvicorn 绑定端口 |
 | `TEST_TIMEOUT` | `30` | `${TEST_TIMEOUT:-10}` | 写入 SQLite `Testing.timeout` |
-| `CONCURRENT_THREADS` | `10` | `${CONCURRENT_THREADS:-50}` | 写入 SQLite `Testing.concurrent_threads` |
+| `CONCURRENT_THREADS` | `50` | `${CONCURRENT_THREADS:-50}` | 写入 SQLite `Testing.concurrent_threads` |
 | `UPDATE_CRON` | `"0 6,12,18,22 * * *"` | `${UPDATE_CRON:-0 2 * * *}` | Cron 表达式，执行 `python -m app` |
 
-> **观察点**：注意 `TEST_TIMEOUT` 和 `CONCURRENT_THREADS` 的 Dockerfile 默认值与 `start_docker.sh` 运行时默认值**不一致**。Dockerfile 是为裸 `docker run` 准备的保守值，而 `start_docker.sh` 是为 `docker-compose` 准备的优化值（更高并发）。这就是为什么推荐使用 `docker-compose` 的原因之一。
+> 修复说明：`CONCURRENT_THREADS` 已统一默认值为 `50`，Dockerfile / `start_docker.sh` / `docker-compose.yml` / `.env.example` 与 SQLite 内部默认（`Testing.concurrent_threads`）口径一致，不再有高低并发不一致的问题。
 
 Sources: [Dockerfile](Dockerfile#L39-L44), [start_docker.sh](start_docker.sh#L461-L467), [docker-compose.yml](docker-compose.yml#L46-L64)
 
@@ -3633,7 +3633,7 @@ Sources: [livetest.html](web/templates/livetest.html#L1-L200)
 | 段落 | 键 | 类型 | 默认值 | 说明 |
 |---|---|---|---|---|
 | `Testing` | `timeout` | int | 10 | 探测超时（秒） |
-| `Testing` | `concurrent_threads` | int | 40 | 线程池最大工作线程 |
+| `Testing` | `concurrent_threads` | int | 50 | 线程池最大工作线程 |
 | `Testing` | `max_concurrent_ffprobe` | int | 16 | ffprobe 子进程 Semaphore 上限 |
 | `Testing` | `cache_ttl` | int | 120 | 缓存有效期（分钟） |
 | `Testing` | `enable_speed_test` | bool | True | 是否启用下载速度测试 |
@@ -4666,7 +4666,7 @@ Sources: [app/config.py](app/config.py#L160-L201), [app/exceptions.py](app/excep
 | 字段名 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
 | timeout | int | 10 | 测试超时(秒) |
-| concurrent_threads | int | 40 | 并发线程数 |
+| concurrent_threads | int | 50 | 并发线程数 |
 | max_concurrent_ffprobe | int | 16 | ffprobe 并发数 |
 | cache_ttl | int | 120 | 缓存有效期(分) |
 | enable_speed_test | bool | True | 启用速率测试 |

@@ -126,7 +126,7 @@ Testing:
   auto_scan_interval_hours: '24'
   auto_scan_mode: interval
   cache_ttl: '120'
-  concurrent_threads: '40'
+  concurrent_threads: '50'
   enable_ad_detect: 'True'
   enable_host_speed_share: 'True'
   enable_source_freeze: 'True'

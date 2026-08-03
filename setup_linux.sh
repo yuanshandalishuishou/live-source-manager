@@ -99,7 +99,20 @@ if [ -d /etc/nginx/sites-available ] && [ -f "$PROJECT_DIR/nginx.conf" ]; then
     cp "$PROJECT_DIR/nginx.conf" /etc/nginx/sites-available/live-source-manager
     ln -sf /etc/nginx/sites-available/live-source-manager /etc/nginx/sites-enabled/
     rm -f /etc/nginx/sites-enabled/default
-    
+
+    # I2修复：nginx.conf 里的 ${NGINX_PORT} 占位符必须替换为实际端口，
+    # 否则 nginx 会因字面量 ${NGINX_PORT} 绑定失败。默认取 12345（与 Docker 一致），可用 NGINX_PORT 覆盖。
+    NGINX_PORT="${NGINX_PORT:-12345}"
+    if command -v envsubst >/dev/null 2>&1; then
+        log_info "使用 envsubst 设置 Nginx 端口: ${NGINX_PORT}"
+        envsubst '${NGINX_PORT}' < /etc/nginx/sites-available/live-source-manager \
+            > /tmp/lsm-nginx.conf.tmp && \
+            mv /tmp/lsm-nginx.conf.tmp /etc/nginx/sites-available/live-source-manager
+    else
+        log_info "envsubst 不可用，使用 sed 设置 Nginx 端口: ${NGINX_PORT}"
+        sed -i "s/\${NGINX_PORT}/${NGINX_PORT}/g" /etc/nginx/sites-available/live-source-manager
+    fi
+
     # 测试 Nginx 配置
     if nginx -t >/dev/null 2>&1; then
         log_info "✓ Nginx 配置成功"
