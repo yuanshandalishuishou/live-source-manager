@@ -84,29 +84,14 @@ from app.rules import (
 )
 
 # --- security ---
+# 仅保留解析阶段真实生效的窄门禁 API（安全审计 S1/S2：validate_url / is_safe_url /
+# sanitize_url 及域名黑白名单、境外流媒体拦截、DNS 解析、CNNIC 黑名单等全量审查逻辑
+# 均为生产零调用的死代码，已整体移除）。
 from app.security import (
     ALLOWED_SCHEMES,
-    BLOCKED_SCHEMES,
-    CMD_INJECTION_PATTERNS,
-    DEFAULT_DOMAIN_BLACKLIST,
-    PATH_TRAVERSAL_PATTERNS,
     PRIVATE_IP_PREFIXES,
-    XSS_PATTERNS,
     SourceData,
-    _check_command_injection,
-    _check_path_traversal,
-    _check_xss,
-    _global_domain_blacklist,
-    _is_blacklisted_domain,
-    _is_private_ip,
-    _is_valid_host,
-    add_domain_blacklist,
-    clear_domain_blacklist,
-    get_domain_blacklist,
-    is_safe_url,
     is_static_safe,  # noqa: F401  (re-exported public API)
-    sanitize_url,
-    validate_url,
 )
 
 # --- source_manager ---

@@ -378,26 +378,57 @@ class EPGFetcher:
 
         timeout_cfg = aiohttp.ClientTimeout(total=self.timeout, connect=min(15, self.timeout))
         headers = {'User-Agent': 'Mozilla/5.0 (compatible; LiveSourceManager/1.0 EPG)'}
-        connector = self._build_connector()
         proxy = self._http_proxy()
-        try:
-            async with (
-                aiohttp.ClientSession(connector=connector, timeout=timeout_cfg) as session,
-                session.get(url, headers=headers, proxy=proxy, allow_redirects=True) as resp,
-            ):
-                if resp.status != 200:
-                    raise RuntimeError(f'HTTP {resp.status}')
-                total = 0
-                with open(dest, 'wb') as f:
-                    async for chunk in resp.content.iter_chunked(64 * 1024):
-                        f.write(chunk)
-                        total += len(chunk)
-                    if total == 0:
-                        raise RuntimeError('下载内容为空')
-            return dest
-        except Exception as e:
-            with_suppress_unlink(dest)
-            raise RuntimeError(f'下载失败: {e}') from e
+
+        # ── 有限重试：容忍公共 EPG 源常见的瞬时网络抖动 / 服务端 5xx / 限流(429) ──
+        # 仅对连接错误、超时、429/5xx 重试；4xx 客户端错误与空内容不重试，直接失败。
+        max_attempts = 3
+        last_exc: Exception | None = None
+        for attempt in range(1, max_attempts + 1):
+            retryable = False
+            try:
+                connector = self._build_connector()
+                async with (
+                    aiohttp.ClientSession(connector=connector, timeout=timeout_cfg) as session,
+                    session.get(url, headers=headers, proxy=proxy, allow_redirects=True) as resp,
+                ):
+                    if resp.status != 200:
+                        if resp.status in (429, 500, 502, 503, 504):
+                            retryable = True
+                            last_exc = RuntimeError(f'HTTP {resp.status}')
+                            logger.warning(
+                                'EPG 下载第 %d/%d 次遇可重试 HTTP %d，准备重试',
+                                attempt, max_attempts, resp.status,
+                            )
+                        else:
+                            with_suppress_unlink(dest)
+                            raise RuntimeError(f'HTTP {resp.status}')
+                    else:
+                        total = 0
+                        with open(dest, 'wb') as f:
+                            async for chunk in resp.content.iter_chunked(64 * 1024):
+                                f.write(chunk)
+                                total += len(chunk)
+                            if total == 0:
+                                raise RuntimeError('下载内容为空')
+                        return dest
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                retryable = True
+                last_exc = e
+                logger.warning(
+                    'EPG 下载第 %d/%d 次连接失败，准备重试: %s',
+                    attempt, max_attempts, e,
+                )
+            except RuntimeError:
+                # 非 200 客户端错误 / 空内容：不重试，直接向上抛
+                with_suppress_unlink(dest)
+                raise
+            if retryable and attempt < max_attempts:
+                await asyncio.sleep(min(2 ** attempt, 8))
+                continue
+            break
+        with_suppress_unlink(dest)
+        raise RuntimeError(f'下载失败(已重试{max_attempts}次): {last_exc}') from last_exc
 
 
 def _static_safe(checker, url: str) -> tuple[bool, str]:

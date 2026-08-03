@@ -1,231 +1,129 @@
 """
-app.security 模块单元测试
+app.security 单元测试
 
-覆盖：validate_url（合法/非法/XSS/命令注入/路径遍历/私有IP/黑名单）、
-sanitize_url、is_safe_url、域名黑名单管理。
+覆盖解析阶段**真实生效**的窄门禁 is_static_safe：
+  - 合法协议 (http/https/rtmp/rtsp/rtp) 放行
+  - 空 / 缺 scheme / 不支持协议 (file/ftp/javascript/data) 拒绝
+  - 缺主机 / 非法主机格式拒绝
+  - SSRF：localhost / .local / .internal / 127.0.0.1 / 10.x / 192.168.x / 172.16.x / 链路本地 拒绝
+  - 合法公网域名 / 公网 IP / IPv6 放行
+  - URL 带端口 / query / fragment 剥离 / | 分隔 正确处理
+
+（历史上本文件曾测试 validate_url / is_safe_url / sanitize_url 等「全量审查」逻辑，
+经安全审计 S1/S2 确认其为死代码并已移除，故改为聚焦 is_static_safe 这一真门禁。）
 """
 
-from app.security import (
-    SourceData,
-    add_domain_blacklist,
-    clear_domain_blacklist,
-    get_domain_blacklist,
-    is_safe_url,
-    sanitize_url,
-    validate_url,
-)
-
-# ── validate_url ──────────────────────────────
+from app.security import SourceData, is_static_safe
 
 
-class TestValidateUrl:
-    """URL 格式校验与安全检查"""
+class TestIsStaticSafe:
+    """解析阶段窄门禁 is_static_safe"""
 
-    def test_valid_http_url(self):
-        result = validate_url('http://example.com/stream.m3u8')
-        assert result['valid'] is True
-        assert result['safe'] is True
-        assert 'example.com' in result['normalized_url']
+    # ── 合法协议放行 ──
+    def test_valid_http(self):
+        ok, reason, cat = is_static_safe('http://example.com/stream.m3u8')
+        assert ok is True and cat == 'ok'
 
-    def test_valid_https_url(self):
-        result = validate_url('https://example.com/live/stream')
-        assert result['valid'] is True
+    def test_valid_https(self):
+        assert is_static_safe('https://example.com/live/stream')[0] is True
 
-    def test_empty_url(self):
-        result = validate_url('')
-        assert result['valid'] is False
-        assert '空' in result['reason']
+    def test_valid_rtmp_rtsp_rtp(self):
+        assert is_static_safe('rtmp://example.com/live')[0] is True
+        assert is_static_safe('rtsp://example.com/live')[0] is True
+        assert is_static_safe('rtp://example.com/live')[0] is True
 
-    def test_whitespace_only_url(self):
-        result = validate_url('   ')
-        assert result['valid'] is False
+    # ── 非法 / 缺失 ──
+    def test_empty(self):
+        ok, reason, cat = is_static_safe('')
+        assert ok is False and cat == 'host' and '空' in reason
+
+    def test_whitespace_only(self):
+        assert is_static_safe('   ')[0] is False
 
     def test_missing_scheme(self):
-        result = validate_url('example.com/stream')
-        assert result['valid'] is False
-        assert 'scheme' in result['reason'].lower() or '协议' in result['reason']
+        ok, reason, cat = is_static_safe('example.com/stream')
+        assert ok is False and cat == 'scheme'
 
-    def test_blocked_scheme_file(self):
-        result = validate_url('file:///etc/passwd')
-        assert result['valid'] is False
+    def test_blocked_file_scheme(self):
+        ok, reason, cat = is_static_safe('file:///etc/passwd')
+        assert ok is False and cat == 'scheme'
 
-    def test_blocked_scheme_javascript(self):
-        result = validate_url('javascript:alert(1)')
-        assert result['valid'] is False
+    def test_blocked_ftp_scheme(self):
+        assert is_static_safe('ftp://example.com/file')[0] is False
 
-    def test_unsupported_scheme_ftp(self):
-        result = validate_url('ftp://example.com/file')
-        assert result['valid'] is False
+    def test_blocked_javascript_scheme(self):
+        assert is_static_safe('javascript:alert(1)')[0] is False
+
+    def test_blocked_data_scheme(self):
+        assert is_static_safe('data:text/html,<script>')[0] is False
 
     def test_missing_host(self):
-        result = validate_url('http:///path')
-        assert result['valid'] is False
-        assert '主机' in result['reason'] or 'host' in result['reason'].lower()
+        ok, reason, cat = is_static_safe('http:///path')
+        assert ok is False and cat == 'host'
 
-    def test_private_ip_localhost(self):
-        # 127.0.0.1 在 DEFAULT_DOMAIN_BLACKLIST 中，会被黑名单拦截
-        result = validate_url('http://127.0.0.1/stream')
-        assert result['valid'] is False
-        assert '黑名单' in result['reason'] or '私有' in result['reason'] or 'IP' in result['reason']
+    def test_invalid_host_chars(self):
+        assert is_static_safe('http://exa mple/stream')[0] is False
 
-    def test_private_ip_10x(self):
-        result = validate_url('http://10.0.0.1/stream')
-        assert result['valid'] is False
+    # ── SSRF 防护 ──
+    def test_ssrf_localhost(self):
+        ok, reason, cat = is_static_safe('http://localhost/stream')
+        assert ok is False and cat == 'ssrf'
 
-    def test_private_ip_192168(self):
-        result = validate_url('http://192.168.1.1/stream')
-        assert result['valid'] is False
+    def test_ssrf_dot_local(self):
+        assert is_static_safe('http://host.local/stream')[0] is False
 
-    def test_private_ip_172(self):
-        result = validate_url('http://172.16.0.1/stream')
-        assert result['valid'] is False
+    def test_ssrf_dot_internal(self):
+        assert is_static_safe('http://host.internal/stream')[0] is False
 
-    def test_xss_attempt_script_tag(self):
-        result = validate_url('http://example.com/<script>alert(1)</script>')
-        assert result['valid'] is False
+    def test_ssrf_loopback_ip(self):
+        assert is_static_safe('http://127.0.0.1/stream')[0] is False
 
-    def test_xss_attempt_onerror(self):
-        result = validate_url('http://example.com/stream" onerror="alert(1)')
-        assert result['valid'] is False
+    def test_ssrf_private_10(self):
+        assert is_static_safe('http://10.0.0.1/stream')[0] is False
 
-    def test_command_injection_semicolon(self):
-        # 注意：urlparse 把 ; 解析为 params，不进入 path/query
-        # 使用 $() 语法测试命令注入（在 URL query 中）
-        result = validate_url('http://example.com/stream?cmd=$(whoami)')
-        assert result['valid'] is False
+    def test_ssrf_private_192168(self):
+        assert is_static_safe('http://192.168.1.1/stream')[0] is False
 
-    def test_command_injection_backtick(self):
-        # 反引号在 URL 中应被检测为命令注入
-        result = validate_url('http://example.com/stream`whoami`')
-        assert result['valid'] is False
+    def test_ssrf_private_17216(self):
+        assert is_static_safe('http://172.16.0.1/stream')[0] is False
 
-    def test_path_traversal(self):
-        result = validate_url('http://example.com/../../../etc/passwd')
-        assert result['valid'] is False
+    def test_ssrf_link_local(self):
+        assert is_static_safe('http://169.254.169.254/stream')[0] is False
 
-    def test_path_traversal_encoded(self):
-        result = validate_url('http://example.com/%2e%2e%2f%2e%2e%2fetc/passwd')
-        assert result['valid'] is False
+    # ── 合法公网地址放行（须用真正公网地址；文档保留段 203.0.113.x / 2001:db8::
+    #     会被 Python ipaddress 归类为 is_private，属 SSRF 正确拦截，不算「公网」）──
+    def test_valid_public_ip(self):
+        assert is_static_safe('http://8.8.8.8/stream')[0] is True
 
+    def test_valid_public_domain(self):
+        assert is_static_safe('http://example.com/stream')[0] is True
+
+    def test_ipv6_host(self):
+        assert is_static_safe('http://[2606:4700:4700::1111]/stream')[0] is True
+
+    # ── 形态处理 ──
     def test_url_with_port(self):
-        result = validate_url('http://example.com:8080/stream.m3u8')
-        assert result['valid'] is True
+        assert is_static_safe('http://example.com:8080/stream.m3u8')[0] is True
 
-    def test_url_with_query_params(self):
-        # & 是合法的 URL query 分隔符（如 ?a=1&b=2）；CMD_INJECTION_PATTERNS 故意
-        # 不拦截单个 shell 元字符（& ; | ` $），否则会误杀海量合法直播源。
-        result = validate_url('https://example.com/stream?key=value')
-        assert result['valid'] is True
+    def test_url_with_query(self):
+        assert is_static_safe('https://example.com/stream?key=value&token=abc')[0] is True
 
-    def test_ampersand_allowed_as_query_separator(self):
-        """& 作为 query 分隔符应被放行，不因命令注入检查被误杀。"""
-        result = validate_url('https://example.com/stream?key=value&token=abc')
-        assert result['valid'] is True
+    def test_fragment_stripped(self):
+        assert is_static_safe('http://example.com/stream#frag')[0] is True
 
-    def test_command_injection_dollar_brace(self):
-        # ${...} 变量展开在 URL 中应被检测为命令注入
-        result = validate_url('http://example.com/stream?x=${HOME}')
-        assert result['valid'] is False
-
-    def test_url_with_fragment_stripped(self):
-        """URL 中的 # 片段被正确处理"""
-        result = validate_url('http://example.com/stream#fragment')
-        # 片段应该被剥离，URL 仍然有效
-        assert result['valid'] is True
-
-    def test_url_with_pipe_stripped(self):
-        """URL 中的 | 分隔符被正确处理"""
-        result = validate_url('http://example.com/stream|extra')
-        assert result['valid'] is True
-
-
-# ── sanitize_url ──────────────────────────────
-
-
-class TestSanitizeUrl:
-    """URL 规范化"""
-
-    def test_lowercase_netloc(self):
-        sanitized = sanitize_url('HTTP://EXAMPLE.COM/Stream')
-        assert 'example.com' in sanitized.lower()
-
-    def test_preserves_path(self):
-        sanitized = sanitize_url('http://example.com/path/to/stream.m3u8')
-        assert '/path/to/stream.m3u8' in sanitized
-
-    def test_preserves_query(self):
-        sanitized = sanitize_url('http://example.com/stream?key=value')
-        assert 'key=value' in sanitized
-
-    def test_invalid_url_returns_original(self):
-        url = 'not a url at all'
-        sanitized = sanitize_url(url)
-        # 无效 URL 应该返回原始字符串
-        assert sanitized == url
-
-
-# ── is_safe_url ───────────────────────────────
-
-
-class TestIsSafeUrl:
-    """is_safe_url 快速安全检查"""
-
-    def test_safe_url(self):
-        safe, reason = is_safe_url('http://example.com/stream.m3u8')
-        assert safe is True
-
-    def test_unsafe_url_private_ip(self):
-        safe, reason = is_safe_url('http://127.0.0.1/stream')
-        assert safe is False
-        assert len(reason) > 0
-
-    def test_unsafe_url_file_scheme(self):
-        safe, reason = is_safe_url('file:///etc/passwd')
-        assert safe is False
-
-
-# ── 域名黑名单管理 ──────────────────────────────
-
-
-class TestDomainBlacklist:
-    """域名黑名单动态管理"""
-
-    def test_add_and_check(self):
-        clear_domain_blacklist()
-        add_domain_blacklist(['evil.example.com'])
-        result = validate_url('http://evil.example.com/stream')
-        assert result['valid'] is False
-        assert '黑名单' in result['reason']
-
-    def test_clear_blacklist(self):
-        add_domain_blacklist(['bad.domain.com'])
-        clear_domain_blacklist()
-        result = validate_url('http://bad.domain.com/stream')
-        # 清除后不再被黑名单拦截
-        assert '黑名单' not in result.get('reason', '')
-
-    def test_get_blacklist(self):
-        clear_domain_blacklist()
-        add_domain_blacklist(['a.com', 'b.org'])
-        bl = get_domain_blacklist()
-        assert 'a.com' in bl
-        assert 'b.org' in bl
-
-
-# ── SourceData TypedDict ───────────────────────
+    def test_pipe_stripped(self):
+        assert is_static_safe('http://example.com/stream|extra')[0] is True
 
 
 class TestSourceData:
     """SourceData TypedDict 基本验证"""
 
-    def test_can_create_with_all_fields(self):
+    def test_can_create_with_fields(self):
         data: SourceData = {
             'name': 'CCTV-1',
             'url': 'http://example.com/stream',
             'group': '央视频道',
             'logo': 'http://example.com/logo.png',
-            'tvg_id': 'cctv1',
-            'ua': 'Mozilla/5.0',
         }
         assert data['name'] == 'CCTV-1'
         assert data['url'] == 'http://example.com/stream'
