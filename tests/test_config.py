@@ -79,7 +79,7 @@ def temp_db(tmp_path):
             'UserAgents.ua_position': 'extinf',
             'UserAgents.ua_enabled': 'False',
             'Testing.timeout': '10',
-            'Testing.concurrent_threads': '40',
+            'Testing.concurrent_threads': '50',
             'Testing.cache_ttl': '120',
             'Testing.enable_speed_test': 'True',
             'Testing.speed_test_duration': '6',

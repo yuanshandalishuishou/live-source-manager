@@ -842,10 +842,10 @@ setup_nginx() {
         envsubst '${NGINX_PORT}' < /etc/nginx/nginx.conf > /tmp/nginx.conf.tmp \
             && mv /tmp/nginx.conf.tmp /etc/nginx/nginx.conf
     else
-        # 降级方案：直接用 sed 替换（以防 envsubst 不可用）
+        # 降级方案：直接用 sed 通用替换 ${NGINX_PORT} 占位符（以防 envsubst 不可用）
+        # 做法与 setup_linux.sh 保持一致，仅替换占位符本身，不触碰 IPv6 listen 行的 default_server 段
         log_info "envsubst 不可用，使用 sed 注入 Nginx 端口: ${NGINX_PORT}"
-        sed -i "s/listen \[::\]:.*/listen [::]:${NGINX_PORT};/g" /etc/nginx/nginx.conf
-        sed -i "s/listen .* default_server/listen ${NGINX_PORT} default_server/g" /etc/nginx/nginx.conf
+        sed -i "s/\${NGINX_PORT}/${NGINX_PORT}/g" /etc/nginx/nginx.conf
     fi
     
     # 测试Nginx配置
