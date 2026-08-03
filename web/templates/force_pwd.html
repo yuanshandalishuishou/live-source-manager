@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}首次登录请修改密码 - 直播源管理器{% endblock %}
+{% block page_title %}设置新密码{% endblock %}
+
+{% block head %}
+<style>
+.app-layout { display: block; }
+.sidebar { display: none; }
+.main-content { margin-left: 0; max-width: 420px; margin: 60px auto; }
+.top-bar { display: none; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="login-card">
+    <div class="login-header">
+        <h2>设置新密码</h2>
+        <p>安全要求 ·《网络安全法》第24条</p>
+    </div>
+    <p style="color:#d97706;margin-bottom:12px;line-height:1.6">
+        当前仍在使用默认初始密码，出于安全考虑，首次登录后须立即修改
+        （或其他未过期的强制改密要求）。修改成功后自动进入控制台。
+    </p>
+    <form id="force-pwd-form">
+        <div class="form-group">
+            <label for="current-password">当前密码</label>
+            <input type="password" id="current-password" class="form-input" required autocomplete="current-password">
+        </div>
+        <div class="form-group">
+            <label for="new-password">新密码</label>
+            <input type="password" id="new-password" class="form-input" required autocomplete="new-password">
+            <small style="color:#666">长度至少8位，且包含大写字母、小写字母、数字、特殊符号中的至少三类</small>
+        </div>
+        <div class="form-group">
+            <label for="confirm-password">确认新密码</label>
+            <input type="password" id="confirm-password" class="form-input" required autocomplete="new-password">
+        </div>
+        <div id="pwd-error" class="alert alert-error" style="display:none"></div>
+        <button type="submit" class="btn btn-primary btn-block" id="pwd-btn">提交</button>
+    </form>
+</div>
+
+<script>
+document.getElementById('force-pwd-form')?.addEventListener('submit', async function(evt) {
+    evt.preventDefault();
+    var errDiv = document.getElementById('pwd-error');
+    errDiv.style.display = 'none';
+    var oldPw = document.getElementById('current-password').value;
+    var newPw = document.getElementById('new-password').value;
+    var confirmPw = document.getElementById('confirm-password').value;
+    if (newPw !== confirmPw) {
+        errDiv.textContent = '两次输入的新密码不一致'; errDiv.style.display = 'block'; return;
+    }
+    if (newPw === oldPw) {
+        errDiv.textContent = '新密码不能与当前密码相同'; errDiv.style.display = 'block'; return;
+    }
+    var btn = document.getElementById('pwd-btn');
+    btn.disabled = true; btn.textContent = '提交中...';
+    try {
+        var resp = await fetch('/api/auth/password', {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': window.__csrf_token || ''
+            },
+            credentials: 'same-origin',
+            body: JSON.stringify({ old_password: oldPw, new_password: newPw })
+        });
+        if (resp.ok) {
+            window.location.href = '/';
+            return;
+        }
+        var data = {};
+        try { data = await resp.json(); } catch (e) {}
+        errDiv.textContent = data.detail || '密码修改失败（HTTP ' + resp.status + '）';
+        errDiv.style.display = 'block';
+    } catch (e) {
+        errDiv.textContent = '网络错误，请重试';
+        errDiv.style.display = 'block';
+    } finally {
+        btn.disabled = false; btn.textContent = '提交';
+    }
+});
+</script>
+{% endblock %}

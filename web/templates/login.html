@@ -50,9 +50,19 @@ document.querySelector('.login-form')?.addEventListener('htmx:responseError', fu
     }
 });
 document.querySelector('.login-form')?.addEventListener('htmx:afterRequest', function(evt) {
-    if (evt.detail.successful) {
-        window.location.href = '/';
+    if (!evt.detail.successful) return;
+    // 首次登录/默认密码强制改密：跳转到改密页，而不是直接进入控制台（S2修复）
+    var raw = '';
+    try {
+        raw = JSON.parse(evt.detail.xhr.responseText || '{}');
+    } catch (e) {
+        raw = {};
     }
+    if (raw && raw.force_change_password) {
+        window.location.href = '/force-password-change';
+        return;
+    }
+    window.location.href = '/';
 });
 </script>
 {% endblock %}

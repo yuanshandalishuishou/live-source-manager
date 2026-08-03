@@ -29,11 +29,36 @@ router = APIRouter()
 
 @router.post('/api/auth/login')
 async def api_login(request: Request, username: str = Form(...), password: str = Form(...)):
+    # ── 登录失败锁定（《网络安全法》第24条，S1修复：接线使真实生效）──
+    is_locked, remaining = await asyncio.to_thread(models.check_login_lockout, username)
+    if is_locked:
+        raise HTTPException(
+            status_code=423,
+            detail=f'登录失败次数过多，账号已锁定 {models.LOGIN_LOCKOUT_DURATION // 60} 分钟，请稍后重试（剩余约 {max(1, remaining // 60)} 分钟）',
+        )
+
     # bcrypt 是同步且CPU密集的，用 asyncio.to_thread 避免阻塞事件循环
     user = await asyncio.to_thread(models.verify_password, username, password)
     if not user:
-        raise HTTPException(status_code=401, detail='用户名或密码错误')
+        # 记录失败次数，达到阈值即锁定
+        await asyncio.to_thread(models.record_login_failure, username)
+        # 反馈剩余可用尝试次数（含本次后的锁定阈值）
+        attempts = models.get_login_lockout_attempts(username)
+        remaining_tries = max(0, models.LOGIN_LOCKOUT_MAX_ATTEMPTS - attempts)
+        detail = '用户名或密码错误'
+        if remaining_tries <= 0:
+            detail = f'登录失败次数过多，账号已锁定 {models.LOGIN_LOCKOUT_DURATION // 60} 分钟'
+        else:
+            detail = f'用户名或密码错误（连续失败将锁定，剩余 {remaining_tries} 次尝试）'
+        raise HTTPException(status_code=401, detail=detail)
+
+    # 登录成功：重置锁定计数
+    await asyncio.to_thread(models.reset_login_lockout, username)
+
     session_id = create_session(user)
+
+    # ── 首次登录/默认密码强制改密标记（S2修复：接线到响应并跳转）──
+    force_change = await asyncio.to_thread(models.get_password_change_required, user['username'])
     # 审计日志
     models.add_audit_log(
         user_id=user['id'],
@@ -47,6 +72,7 @@ async def api_login(request: Request, username: str = Form(...), password: str =
             'status': 'ok',
             'role': user['role'],
             'encrypt_key_hint': not core.CONFIG_KEY_IS_MANUAL,
+            'force_change_password': force_change,
         }
     )
     is_https = os.environ.get('HTTPS', '') == 'on'
@@ -109,8 +135,12 @@ async def api_update_password(request: Request, current_user: dict = Depends(get
         raise HTTPException(status_code=400, detail='旧密码不能为空')
     if not new_password:
         raise HTTPException(status_code=400, detail='新密码不能为空')
-    if len(new_password) < 6:
-        raise HTTPException(status_code=400, detail='新密码长度至少6个字符')
+    # 复杂度统一校验（GB/T 39786-2021，与 init_db / 初始密码口径一致）
+    if not models.password_complexity_ok(new_password):
+        raise HTTPException(
+            status_code=400,
+            detail='新密码不满足复杂度要求：长度至少8位，且需包含大写字母、小写字母、数字、特殊符号中的至少三类',
+        )
     if old_password == new_password:
         raise HTTPException(status_code=400, detail='新密码不能与旧密码相同')
 
@@ -123,6 +153,9 @@ async def api_update_password(request: Request, current_user: dict = Depends(get
     success = models.update_user_password(current_user['user_id'], new_password)
     if not success:
         raise HTTPException(status_code=500, detail='密码修改失败，请稍后重试')
+
+    # 清除强制改密标记（首次登录默认密码→改为合规新密码后解除）
+    await asyncio.to_thread(models.clear_password_change_required, current_user['username'])
 
     # 记录审计日志
     models.add_audit_log(
@@ -149,8 +182,12 @@ async def api_update_user_password(user_id: int, request: Request, current_user:
 
     if not new_password:
         raise HTTPException(status_code=400, detail='新密码不能为空')
-    if len(new_password) < 6:
-        raise HTTPException(status_code=400, detail='密码长度至少6个字符')
+    # 复杂度统一校验（GB/T 39786-2021）
+    if not models.password_complexity_ok(new_password):
+        raise HTTPException(
+            status_code=400,
+            detail='新密码不满足复杂度要求：长度至少8位，且需包含大写字母、小写字母、数字、特殊符号中的至少三类',
+        )
 
     # 获取目标用户信息
     target_user = models.get_user_by_id(user_id)
@@ -232,8 +269,11 @@ async def api_create_user(data: dict, request: Request, current_user: dict = Dep
 
     if not username or len(username) < 2:
         raise HTTPException(status_code=400, detail='用户名至少2个字符')
-    if not password or len(password) < 6:
-        raise HTTPException(status_code=400, detail='密码至少6个字符')
+    if not password or not models.password_complexity_ok(password):
+        raise HTTPException(
+            status_code=400,
+            detail='密码不满足复杂度要求：长度至少8位，且需包含大写字母、小写字母、数字、特殊符号中的至少三类',
+        )
     if role not in ('admin', 'viewer'):
         raise HTTPException(status_code=400, detail='角色无效')
 
@@ -270,8 +310,11 @@ async def api_update_user(
     if 'display_name' in data:
         kwargs['display_name'] = data['display_name'].strip()
     if data.get('password'):
-        if len(data['password']) < 6:
-            raise HTTPException(status_code=400, detail='密码至少6个字符')
+        if not models.password_complexity_ok(data['password']):
+            raise HTTPException(
+                status_code=400,
+                detail='密码不满足复杂度要求：长度至少8位，且需包含大写字母、小写字母、数字、特殊符号中的至少三类',
+            )
         kwargs['password'] = data['password']
     success = models.update_user(user_id, **kwargs)
     if not success:

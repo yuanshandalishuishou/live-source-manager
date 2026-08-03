@@ -218,7 +218,7 @@ def init_db(admin_password: str | None = None):
             # 首次部署且未提供密码：使用默认初始密码 Admin@123
             # （李总指定，与 Go 版一致；9 位含大写/小写/数字/特殊符号 4 类字符，
             #   满足 GB/T 39786-2021 复杂度；首次登录会强制要求修改密码）
-            effective_pw = 'Admin@123'
+            effective_pw = DEFAULT_ADMIN_PASSWORD
             logger.warning('未设置 WEB_ADMIN_PASSWORD，使用默认初始密码 Admin@123（首次登录后请立即修改）')
         else:
             effective_pw = admin_password
@@ -541,6 +541,8 @@ def init_db(admin_password: str | None = None):
         logger.warning('输出文件加入本地源失败（忽略）: %s', _e2)
 
     logger.info('init_db 完成')
+    # 确保登录失败锁定表始终存在（S1修复：即使跳过 lifespan 直接调用 init_db（如测试/手动初始化），登录锁定也能工作）
+    init_login_lockout_table()
     return effective_pw
 
 
@@ -1348,6 +1350,9 @@ def update_user_password(user_id: int, new_password: str) -> bool:
         'UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
         (pw_hash, user_id),
     )
+    if cursor.rowcount > 0:
+        # 用户已更换为管理员/自身设置的新密码，解除首次强制改密标记，避免死循环
+        set_password_change_required(_username_for_id(user_id), False)
     return cursor.rowcount > 0
 
 
@@ -2119,6 +2124,24 @@ def get_github_download_cache_summary(repo_key: str) -> dict:
 # 首次登录强制修改密码（《网络安全法》第24条）
 # ═══════════════════════════════════════════════════
 
+# 默认初始管理员密码（李总指定，与 Go 版一致；首次登录后强制修改）
+DEFAULT_ADMIN_PASSWORD = 'Admin@123'
+
+
+def _username_for_id(user_id: int) -> str:
+    """根据用户ID取用户名（用于改密后清除强制改密标记）"""
+    conn = get_conn()
+    try:
+        row = conn.execute('SELECT username FROM users WHERE id = ?', (user_id,)).fetchone()
+        return row['username'] if row else ''
+    finally:
+        conn.close()
+
+
+def is_admin_on_default_password() -> bool:
+    """判断 admin 当前是否仍在使用默认初始密码（用于决定是否置位首次强制改密）"""
+    return bool(verify_password('admin', DEFAULT_ADMIN_PASSWORD))
+
 
 def set_password_change_required(username: str, required: bool = True):
     """设置用户是否需要在下次登录时修改密码（《网络安全法》第24条）"""
@@ -2141,9 +2164,17 @@ def set_password_change_required(username: str, required: bool = True):
 
 
 def get_password_change_required(username: str) -> bool:
-    """查询用户是否需要在下次登录时修改密码"""
+    """查询用户是否需要在下次登录时修改密码（表不存在时自动建表，保证幂等）"""
     conn = get_conn()
     try:
+        conn.execute(
+            'CREATE TABLE IF NOT EXISTS password_change_required ('
+            'username TEXT PRIMARY KEY, '
+            'required INTEGER NOT NULL DEFAULT 1, '
+            "created_at TEXT DEFAULT (datetime('now'))"
+            ')'
+        )
+        conn.commit()
         row = conn.execute(
             'SELECT required FROM password_change_required WHERE username = ?',
             (username,),
@@ -2186,6 +2217,14 @@ def check_login_lockout(username: str) -> tuple[bool, int]:
     """检查用户是否被锁定。返回 (is_locked, remaining_seconds)"""
     conn = get_conn()
     try:
+        conn.execute(
+            'CREATE TABLE IF NOT EXISTS login_lockout ('
+            'username TEXT PRIMARY KEY, '
+            'attempts INTEGER NOT NULL DEFAULT 0, '
+            'lockout_until REAL'
+            ')'
+        )
+        conn.commit()
         row = conn.execute(
             'SELECT attempts, lockout_until FROM login_lockout WHERE username = ?',
             (username,),
@@ -2231,6 +2270,19 @@ def record_login_failure(username: str):
 def reset_login_lockout(username: str):
     """登录成功后重置锁定计数器"""
     _execute('DELETE FROM login_lockout WHERE username = ?', (username,))
+
+
+def get_login_lockout_attempts(username: str) -> int:
+    """返回当前累计失败尝试次数（用于给前端提示剩余可尝试次数）"""
+    conn = get_conn()
+    try:
+        row = conn.execute(
+            'SELECT attempts FROM login_lockout WHERE username = ?',
+            (username,),
+        ).fetchone()
+        return int(row['attempts']) if row and row['attempts'] else 0
+    finally:
+        conn.close()
 
 
 # ══════════════════════════════════════════════════════════

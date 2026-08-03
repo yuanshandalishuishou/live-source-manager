@@ -176,7 +176,7 @@ SECTION_SCHEMA: dict[str, dict[str, tuple]] = {
     },
     'Testing': {
         'timeout': ('int', '10', '测试超时(秒)'),
-        'concurrent_threads': ('int', '40', '并发线程数'),
+        'concurrent_threads': ('int', '50', '并发线程数'),
         'max_concurrent_ffprobe': ('int', '16', 'ffprobe并发数(实时测试)'),
         'cache_ttl': ('int', '120', '缓存有效期(分)'),
         'enable_speed_test': ('bool', 'True', '启用速率测试'),
@@ -813,9 +813,16 @@ async def lifespan(app_instance: FastAPI):
     await asyncio.to_thread(models.cleanup_expired_sessions)
     await asyncio.to_thread(models.cleanup_audit_logs, max_days=180)
     logger.info('数据库初始化完成，已清除过期Session，清理180天前审计日志')
-    # 首次登录强制修改密码标记
-    await asyncio.to_thread(models.set_password_change_required, 'admin', True)
-    logger.info('首次登录强制修改密码策略已启用')
+    # 首次登录强制修改密码标记（S2修复）：仅当仍在使用默认初始密码且该特性启用时置位；
+    # 避免对已改为自定义强密码的管理员在每次重启后重复强制（原实现无条件写 True 属死代码/误导）。
+    # 可用环境变量 FORCE_PASSWORD_CHANGE_ON_FIRST_LOGIN=0 显式关闭该特性（可选）。
+    force_pw = os.environ.get('FORCE_PASSWORD_CHANGE_ON_FIRST_LOGIN', '1').strip().lower() not in ('0', 'false', 'off', 'no')
+    if force_pw and await asyncio.to_thread(models.is_admin_on_default_password):
+        await asyncio.to_thread(models.set_password_change_required, 'admin', True)
+        logger.info('管理员仍使用默认初始密码，启用首次登录强制改密策略（如需关闭设置 FORCE_PASSWORD_CHANGE_ON_FIRST_LOGIN=0）')
+    else:
+        await asyncio.to_thread(models.set_password_change_required, 'admin', False)
+        logger.info('首次登录强制改密策略：已关闭（管理员为非默认密码或特性被禁用）')
     # 初始化登录锁定表
     await asyncio.to_thread(models.init_login_lockout_table)
     logger.info('登录失败锁定机制已启用（5次失败锁定15分钟）—— 依据《网络安全法》第24条')

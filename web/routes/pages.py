@@ -78,6 +78,12 @@ async def users_page(request: Request, current_user: dict = Depends(require_admi
     return _render(request, 'users.html')
 
 
+@router.get('/force-password-change', response_class=HTMLResponse)
+async def force_password_change_page(request: Request, current_user: dict = Depends(get_current_user)):
+    """强制改密页（首次登录/默认密码时由登录流程跳转到这里）"""
+    return _render(request, 'force_pwd.html')
+
+
 @router.get('/rules', response_class=HTMLResponse)
 async def rules_page(request: Request, current_user: dict = Depends(get_current_user)):
     """分类规则管理页"""
