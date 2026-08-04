@@ -1,1 +1,176 @@
-IiIiCmFwcC5zZWN1cml0eSDljZXlhYPmtYvor5UKCuimhuebluino+aekOmYtuautSoq55yf5a6e55Sf5pWIKirnmoTnqoTpl6jnpoEgaXNfc3RhdGljX3NhZmXvvJoKICAtIOWQiOazleWNj+iuriAoaHR0cC9odHRwcy9ydG1wL3J0c3AvcnRwKSDmlL7ooYwKICAtIOepuiAvIOe8uiBzY2hlbWUgLyDkuI3mlK/mjIHljY/orq4gKGZpbGUvZnRwL2phdmFzY3JpcHQvZGF0YSkg5ouS57udCiAgLSDnvLrkuLvmnLogLyDpnZ7ms5XkuLvmnLrmoLzlvI/mi5Lnu50KICAtIFNTUkbvvJpsb2NhbGhvc3QgLyAubG9jYWwgLyAuaW50ZXJuYWwgLyAxMjcuMC4wLjEgLyAxMC54IC8gMTkyLjE2OC54IC8gMTcyLjE2LnggLyDpk77ot6/mnKzlnLAg5ouS57udCiAgLSDlkIjms5XlhaznvZHln5/lkI0gLyDlhaznvZEgSVAgLyBJUHY2IOaUvuihjAogIC0gVVJMIOW4puerr+WPoyAvIHF1ZXJ5IC8gZnJhZ21lbnQg5Yml56a7IC8gfCDliIbpmpQg5q2j56Gu5aSE55CGCgrvvIjljoblj7LkuIrmnKzmlofku7bmm77mtYvor5UgdmFsaWRhdGVfdXJsIC8gaXNfc2FmZV91cmwgLyBzYW5pdGl6ZV91cmwg562J44CM5YWo6YeP5a6h5p+l44CN6YC76L6R77yMCue7j+WuieWFqOWuoeiuoSBTMS9TMiDnoa7orqTlhbbkuLrmrbvku6PnoIHlubblt7Lnp7vpmaTvvIzmlYXmlLnkuLrogZrnhKYgaXNfc3RhdGljX3NhZmUg6L+Z5LiA55yf6Zeo56aB44CC77yJCiIiIgoKZnJvbSBhcHAuc2VjdXJpdHkgaW1wb3J0IFNvdXJjZURhdGEsIGlzX3N0YXRpY19zYWZlCgoKY2xhc3MgVGVzdElzU3RhdGljU2FmZToKICAgICIiIuino+aekOmYtuauteeqhOmXqOemgSBpc19zdGF0aWNfc2FmZSIiIgoKICAgICMg4pSA4pSAIOWQiOazleWNj+iuruaUvuihjCDilIDilIAKICAgIGRlZiB0ZXN0X3ZhbGlkX2h0dHAoc2VsZik6CiAgICAgICAgb2ssIHJlYXNvbiwgY2F0ID0gaXNfc3RhdGljX3NhZmUoJ2h0dHA6Ly9leGFtcGxlLmNvbS9zdHJlYW0ubTN1OCcpCiAgICAgICAgYXNzZXJ0IG9rIGlzIFRydWUgYW5kIGNhdCA9PSAnb2snCgogICAgZGVmIHRlc3RfdmFsaWRfaHR0cHMoc2VsZik6CiAgICAgICAgYXNzZXJ0IGlzX3N0YXRpY19zYWZlKCdodHRwczovL2V4YW1wbGUuY29tL2xpdmUvc3RyZWFtJylbMF0gaXMgVHJ1ZQoKICAgIGRlZiB0ZXN0X3ZhbGlkX3J0bXBfcnRzcF9ydHAoc2VsZik6CiAgICAgICAgYXNzZXJ0IGlzX3N0YXRpY19zYWZlKCdydG1wOi8vZXhhbXBsZS5jb20vbGl2ZScpWzBdIGlzIFRydWUKICAgICAgICBhc3NlcnQgaXNfc3RhdGljX3NhZmUoJ3J0c3A6Ly9leGFtcGxlLmNvbS9saXZlJylbMF0gaXMgVHJ1ZQogICAgICAgIGFzc2VydCBpc19zdGF0aWNfc2FmZSgncnRwOi8vZXhhbXBsZS5jb20vbGl2ZScpWzBdIGlzIFRydWUKCiAgICAjIOKUgOKUgCDpnZ7ms5UgLyDnvLrlpLEg4pSA4pSACiAgICBkZWYgdGVzdF9lbXB0eShzZWxmKToKICAgICAgICBvaywgcmVhc29uLCBjYXQgPSBpc19zdGF0aWNfc2FmZSgnJykKICAgICAgICBhc3NlcnQgb2sgaXMgRmFsc2UgYW5kIGNhdCA9PSAnaG9zdCcgYW5kICfnqbonIGluIHJlYXNvbgoKICAgIGRlZiB0ZXN0X3doaXRlc3BhY2Vfb25seShzZWxmKToKICAgICAgICBhc3NlcnQgaXNfc3RhdGljX3NhZmUoJyAgICcpWzBdIGlzIEZhbHNlCgogICAgZGVmIHRlc3RfbWlzc2luZ19zY2hlbWUoc2VsZik6CiAgICAgICAgb2ssIHJlYXNvbiwgY2F0ID0gaXNfc3RhdGljX3NhZmUoJ2V4YW1wbGUuY29tL3N0cmVhbScpCiAgICAgICAgYXNzZXJ0IG9rIGlzIEZhbHNlIGFuZCBjYXQgPT0gJ3NjaGVtZScKCiAgICBkZWYgdGVzdF9ibG9ja2VkX2ZpbGVfc2NoZW1lKHNlbGYpOgogICAgICAgIG9rLCByZWFzb24sIGNhdCA9IGlzX3N0YXRpY19zYWZlKCdmaWxlOi8vL2V0Yy9wYXNzd2QnKQogICAgICAgIGFzc2VydCBvayBpcyBGYWxzZSBhbmQgY2F0ID09ICdzY2hlbWUnCgogICAgZGVmIHRlc3RfYmxvY2tlZF9mdHBfc2NoZW1lKHNlbGYpOgogICAgICAgIGFzc2VydCBpc19zdGF0aWNfc2FmZSgnZnRwOi8vZXhhbXBsZS5jb20vZmlsZScpWzBdIGlzIEZhbHNlCgogICAgZGVmIHRlc3RfYmxvY2tlZF9qYXZhc2NyaXB0X3NjaGVtZShzZWxmKToKICAgICAgICBhc3NlcnQgaXNfc3RhdGljX3NhZmUoJ2phdmFzY3JpcHQ6YWxlcnQoMSknKVswXSBpcyBGYWxzZQoKICAgIGRlZiB0ZXN0X2Jsb2NrZWRfZGF0YV9zY2hlbWUoc2VsZik6CiAgICAgICAgYXNzZXJ0IGlzX3N0YXRpY19zYWZlKCdkYXRhOnRleHQvaHRtbCw8c2NyaXB0PicpWzBdIGlzIEZhbHNlCgogICAgZGVmIHRlc3RfbWlzc2luZ19ob3N0KHNlbGYpOgogICAgICAgIG9rLCByZWFzb24sIGNhdCA9IGlzX3N0YXRpY19zYWZlKCdodHRwOi8vL3BhdGgnKQogICAgICAgIGFzc2VydCBvayBpcyBGYWxzZSBhbmQgY2F0ID09ICdob3N0JwoKICAgIGRlZiB0ZXN0X2ludmFsaWRfaG9zdF9jaGFycyhzZWxmKToKICAgICAgICBhc3NlcnQgaXNfc3RhdGljX3NhZmUoJ2h0dHA6Ly9leGEgbXBsZS9zdHJlYW0nKVswXSBpcyBGYWxzZQoKICAgICMg4pSA4pSAIFNTUkYg6Ziy5oqkIOKUgOKUgAogICAgZGVmIHRlc3Rfc3NyZl9sb2NhbGhvc3Qoc2VsZik6CiAgICAgICAgb2ssIHJlYXNvbiwgY2F0ID0gaXNfc3RhdGljX3NhZmUoJ2h0dHA6Ly9sb2NhbGhvc3Qvc3RyZWFtJykKICAgICAgICBhc3NlcnQgb2sgaXMgRmFsc2UgYW5kIGNhdCA9PSAnc3NyZicKCiAgICBkZWYgdGVzdF9zc3JmX2RvdF9sb2NhbChzZWxmKToKICAgICAgICBhc3NlcnQgaXNfc3RhdGljX3NhZmUoJ2h0dHA6Ly9ob3N0LmxvY2FsL3N0cmVhbScpWzBdIGlzIEZhbHNlCgogICAgZGVmIHRlc3Rfc3NyZl9kb3RfaW50ZXJuYWwoc2VsZik6CiAgICAgICAgYXNzZXJ0IGlzX3N0YXRpY19zYWZlKCdodHRwOi8vaG9zdC5pbnRlcm5hbC9zdHJlYW0nKVswXSBpcyBGYWxzZQoKICAgIGRlZiB0ZXN0X3NzcmZfbG9vcGJhY2tfaXAoc2VsZik6CiAgICAgICAgYXNzZXJ0IGlzX3N0YXRpY19zYWZlKCdodHRwOi8vMTI3LjAuMC4xL3N0cmVhbScpWzBdIGlzIEZhbHNlCgogICAgZGVmIHRlc3Rfc3NyZl9wcml2YXRlXzEwKHNlbGYpOgogICAgICAgIGFzc2VydCBpc19zdGF0aWNfc2FmZSgnaHR0cDovLzEwLjAuMC4xL3N0cmVhbScpWzBdIGlzIEZhbHNlCgogICAgZGVmIHRlc3Rfc3NyZl9wcml2YXRlXzE5MjE2OChzZWxmKToKICAgICAgICBhc3NlcnQgaXNfc3RhdGljX3NhZmUoJ2h0dHA6Ly8xOTIuMTY4LjEuMS9zdHJlYW0nKVswXSBpcyBGYWxzZQoKICAgIGRlZiB0ZXN0X3NzcmZfcHJpdmF0ZV8xNzIxNihzZWxmKToKICAgICAgICBhc3NlcnQgaXNfc3RhdGljX3NhZmUoJ2h0dHA6Ly8xNzIuMTYuMC4xL3N0cmVhbScpWzBdIGlzIEZhbHNlCgogICAgZGVmIHRlc3Rfc3NyZl9saW5rX2xvY2FsKHNlbGYpOgogICAgICAgIGFzc2VydCBpc19zdGF0aWNfc2FmZSgnaHR0cDovLzE2OS4yNTQuMTY5LjI1NC9zdHJlYW0nKVswXSBpcyBGYWxzZQoKICAgICMg4pSA4pSAIOWQiOazleWFrOe9keWcsOWdgOaUvuihjO+8iOmhu+eUqOecn+ato+WFrOe9keWcsOWdgO+8m+aWh+aho+S/neeVmeautSAyMDMuMC4xMTMueCAvIDIwMDE6ZGI4OjoKICAgICMgICAgIOS8muiiqyBQeXRob24gaXBhZGRyZXNzIOW9kuexu+S4uiBpc19wcml2YXRl77yM5bGeIFNTUkYg5q2j56Gu5oum5oiq77yM5LiN566X44CM5YWs572R44CN77yJ4pSA4pSACiAgICBkZWYgdGVzdF92YWxpZF9wdWJsaWNfaXAoc2VsZik6CiAgICAgICAgYXNzZXJ0IGlzX3N0YXRpY19zYWZlKCdodHRwOi8vOC44LjguOC9zdHJlYW0nKVswXSBpcyBUcnVlCgogICAgZGVmIHRlc3RfdmFsaWRfcHVibGljX2RvbWFpbihzZWxmKToKICAgICAgICBhc3NlcnQgaXNfc3RhdGljX3NhZmUoJ2h0dHA6Ly9leGFtcGxlLmNvbS9zdHJlYW0nKVswXSBpcyBUcnVlCgogICAgZGVmIHRlc3RfaXB2Nl9ob3N0KHNlbGYpOgogICAgICAgIGFzc2VydCBpc19zdGF0aWNfc2FmZSgnaHR0cDovL1syNjA2OjQ3MDA6NDcwMDo6MTExMV0vc3RyZWFtJylbMF0gaXMgVHJ1ZQoKICAgICMg4pSA4pSAIOW9ouaAgeWkhOeQhiDilIDilIAKICAgIGRlZiB0ZXN0X3VybF93aXRoX3BvcnQoc2VsZik6CiAgICAgICAgYXNzZXJ0IGlzX3N0YXRpY19zYWZlKCdodHRwOi8vZXhhbXBsZS5jb206ODA4MC9zdHJlYW0ubTN1OCcpWzBdIGlzIFRydWUKCiAgICBkZWYgdGVzdF91cmxfd2l0aF9xdWVyeShzZWxmKToKICAgICAgICBhc3NlcnQgaXNfc3RhdGljX3NhZmUoJ2h0dHBzOi8vZXhhbXBsZS5jb20vc3RyZWFtP2tleT12YWx1ZSZ0b2tlbj1hYmMnKVswXSBpcyBUcnVlCgogICAgZGVmIHRlc3RfZnJhZ21lbnRfc3RyaXBwZWQoc2VsZik6CiAgICAgICAgYXNzZXJ0IGlzX3N0YXRpY19zYWZlKCdodHRwOi8vZXhhbXBsZS5jb20vc3RyZWFtI2ZyYWcnKVswXSBpcyBUcnVlCgogICAgZGVmIHRlc3RfcGlwZV9zdHJpcHBlZChzZWxmKToKICAgICAgICBhc3NlcnQgaXNfc3RhdGljX3NhZmUoJ2h0dHA6Ly9leGFtcGxlLmNvbS9zdHJlYW18ZXh0cmEnKVswXSBpcyBUcnVlCgoKY2xhc3MgVGVzdFNvdXJjZURhdGE6CiAgICAiIiJTb3VyY2VEYXRhIFR5cGVkRGljdCDln7rmnKzpqozor4EiIiIKCiAgICBkZWYgdGVzdF9jYW5fY3JlYXRlX3dpdGhfZmllbGRzKHNlbGYpOgogICAgICAgIGRhdGE6IFNvdXJjZURhdGEgPSB7CiAgICAgICAgICAgICduYW1lJzogJ0NDVFYtMScsCiAgICAgICAgICAgICd1cmwnOiAnaHR0cDovL2V4YW1wbGUuY29tL3N0cmVhbScsCiAgICAgICAgICAgICdncm91cCc6ICflpK7op4bpopHpgZMnLAogICAgICAgICAgICAnbG9nbyc6ICdodHRwOi8vZXhhbXBsZS5jb20vbG9nby5wbmcnLAogICAgICAgIH0KICAgICAgICBhc3NlcnQgZGF0YVsnbmFtZSddID09ICdDQ1RWLTEnCiAgICAgICAgYXNzZXJ0IGRhdGFbJ3VybCddID09ICdodHRwOi8vZXhhbXBsZS5jb20vc3RyZWFtJwoKICAgIGRlZiB0ZXN0X2Nhbl9jcmVhdGVfd2l0aF9wYXJ0aWFsX2ZpZWxkcyhzZWxmKToKICAgICAgICBkYXRhOiBTb3VyY2VEYXRhID0gewogICAgICAgICAgICAnbmFtZSc6ICdUZXN0JywKICAgICAgICAgICAgJ3VybCc6ICdodHRwOi8vZXhhbXBsZS5jb20vc3RyZWFtJywKICAgICAgICB9CiAgICAgICAgYXNzZXJ0IGRhdGFbJ25hbWUnXSA9PSAnVGVzdCcKCgpjbGFzcyBUZXN0UGFzc3dvcmRDb21wbGV4aXR5OgogICAgIiIi5a+G56CB5aSN5p2C5bqm77yIR0IvVCAzOTc4Ni0yMDIx77yJ77ya57uE5ZCIICsg5byx5Y+j5Luk6buR5ZCN5Y2VICsg6ZW/5bqm5LiK6ZmQIiIiCgogICAgZGVmIHRlc3RfZGVmYXVsdF9hZG1pbl9wYXNzd29yZF9zdGlsbF9vayhzZWxmKToKICAgICAgICAjIOmhueebruWIneWni+m7mOiupOWvhueggSBBZG1pbkAxMjMg5LuN5bqU5ruh6Laz5aSN5p2C5bqm77yI5LiN6KKr5byx5Y+j5Luk6buR5ZCN5Y2V6K+v5Lyk77yJCiAgICAgICAgZnJvbSB3ZWIubW9kZWxzIGltcG9ydCBwYXNzd29yZF9jb21wbGV4aXR5X29rCgogICAgICAgIGFzc2VydCBwYXNzd29yZF9jb21wbGV4aXR5X29rKCdBZG1pbkAxMjMnKSBpcyBUcnVlCgogICAgZGVmIHRlc3Rfd2Vha19wYXNzd29yZF9yZWplY3RlZChzZWxmKToKICAgICAgICBmcm9tIHdlYi5tb2RlbHMgaW1wb3J0IHBhc3N3b3JkX2NvbXBsZXhpdHlfb2sKCiAgICAgICAgYXNzZXJ0IHBhc3N3b3JkX2NvbXBsZXhpdHlfb2soJzEyMzQ1Njc4JykgaXMgRmFsc2UKICAgICAgICBhc3NlcnQgcGFzc3dvcmRfY29tcGxleGl0eV9vaygnYWRtaW4xMjMnKSBpcyBGYWxzZQogICAgICAgIGFzc2VydCBwYXNzd29yZF9jb21wbGV4aXR5X29rKCdxd2VydHkxMjMnKSBpcyBGYWxzZQogICAgICAgIGFzc2VydCBwYXNzd29yZF9jb21wbGV4aXR5X29rKCdQQVNTV09SRCcpIGlzIEZhbHNlICAjIOWkp+Wwj+WGmeS4jeaVj+aEn++8muWkp+WGmeS7jeWRveS4rem7keWQjeWNlShwYXNzd29yZCkKCiAgICBkZWYgdGVzdF90b29fc2hvcnRfcmVqZWN0ZWQoc2VsZik6CiAgICAgICAgZnJvbSB3ZWIubW9kZWxzIGltcG9ydCBwYXNzd29yZF9jb21wbGV4aXR5X29rCgogICAgICAgIGFzc2VydCBwYXNzd29yZF9jb21wbGV4aXR5X29rKCdBYjEhJykgaXMgRmFsc2UgICMg6ZW/5bqmIDwgOAoKICAgIGRlZiB0ZXN0X3Rvb19sb25nX3JlamVjdGVkKHNlbGYpOgogICAgICAgIGZyb20gd2ViLm1vZGVscyBpbXBvcnQgcGFzc3dvcmRfY29tcGxleGl0eV9vawoKICAgICAgICBhc3NlcnQgcGFzc3dvcmRfY29tcGxleGl0eV9vaygnQScgKiA3MykgaXMgRmFsc2UgICMg6LaF6L+HIGJjcnlwdCA3MiDlrZfoioLkuIrpmZAKCiAgICBkZWYgdGVzdF9sb3dfY2F0ZWdvcnlfcmVqZWN0ZWQoc2VsZik6CiAgICAgICAgZnJvbSB3ZWIubW9kZWxzIGltcG9ydCBwYXNzd29yZF9jb21wbGV4aXR5X29rCgogICAgICAgIGFzc2VydCBwYXNzd29yZF9jb21wbGV4aXR5X29rKCdhYmNkZWZnaCcpIGlzIEZhbHNlICAjIOS7heWwj+WGme+8jOS4jei2syAzIOexuwogICAgICAgIGFzc2VydCBwYXNzd29yZF9jb21wbGV4aXR5X29rKCcxMjM0NTY3OCcpIGlzIEZhbHNlICAjIOS7heaVsOWtl++8iOS4lOS4uuW8seWPo+S7pO+8iQoKICAgIGRlZiB0ZXN0X3N0cm9uZ19wYXNzd29yZF9vayhzZWxmKToKICAgICAgICBmcm9tIHdlYi5tb2RlbHMgaW1wb3J0IHBhc3N3b3JkX2NvbXBsZXhpdHlfb2sKCiAgICAgICAgYXNzZXJ0IHBhc3N3b3JkX2NvbXBsZXhpdHlfb2soJ1R2QiM5a0xtMnFYJykgaXMgVHJ1ZSAgIyA0IOexu+m9kOWFqAogICAgICAgIGFzc2VydCBwYXNzd29yZF9jb21wbGV4aXR5X29rKCdDY3R2QDIwMjQnKSBpcyBUcnVlICAjIDMg57G76b2Q5YWo5LiU6Z2e5byx5Y+j5LukCg==
+"""
+app.security 单元测试
+
+覆盖解析阶段**真实生效**的窄门禁 is_static_safe：
+  - 合法协议 (http/https/rtmp/rtsp/rtp) 放行
+  - 空 / 缺 scheme / 不支持协议 (file/ftp/javascript/data) 拒绝
+  - 缺主机 / 非法主机格式拒绝
+  - SSRF：localhost / .local / .internal / 127.0.0.1 / 10.x / 192.168.x / 172.16.x / 链路本地 拒绝
+  - 合法公网域名 / 公网 IP / IPv6 放行
+  - URL 带端口 / query / fragment 剥离 / | 分隔 正确处理
+
+（历史上本文件曾测试 validate_url / is_safe_url / sanitize_url 等「全量审查」逻辑，
+经安全审计 S1/S2 确认其为死代码并已移除，故改为聚焦 is_static_safe 这一真门禁。）
+"""
+
+from app.security import SourceData, is_static_safe
+
+
+class TestIsStaticSafe:
+    """解析阶段窄门禁 is_static_safe"""
+
+    # ── 合法协议放行 ──
+    def test_valid_http(self):
+        ok, reason, cat = is_static_safe('http://example.com/stream.m3u8')
+        assert ok is True and cat == 'ok'
+
+    def test_valid_https(self):
+        assert is_static_safe('https://example.com/live/stream')[0] is True
+
+    def test_valid_rtmp_rtsp_rtp(self):
+        assert is_static_safe('rtmp://example.com/live')[0] is True
+        assert is_static_safe('rtsp://example.com/live')[0] is True
+        assert is_static_safe('rtp://example.com/live')[0] is True
+
+    # ── 非法 / 缺失 ──
+    def test_empty(self):
+        ok, reason, cat = is_static_safe('')
+        assert ok is False and cat == 'host' and '空' in reason
+
+    def test_whitespace_only(self):
+        assert is_static_safe('   ')[0] is False
+
+    def test_missing_scheme(self):
+        ok, reason, cat = is_static_safe('example.com/stream')
+        assert ok is False and cat == 'scheme'
+
+    def test_blocked_file_scheme(self):
+        ok, reason, cat = is_static_safe('file:///etc/passwd')
+        assert ok is False and cat == 'scheme'
+
+    def test_blocked_ftp_scheme(self):
+        assert is_static_safe('ftp://example.com/file')[0] is False
+
+    def test_blocked_javascript_scheme(self):
+        assert is_static_safe('javascript:alert(1)')[0] is False
+
+    def test_blocked_data_scheme(self):
+        assert is_static_safe('data:text/html,<script>')[0] is False
+
+    def test_missing_host(self):
+        ok, reason, cat = is_static_safe('http:///path')
+        assert ok is False and cat == 'host'
+
+    def test_invalid_host_chars(self):
+        assert is_static_safe('http://exa mple/stream')[0] is False
+
+    # ── SSRF 防护 ──
+    def test_ssrf_localhost(self):
+        ok, reason, cat = is_static_safe('http://localhost/stream')
+        assert ok is False and cat == 'ssrf'
+
+    def test_ssrf_dot_local(self):
+        assert is_static_safe('http://host.local/stream')[0] is False
+
+    def test_ssrf_dot_internal(self):
+        assert is_static_safe('http://host.internal/stream')[0] is False
+
+    def test_ssrf_loopback_ip(self):
+        assert is_static_safe('http://127.0.0.1/stream')[0] is False
+
+    def test_ssrf_private_10(self):
+        assert is_static_safe('http://10.0.0.1/stream')[0] is False
+
+    def test_ssrf_private_192168(self):
+        assert is_static_safe('http://192.168.1.1/stream')[0] is False
+
+    def test_ssrf_private_17216(self):
+        assert is_static_safe('http://172.16.0.1/stream')[0] is False
+
+    def test_ssrf_link_local(self):
+        assert is_static_safe('http://169.254.169.254/stream')[0] is False
+
+    # ── 合法公网地址放行（须用真正公网地址；文档保留段 203.0.113.x / 2001:db8::
+    #     会被 Python ipaddress 归类为 is_private，属 SSRF 正确拦截，不算「公网」）──
+    def test_valid_public_ip(self):
+        assert is_static_safe('http://8.8.8.8/stream')[0] is True
+
+    def test_valid_public_domain(self):
+        assert is_static_safe('http://example.com/stream')[0] is True
+
+    def test_ipv6_host(self):
+        assert is_static_safe('http://[2606:4700:4700::1111]/stream')[0] is True
+
+    # ── 形态处理 ──
+    def test_url_with_port(self):
+        assert is_static_safe('http://example.com:8080/stream.m3u8')[0] is True
+
+    def test_url_with_query(self):
+        assert is_static_safe('https://example.com/stream?key=value&token=abc')[0] is True
+
+    def test_fragment_stripped(self):
+        assert is_static_safe('http://example.com/stream#frag')[0] is True
+
+    def test_pipe_stripped(self):
+        assert is_static_safe('http://example.com/stream|extra')[0] is True
+
+
+class TestSourceData:
+    """SourceData TypedDict 基本验证"""
+
+    def test_can_create_with_fields(self):
+        data: SourceData = {
+            'name': 'CCTV-1',
+            'url': 'http://example.com/stream',
+            'group': '央视频道',
+            'logo': 'http://example.com/logo.png',
+        }
+        assert data['name'] == 'CCTV-1'
+        assert data['url'] == 'http://example.com/stream'
+
+    def test_can_create_with_partial_fields(self):
+        data: SourceData = {
+            'name': 'Test',
+            'url': 'http://example.com/stream',
+        }
+        assert data['name'] == 'Test'
+
+
+class TestPasswordComplexity:
+    """密码复杂度（GB/T 39786-2021）：组合 + 弱口令黑名单 + 长度上限"""
+
+    def test_default_admin_password_still_ok(self):
+        # 项目初始默认密码 Admin@123 仍应满足复杂度（不被弱口令黑名单误伤）
+        from web.models import password_complexity_ok
+
+        assert password_complexity_ok('Admin@123') is True
+
+    def test_weak_password_rejected(self):
+        from web.models import password_complexity_ok
+
+        assert password_complexity_ok('12345678') is False
+        assert password_complexity_ok('admin123') is False
+        assert password_complexity_ok('qwerty123') is False
+        assert password_complexity_ok('PASSWORD') is False  # 大小写不敏感：大写仍命中黑名单(password)
+
+    def test_too_short_rejected(self):
+        from web.models import password_complexity_ok
+
+        assert password_complexity_ok('Ab1!') is False  # 长度 < 8
+
+    def test_too_long_rejected(self):
+        from web.models import password_complexity_ok
+
+        assert password_complexity_ok('A' * 73) is False  # 超过 bcrypt 72 字节上限
+
+    def test_low_category_rejected(self):
+        from web.models import password_complexity_ok
+
+        assert password_complexity_ok('abcdefgh') is False  # 仅小写，不足 3 类
+        assert password_complexity_ok('12345678') is False  # 仅数字（且为弱口令）
+
+    def test_strong_password_ok(self):
+        from web.models import password_complexity_ok
+
+        assert password_complexity_ok('TvB#9kLm2qX') is True  # 4 类齐全
+        assert password_complexity_ok('Cctv@2024') is True  # 3 类齐全且非弱口令
