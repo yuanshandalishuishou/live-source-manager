@@ -130,9 +130,44 @@ def _execute(sql: str, params=()):
                     logger.warning(f'关闭数据库连接异常: {_re}')
 
 
+# 常见弱口令黑名单（GB/T 39786-2021：不得使用常见弱口令）。作为组合复杂度之外的兜底，
+# 避免 Password@123 / 12345678 等高频弱口令通过。大小写不敏感比对。
+_WEAK_PASSWORD_BLACKLIST = frozenset(
+    {
+        'password',
+        '123456',
+        '12345678',
+        '123456789',
+        'qwerty',
+        'abc123',
+        'password1',
+        'admin123',
+        'root123',
+        'letmein',
+        'iloveyou',
+        '111111',
+        '000000',
+        'passw0rd',
+        'p@ssw0rd',
+        'qwerty123',
+        '1q2w3e4r',
+        'shadow',
+        'sunshine',
+    }
+)
+
+
 def password_complexity_ok(pw: str) -> bool:
-    """校验密码是否满足 GB/T 39786-2021 复杂度要求（长度≥8 且含大写/小写/数字/特殊符号中至少3类）。"""
-    if not pw or len(pw) < 8:
+    """校验密码是否满足 GB/T 39786-2021 复杂度要求：
+    - 长度 8~72（bcrypt 仅取前 72 字节，超长会被静默截断，故设上限）；
+    - 含大写/小写/数字/特殊符号中至少 3 类；
+    - 不得为常见弱口令（大小写不敏感比对）。
+    """
+    if not pw:
+        return False
+    if len(pw) < 8 or len(pw) > 72:
+        return False
+    if pw.lower() in _WEAK_PASSWORD_BLACKLIST:
         return False
     cats = 0
     if re.search(r'[A-Z]', pw):
@@ -2265,7 +2300,7 @@ def record_login_failure(username: str):
             username,
             LOGIN_LOCKOUT_MAX_ATTEMPTS - 1,
             LOGIN_LOCKOUT_MAX_ATTEMPTS,
-            LOGIN_LOCKOUT_MAX_ATTEMPTS - 1,
+            LOGIN_LOCKOUT_MAX_ATTEMPTS,
             now + LOGIN_LOCKOUT_DURATION,
         ),
     )

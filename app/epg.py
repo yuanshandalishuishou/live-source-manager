@@ -351,9 +351,7 @@ class EPGFetcher:
         looks_local = is_file_scheme or not re.match(r'^[a-zA-Z][a-zA-Z0-9+.-]*://', url)
         if looks_local:
             abs_local = os.path.realpath(os.path.abspath(local_path))
-            in_allowed = any(
-                abs_local == root or abs_local.startswith(root + os.sep) for root in allowed_roots
-            )
+            in_allowed = any(abs_local == root or abs_local.startswith(root + os.sep) for root in allowed_roots)
             if not in_allowed:
                 raise ValueError(
                     'EPG 本地文件不在允许目录内（已拒绝任意文件读取）：仅允许 config/sources、config/online、www/output、data 等应用数据目录，请改用 http(s) 源'
@@ -382,6 +380,7 @@ class EPGFetcher:
 
         # ── 有限重试：容忍公共 EPG 源常见的瞬时网络抖动 / 服务端 5xx / 限流(429) ──
         # 仅对连接错误、超时、429/5xx 重试；4xx 客户端错误与空内容不重试，直接失败。
+        # 全链路可观测：每次重试记录原因与退避秒数，成功/最终失败均留日志。
         max_attempts = 3
         last_exc: Exception | None = None
         for attempt in range(1, max_attempts + 1):
@@ -398,7 +397,9 @@ class EPGFetcher:
                             last_exc = RuntimeError(f'HTTP {resp.status}')
                             logger.warning(
                                 'EPG 下载第 %d/%d 次遇可重试 HTTP %d，准备重试',
-                                attempt, max_attempts, resp.status,
+                                attempt,
+                                max_attempts,
+                                resp.status,
                             )
                         else:
                             with_suppress_unlink(dest)
@@ -411,22 +412,43 @@ class EPGFetcher:
                                 total += len(chunk)
                             if total == 0:
                                 raise RuntimeError('下载内容为空')
+                        logger.info(
+                            'EPG 下载成功: url=%s bytes=%d',
+                            url,
+                            total,
+                        )
                         return dest
-            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+            except (TimeoutError, aiohttp.ClientError) as e:
                 retryable = True
                 last_exc = e
                 logger.warning(
                     'EPG 下载第 %d/%d 次连接失败，准备重试: %s',
-                    attempt, max_attempts, e,
+                    attempt,
+                    max_attempts,
+                    e,
                 )
             except RuntimeError:
                 # 非 200 客户端错误 / 空内容：不重试，直接向上抛
                 with_suppress_unlink(dest)
                 raise
             if retryable and attempt < max_attempts:
-                await asyncio.sleep(min(2 ** attempt, 8))
+                backoff = min(2**attempt, 8)
+                logger.warning(
+                    'EPG 下载第 %d/%d 次失败，%s 秒后重试（指数退避）: %s',
+                    attempt,
+                    max_attempts,
+                    backoff,
+                    last_exc,
+                )
+                await asyncio.sleep(backoff)
                 continue
             break
+        logger.error(
+            'EPG 下载最终失败，已放弃（url=%s, 尝试 %d 次）: %s',
+            url,
+            max_attempts,
+            last_exc,
+        )
         with_suppress_unlink(dest)
         raise RuntimeError(f'下载失败(已重试{max_attempts}次): {last_exc}') from last_exc
 

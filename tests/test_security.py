@@ -134,3 +134,43 @@ class TestSourceData:
             'url': 'http://example.com/stream',
         }
         assert data['name'] == 'Test'
+
+
+class TestPasswordComplexity:
+    """密码复杂度（GB/T 39786-2021）：组合 + 弱口令黑名单 + 长度上限"""
+
+    def test_default_admin_password_still_ok(self):
+        # 项目初始默认密码 Admin@123 仍应满足复杂度（不被弱口令黑名单误伤）
+        from web.models import password_complexity_ok
+
+        assert password_complexity_ok('Admin@123') is True
+
+    def test_weak_password_rejected(self):
+        from web.models import password_complexity_ok
+
+        assert password_complexity_ok('12345678') is False
+        assert password_complexity_ok('admin123') is False
+        assert password_complexity_ok('qwerty123') is False
+        assert password_complexity_ok('PASSWORD') is False  # 大小写不敏感：大写仍命中黑名单(password)
+
+    def test_too_short_rejected(self):
+        from web.models import password_complexity_ok
+
+        assert password_complexity_ok('Ab1!') is False  # 长度 < 8
+
+    def test_too_long_rejected(self):
+        from web.models import password_complexity_ok
+
+        assert password_complexity_ok('A' * 73) is False  # 超过 bcrypt 72 字节上限
+
+    def test_low_category_rejected(self):
+        from web.models import password_complexity_ok
+
+        assert password_complexity_ok('abcdefgh') is False  # 仅小写，不足 3 类
+        assert password_complexity_ok('12345678') is False  # 仅数字（且为弱口令）
+
+    def test_strong_password_ok(self):
+        from web.models import password_complexity_ok
+
+        assert password_complexity_ok('TvB#9kLm2qX') is True  # 4 类齐全
+        assert password_complexity_ok('Cctv@2024') is True  # 3 类齐全且非弱口令
