@@ -36,7 +36,7 @@ from app.exceptions import (
 from app.logger import Logger
 from app.m3u_generator import M3UGenerator
 from app.rules import ChannelRules, get_channel_name_mapping_for_app
-from app.source_manager import SourceManager
+from app.source_manager import SourceManager, dedup_sources_by_url
 from app.stream_tester import StreamTester
 
 
@@ -750,7 +750,13 @@ class EnhancedLiveSourceManager:
             # 应用文件级/频道级 UA 设置（来自 Web UI 配置）
             sources = self.source_manager.apply_ua_settings(sources)
 
-            self.logger_info(f'成功解析 {len(sources)} 个直播源')
+            total_parsed = len(sources)
+            self.logger_info(f'成功解析 {total_parsed} 个直播源')
+
+            # URL 去重：与 Web 实时测试口径统一，避免重复测试同一地址浪费 ffmpeg 并发
+            sources = dedup_sources_by_url(sources)
+            removed = total_parsed - len(sources)
+            self.logger_info(f'URL 去重后 {len(sources)} 个唯一源（去除重复 {removed} 个）')
 
             # 步骤3: 测试所有流媒体源
             self.logger_info('=== 步骤3: 测试流媒体源 ===')
