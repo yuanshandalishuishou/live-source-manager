@@ -1078,3 +1078,24 @@ class SourceManager:
             except Exception as e:
                 self.logger.warning(f'关闭aiohttp会话失败: {e}')
         self._session = None
+
+
+def dedup_sources_by_url(sources: list) -> list:
+    """按频道原始地址（url）全局去重，避免重复测试同一地址。
+
+    单一事实来源（app 层）。web/routes/system.py 的 dedup_sources_by_url 现委托此处，
+    后台增强流程（manager.enhanced_process_sources）也复用同一实现，保证口径统一。
+    - 跨文件/跨源全局去重：同一 url 只保留首次出现的源，后续重复项跳过；
+    - 空 url 的源不做去重（保留并加入结果），避免静默丢弃无地址的源；
+    - 返回去重后的新列表，不修改入参。
+    """
+    seen: set = set()
+    uniq: list = []
+    for s in sources:
+        u = s.get('url') if isinstance(s, dict) else None
+        if u:
+            if u in seen:
+                continue
+            seen.add(u)
+        uniq.append(s)
+    return uniq

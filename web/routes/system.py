@@ -9,6 +9,7 @@ import os
 import threading
 import time
 
+from app.source_manager import dedup_sources_by_url
 from fastapi import (
     APIRouter,
     Depends,
@@ -529,25 +530,6 @@ def _collect_file_sources(sm, file_id: str):
         return None, 'GitHub 源暂不支持按文件测试，请先采集后再选择对应的在线/本地文件'
 
     return None, '未知源类型，无法按文件测试'
-
-
-def dedup_sources_by_url(sources: list) -> list:
-    """按频道原始地址（url）去重，避免重复测试相同地址。
-
-    - 跨文件/跨源全局去重：同一 url 只保留首次出现的源（后出现的重复项跳过）。
-    - 空 url 的源不做去重（保留并加入结果），避免静默丢弃无地址的源。
-    - 返回去重后的新列表，不修改入参。
-    """
-    seen: set = set()
-    uniq: list = []
-    for s in sources:
-        u = s.get('url') if isinstance(s, dict) else None
-        if u:
-            if u in seen:
-                continue
-            seen.add(u)
-        uniq.append(s)
-    return uniq
 
 
 # 防护：单次测试最多测这么多源。ffprobe 并发受 Testing.max_concurrent_ffprobe 限制（默认 16），
@@ -1113,6 +1095,14 @@ def _run_test_task(sources: list[dict], limit: int | None = None, gen: int = 0) 
                     _publish_test_state()
                 else:
                     return
+
+                # 逐源结果写入文件日志（与前端表格一一对应，便于离线 grep 排查）
+                _lv = logger.info if disp_status == 'passed' else logger.error
+                _mark = '✓' if disp_status == 'passed' else '✗'
+                _rt = entry.get('response_time')
+                _rt_str = f' 延迟={_rt}s' if _rt is not None else ''
+                _reason_str = f' 原因={entry["reason"]}' if entry.get('reason') else ''
+                _lv(f'{_mark} 测试源 [{entry["name"]}] 状态={disp_status}{_rt_str} URL={entry["url"]}{_reason_str}')
 
                 # ── 暂停：每完成一个源即响应（立即终止在跑子进程，进入阻塞等待）──
                 if _test_pause.is_set():
