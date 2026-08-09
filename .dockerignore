@@ -78,3 +78,5 @@ tools/
 node_modules/
 docker-compose.yml
 docker-compose*.yml
+# 本机 safe-delete 守卫暂留的临时诊断文件（绝不可进镜像）
+_rm_result.txt
