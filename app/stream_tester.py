@@ -523,8 +523,8 @@ class StreamTester:
                     if use_tqdm:
                         pbar.update(1)
                 except Exception as e:
-                    # 处理其他异常
-                    self.logger.error(f'测试异常 {source["name"]}: {e}')
+                    # 处理其他异常（用 !r 保证异常类型/信息可见，避免 __str__ 为空时日志留白）
+                    self.logger.error(f'测试异常 {source["name"]}: {type(e).__name__}: {e!r}')
                     error_result = {
                         **source,
                         'status': 'error',

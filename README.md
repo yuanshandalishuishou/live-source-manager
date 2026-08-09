@@ -190,7 +190,9 @@ Sources: [app/rules.py](app/rules.py#L1-L60), [app/data/seed_classification_rule
 - **User-Agent 注入**：可在 EXTINF 标签或 URL 行中插入自定义 UA，应对防盗链
 - **白名单强制保留**：即使未通过质量测试，在白名单中的源也能出现在输出中
 
-每个频道默认最多保留 8 个源（`max_sources_per_channel`），在速度测试中表现最好的优先保留。
+每个频道默认最多保留 5 个源（`max_sources_per_channel`，可在 Web 后台「输出」页调整），在速度测试中表现最好的优先保留。
+
+- **输出全部有效源**：Web 后台「输出」页可开启 `output_all_valid`。开启后 `live.m3u` 直接用第一层全部有效源（跳过分辨率聚合与质量过滤），保留所有检测通过的频道（含收音机 / 港台 / MTV / 电影等非标准 TV 类目），适合希望完整保留全部频道的场景。
 
 Sources: [app/m3u_generator.py](app/m3u_generator.py#L1-L60), [config/config-defaults.yaml](config/config-defaults.yaml#L38-L44)
 
@@ -654,7 +656,7 @@ Sources: [web/core.py](web/core#L200-L300), [web/models.py](web/models#L100-L225
 | `Sources` | 直播源来源配置 | `online_urls`、`github_sources`、`local_dirs` |
 | `Network` | 网络与代理设置 | `proxy_enabled`、`proxy_type`、`github_mirror` |
 | `Testing` | 流测试参数 | `timeout`、`concurrent_threads`、`enable_ad_detect` |
-| `Output` | 播放列表输出 | `filename`、`group_by`、`max_sources_per_channel` |
+| `Output` | 播放列表输出 | `filename`、`group_by`、`max_sources_per_channel`、`output_all_valid` |
 | `Filter` | 质量过滤条件 | `min_resolution`、`min_bitrate`、`max_latency` |
 | `GitHub` | GitHub API 集成 | `api_token`、`rate_limit` |
 | `HTTPServer` | 文件发布服务 | `fileshare_port`、`manager_port` |
@@ -4265,7 +4267,8 @@ M3UGenerator 的行为完全由以下配置参数控制：
 | `Output.filename` | 文件名 | `live.m3u` | 基础输出文件名 |
 | `Output.group_by` | 分组维度 | `category` | 视频源的分组依据 |
 | `Output.include_failed` | 包含失败源 | `False` | 是否包含测试失败的源 |
-| `Output.max_sources_per_channel` | 每频道最大源数 | `8` | 控制冗余度 |
+| `Output.max_sources_per_channel` | 每频道最大源数 | `5` | 控制冗余度，可在 Web 后台调整 |
+| `Output.output_all_valid` | 输出全部有效源 | `False` | 开启后 live.m3u 保留全部有效源，跳过质量过滤 |
 | `Output.enable_filter` | 启用过滤 | `False` | 是否应用质量过滤 |
 | `Output.whitelist_force_keep` | 白名单强制保留 | `False` | 白名单豁免过滤 |
 | `Filter.max_latency` | 最大延迟 | `4000` | 响应时间上限(ms) |

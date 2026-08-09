@@ -55,7 +55,8 @@ Output:
   filename: live.m3u
   group_by: category
   include_failed: 'False'
-  max_sources_per_channel: '8'
+  max_sources_per_channel: '5'
+  output_all_valid: 'False'
   whitelist_force_keep: 'False'
 Sources:
   channel_ua_overrides: '{}'

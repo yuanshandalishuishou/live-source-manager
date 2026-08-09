@@ -272,7 +272,13 @@ SECTION_SCHEMA: dict[str, dict[str, tuple]] = {
         'filename': ('str', 'live.m3u', '输出文件名'),
         'group_by': ('str', 'category', '分组策略'),
         'include_failed': ('bool', 'False', '包含失败源'),
-        'max_sources_per_channel': ('int', '8', '每频道最大源数'),
+        'max_sources_per_channel': ('int', '5', '每频道最大源数'),
+        'output_all_valid': (
+            'bool',
+            'False',
+            '输出全部有效源',
+            '开启后 live.m3u 直接用全部有效源(跳过分辨率聚合与质量过滤)，保留所有检测通过的频道(含收音机/港台/MTV/电影)',
+        ),
         'enable_filter': ('bool', 'False', '启用过滤'),
         'whitelist_force_keep': (
             'bool',
@@ -816,10 +822,17 @@ async def lifespan(app_instance: FastAPI):
     # 首次登录强制修改密码标记（S2修复）：仅当仍在使用默认初始密码且该特性启用时置位；
     # 避免对已改为自定义强密码的管理员在每次重启后重复强制（原实现无条件写 True 属死代码/误导）。
     # 可用环境变量 FORCE_PASSWORD_CHANGE_ON_FIRST_LOGIN=0 显式关闭该特性（可选）。
-    force_pw = os.environ.get('FORCE_PASSWORD_CHANGE_ON_FIRST_LOGIN', '1').strip().lower() not in ('0', 'false', 'off', 'no')
+    force_pw = os.environ.get('FORCE_PASSWORD_CHANGE_ON_FIRST_LOGIN', '1').strip().lower() not in (
+        '0',
+        'false',
+        'off',
+        'no',
+    )
     if force_pw and await asyncio.to_thread(models.is_admin_on_default_password):
         await asyncio.to_thread(models.set_password_change_required, 'admin', True)
-        logger.info('管理员仍使用默认初始密码，启用首次登录强制改密策略（如需关闭设置 FORCE_PASSWORD_CHANGE_ON_FIRST_LOGIN=0）')
+        logger.info(
+            '管理员仍使用默认初始密码，启用首次登录强制改密策略（如需关闭设置 FORCE_PASSWORD_CHANGE_ON_FIRST_LOGIN=0）'
+        )
     else:
         await asyncio.to_thread(models.set_password_change_required, 'admin', False)
         logger.info('首次登录强制改密策略：已关闭（管理员为非默认密码或特性被禁用）')

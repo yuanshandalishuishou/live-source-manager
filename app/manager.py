@@ -539,6 +539,9 @@ class EnhancedLiveSourceManager:
         # 按频道名称和分辨率分组
         channel_groups = {}
 
+        # 每组保留上限：优先读取 Web 后台配置项 max_sources_per_channel（默认 5）
+        max_per_channel = int(self.config.get_output_params().get('max_sources_per_channel', 5) or 5)
+
         for source in sources:
             media_type = source.get('media_type', 'video')
 
@@ -573,8 +576,8 @@ class EnhancedLiveSourceManager:
                 ),
             )
 
-            # 保留前5个质量最好的源
-            keep_count = min(5, len(sorted_sources))
+            # 保留质量最好的前 N 个源（N 由 Output.max_sources_per_channel 控制，默认 5）
+            keep_count = min(max_per_channel, len(sorted_sources))
             filtered_sources.extend(sorted_sources[:keep_count])
 
             if len(sorted_sources) > keep_count:
@@ -770,9 +773,21 @@ class EnhancedLiveSourceManager:
             self.logger_info('=== 步骤5: 生成播放列表文件 ===')
             generator = M3UGenerator(self.config, self.logger)
 
-            # 生成基础播放列表（第二层筛选结果）
-            if base_sources:
-                success = self._generate_enhanced_playlist(generator, base_sources, '', '基础')
+            # 「输出全部有效源」开关：开启后 live.m3u 直接用第一层全部有效源，
+            # 跳过分辨率聚合(第二层)与质量过滤(第三层)，保留所有检测通过的频道
+            # （含收音机/港台/MTV/电影等此前被压缩或非标准 TV 类目）。
+            output_all_valid = self.config.get_output_params().get('output_all_valid', False)
+            if output_all_valid:
+                self.logger_info('⚠ 已开启「输出全部有效源」：live.m3u 将包含全部有效源（跳过分辨率聚合与质量过滤）')
+                live_sources = valid_sources
+                live_label = '全部有效'
+            else:
+                live_sources = base_sources
+                live_label = '基础'
+
+            # 生成基础播放列表（第二层筛选结果 / 或全部有效源）
+            if live_sources:
+                success = self._generate_enhanced_playlist(generator, live_sources, '', live_label)
                 if not success:
                     self.logger_error('生成基础播放列表文件失败')
             else:

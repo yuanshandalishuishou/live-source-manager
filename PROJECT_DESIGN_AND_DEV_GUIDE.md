@@ -233,7 +233,7 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 | Output | filename | str | live.m3u |
 | | group_by | str | category |
 | | include_failed | bool | False |
-| | max_sources_per_channel | int | 8 |
+| | max_sources_per_channel | int | 5 |
 | | enable_filter | bool | False |
 | | whitelist_force_keep | bool | False |
 | Filter | max_latency | int | 4000 |

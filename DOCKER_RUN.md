@@ -203,3 +203,11 @@ curl -sI http://localhost:12345/epg.xml.gz
 Web 后台 `http://localhost:23456/epg`（节目单网格视图）与 `/epg/sources`（源管理）可手动刷新、生成、增删源。
 
 > 提示：`epg.xml.gz` 属运行期产物，必须挂载 `-v ./output:/www/output` 才能在容器重建后保留。
+
+---
+
+## 九、国内网络部署（让 IPTV 源测试通过率正常）
+
+> **服务必须跑在能直连国内 IPTV CDN 的网络（国内云主机 / 家庭宽带 NAS 等），否则源测试通过率会接近 0。**
+> 选网络环境、容器出站放行、国内 DNS、GHCR 镜像加速、GitHub 源列表代理坑、排错清单等，详见专文
+> **[`DOCKER_DEPLOY_CN.md`](./DOCKER_DEPLOY_CN.md)**。

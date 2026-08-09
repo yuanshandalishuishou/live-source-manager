@@ -118,7 +118,8 @@ class Config:
         'Output.filename': 'live.m3u',
         'Output.group_by': 'category',
         'Output.include_failed': 'False',
-        'Output.max_sources_per_channel': '8',
+        'Output.max_sources_per_channel': '5',
+        'Output.output_all_valid': 'False',  # 开启后 live.m3u 直接用全部有效源(跳过分辨率聚合与质量过滤)
         'Output.enable_filter': 'False',
         'Output.whitelist_force_keep': 'False',  # 白名单源即使未通过质量过滤也强制保留到输出
         # [Logging]
@@ -386,6 +387,11 @@ class Config:
                 'Output',
                 'max_sources_per_channel',
                 self._default_int('Output', 'max_sources_per_channel'),
+            ),
+            'output_all_valid': self.getboolean(
+                'Output',
+                'output_all_valid',
+                self._default_bool('Output', 'output_all_valid'),
             ),
             'enable_filter': self.getboolean('Output', 'enable_filter', self._default_bool('Output', 'enable_filter')),
             'whitelist_force_keep': self.getboolean(
