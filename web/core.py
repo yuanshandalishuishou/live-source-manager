@@ -112,14 +112,13 @@ SECTION_SCHEMA: dict[str, dict[str, tuple]] = {
             'https://raw.githubusercontent.com/fanmingming/live/main/tv/m3u/ipv6.m3u\n'
             'https://live.fanmingming.cn/tv/m3u/ipv6.m3u\n'
             'https://raw.githubusercontent.com/YueChan/Live/main/IPTV.m3u\n'
-            'https://iptv-org.github.io/iptv/countries/tw.m3u\n'
-            'https://iptv-org.github.io/iptv/index.m3u',
+            'https://raw.githubusercontent.com/iptv-org/iptv/master/streams/tw.m3u\n'
+            'https://raw.githubusercontent.com/iptv-org/iptv/master/streams/hk.m3u',
             '在线源URL列表',
             '每行一个URL',
         ),
         'github_sources': (
             'textarea',
-            'wcb1969/iptv/main\n'
             'joevess/IPTV/main\n'
             'suxuang/myIPTV/main\n'
             'YueChan/Live\n'
@@ -130,6 +129,12 @@ SECTION_SCHEMA: dict[str, dict[str, tuple]] = {
             'Rivens7/Livelist',
             'GitHub仓库',
             '格式: owner/repo',
+        ),
+        'github_source_settings': (
+            'textarea',
+            '{}',
+            'GitHub源下载方式',
+            'JSON：{条目: 方式}，方式=raw(默认)/api/proxy/mirror。海外/区域受限仓库设 "proxy" 经代理拉取',
         ),
     },
     'Network': {
@@ -279,7 +284,12 @@ SECTION_SCHEMA: dict[str, dict[str, tuple]] = {
             '输出全部有效源',
             '开启后 live.m3u 直接用全部有效源(跳过分辨率聚合与质量过滤)，保留所有检测通过的频道(含收音机/港台/MTV/电影)',
         ),
-        'enable_filter': ('bool', 'False', '启用过滤'),
+        'enable_filter': (
+            'bool',
+            'True',
+            '启用分层过滤',
+            '关闭后 base/qualified 均直接用全量有效源，等效关闭分辨率聚合与质量过滤',
+        ),
         'whitelist_force_keep': (
             'bool',
             'False',

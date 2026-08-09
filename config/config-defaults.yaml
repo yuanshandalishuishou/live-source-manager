@@ -51,7 +51,7 @@ Network:
   proxy_type: socks5
   proxy_username: ''
 Output:
-  enable_filter: 'False'
+  enable_filter: 'True'
   filename: live.m3u
   group_by: category
   include_failed: 'False'
@@ -61,9 +61,7 @@ Output:
 Sources:
   channel_ua_overrides: '{}'
   github_source_settings: '{}'
-  github_sources: 'wcb1969/iptv/main
-
-    joevess/IPTV/main
+  github_sources: 'joevess/IPTV/main
 
     suxuang/myIPTV/main
 
@@ -115,9 +113,9 @@ Sources:
 
     https://raw.githubusercontent.com/YueChan/Live/main/IPTV.m3u
 
-    https://iptv-org.github.io/iptv/countries/tw.m3u
+    https://raw.githubusercontent.com/iptv-org/iptv/master/streams/tw.m3u
 
-    https://iptv-org.github.io/iptv/index.m3u'
+    https://raw.githubusercontent.com/iptv-org/iptv/master/streams/hk.m3u'
   source_file_ua_settings: '{}'
 Testing:
   ad_keywords: no_signal,/ad/,advertisement,测试卡,无信号,test_pattern,colorbar,broadcast_test,signal_lost

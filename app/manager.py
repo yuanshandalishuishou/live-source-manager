@@ -737,7 +737,13 @@ class EnhancedLiveSourceManager:
 
             # 步骤1: 下载所有源文件
             self.logger_info('=== 步骤1: 下载源文件 ===')
-            downloaded_files = await self.source_manager.download_all_sources()
+            # 接通死配置 github_source_settings：每个 GitHub 条目可选下载方式(raw/api/proxy/mirror)，
+            # 海外/区域受限仓库可设为 proxy 经代理拉取。
+            sources_cfg = self.config.get_sources()
+            github_download_methods = sources_cfg.get('github_source_settings', {}) or {}
+            downloaded_files = await self.source_manager.download_all_sources(
+                github_download_methods=github_download_methods
+            )
 
             if not downloaded_files:
                 self.logger_warning('没有成功下载任何源文件，尝试使用缓存文件继续处理')
@@ -768,6 +774,15 @@ class EnhancedLiveSourceManager:
             # 步骤4: 分层筛选
             self.logger_info('=== 步骤4: 分层筛选 ===')
             valid_sources, base_sources, qualified_sources = self.hierarchical_filtering(test_results)
+
+            # enable_filter 主开关（#466）：关闭时 base/qualified 均等于全量有效源，
+            # 即不应用分辨率聚合(第二层)与质量过滤(第三层)，等价于「关闭过滤」。
+            # 默认 True（保持历史「始终过滤」的有效行为）。
+            enable_filter = self.config.get_output_params().get('enable_filter', True)
+            if not enable_filter:
+                self.logger_info('⚠ enable_filter 关闭：base/qualified 均使用全量有效源（不应用分辨率聚合与质量过滤）')
+                base_sources = valid_sources
+                qualified_sources = valid_sources
 
             # 步骤5: 生成不同层次的播放列表
             self.logger_info('=== 步骤5: 生成播放列表文件 ===')

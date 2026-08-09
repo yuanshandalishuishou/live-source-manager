@@ -253,3 +253,44 @@ class TestConfigUserAgents:
             assert len(uas) >= 1
         else:
             assert len(uas) >= 1
+
+
+# ── #466 / #467 回归：enable_filter 默认与 github_source_settings 解析 ──
+
+
+class TestOutputFilterDefaultAndGithubSettings:
+    """enable_filter 真正生效 + github_source_settings 解析（#466/#467）"""
+
+    def test_enable_filter_default_true(self, config_instance):
+        """enable_filter 默认应为 True（保持历史始终过滤的有效行为）"""
+        params = config_instance.get_output_params()
+        assert params['enable_filter'] is True
+
+    def test_enable_filter_false_respected(self, temp_db):
+        _seed_app_config({'Output.enable_filter': 'False'})
+        from app.config import Config
+
+        cfg = Config()
+        assert cfg.get_output_params()['enable_filter'] is False
+
+    def test_github_source_settings_parsed(self, temp_db):
+        _seed_app_config(
+            {
+                'Sources.github_source_settings': '{"owner/repo": "proxy", "a/b": "mirror"}',
+            }
+        )
+        from app.config import Config
+
+        cfg = Config()
+        settings = cfg.get_sources()['github_source_settings']
+        assert settings == {'owner/repo': 'proxy', 'a/b': 'mirror'}
+
+    def test_github_source_settings_invalid_json_falls_back_empty(self, temp_db):
+        _seed_app_config({'Sources.github_source_settings': 'not-json'})
+        from app.config import Config
+
+        cfg = Config()
+        assert cfg.get_sources()['github_source_settings'] == {}
+
+    def test_github_source_settings_default_empty(self, config_instance):
+        assert config_instance.get_sources()['github_source_settings'] == {}

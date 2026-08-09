@@ -231,6 +231,12 @@ def init_db(admin_password: str | None = None):
             updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
 
+        -- 迁移标记表：记录已执行的一次性迁移，避免把标记行写进 app_config 干扰「默认值条数」断言
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+            name        TEXT PRIMARY KEY,
+            applied_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
         CREATE TABLE IF NOT EXISTS sessions (
             id TEXT PRIMARY KEY,
             user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -844,6 +850,9 @@ def fill_missing_app_config_defaults() -> int:
     """
     from app import Config
 
+    # 现有库一次性迁移（自愈），先于默认值补齐执行
+    _run_one_time_source_migrations()
+
     conn = get_conn()
     try:
         existing = {row[0] for row in conn.execute('SELECT key FROM app_config').fetchall()}
@@ -860,6 +869,89 @@ def fill_missing_app_config_defaults() -> int:
     except Exception as e:
         logger.error(f'补全配置默认值失败: {e}')
         return 0
+    finally:
+        conn.close()
+
+
+def _mig_has_run(conn: sqlite3.Connection, name: str) -> bool:
+    """查询迁移标记（存于 schema_migrations 表，避免污染 app_config 行数断言）。"""
+    row = conn.execute('SELECT 1 FROM schema_migrations WHERE name=?', (name,)).fetchone()
+    return row is not None
+
+
+def _mig_mark_done(conn: sqlite3.Connection, name: str) -> None:
+    now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    conn.execute(
+        'INSERT OR IGNORE INTO schema_migrations (name, applied_at) VALUES (?, ?)',
+        (name, now),
+    )
+
+
+def _run_one_time_source_migrations() -> None:
+    """现有库一次性迁移（自愈），保证老库也能拉到港台源并启用过滤。
+
+    1) enable_filter 默认值由 False→True：该键旧版为死配置，老库写入 'False'；
+       新版本真正生效，为保持“始终过滤”的历史有效行为需一次性翻为 'True'。
+       （用 schema_migrations 标记防回跑，避免覆盖用户在新版中主动设回的 'False'）
+    2) 从 github_sources 移除全局 451 的 wcb1969/iptv（GitHub 已封锁，永远拉不到）。
+    3) online_urls 移除被墙且路径过期的 iptv-org.github.io 链接，补入实测可达的
+       iptv-org/iptv/master/streams/tw.m3u 与 streams/hk.m3u（港台）。
+    """
+    conn = get_conn()
+    try:
+        now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+        # 迁移1：enable_filter 翻 True（一次性，标记防回跑）
+        if not _mig_has_run(conn, 'enable_filter_default_true'):
+            cur = conn.execute("SELECT value FROM app_config WHERE key='Output.enable_filter'")
+            row = cur.fetchone()
+            if row is not None and row[0] == 'False':
+                conn.execute(
+                    "UPDATE app_config SET value='True', updated_at=? WHERE key='Output.enable_filter'",
+                    (now,),
+                )
+                logger.info('[mig] Output.enable_filter 由 False→True(保持老库始终过滤的有效行为)')
+            _mig_mark_done(conn, 'enable_filter_default_true')
+
+        # 迁移2/3：源列表清理（用标记防重复执行；本身幂等）
+        if not _mig_has_run(conn, 'sources_urls_cleanup_v1'):
+            cur = conn.execute("SELECT value FROM app_config WHERE key='Sources.github_sources'")
+            row = cur.fetchone()
+            if row is not None:
+                val = row[0]
+                new_val = '\n'.join(ln for ln in val.split('\n') if ln.strip() and 'wcb1969/iptv' not in ln)
+                if new_val != val:
+                    conn.execute(
+                        'UPDATE app_config SET value=?, updated_at=? WHERE key=?',
+                        (new_val, now, 'Sources.github_sources'),
+                    )
+                    logger.info('[mig] 已从 github_sources 移除 wcb1969/iptv(全局451)')
+
+            cur = conn.execute("SELECT value FROM app_config WHERE key='Sources.online_urls'")
+            row = cur.fetchone()
+            if row is not None:
+                val = row[0]
+                lines = [ln for ln in val.split('\n') if ln.strip() and 'iptv-org.github.io' not in ln]
+                add = [
+                    'https://raw.githubusercontent.com/iptv-org/iptv/master/streams/tw.m3u',
+                    'https://raw.githubusercontent.com/iptv-org/iptv/master/streams/hk.m3u',
+                ]
+                for u in add:
+                    if u not in lines:
+                        lines.append(u)
+                new_val = '\n'.join(lines)
+                if new_val != val:
+                    conn.execute(
+                        'UPDATE app_config SET value=?, updated_at=? WHERE key=?',
+                        (new_val, now, 'Sources.online_urls'),
+                    )
+                    logger.info('[mig] online_urls 已替换为 iptv-org streams/(tw+hk)，移除被墙的 iptv-org.github.io')
+
+            _mig_mark_done(conn, 'sources_urls_cleanup_v1')
+
+        conn.commit()
+    except Exception as e:
+        logger.error(f'源列表一次性迁移失败: {e}')
     finally:
         conn.close()
 

@@ -298,7 +298,10 @@ class SourceManager:
         if methods is None:
             methods = {}
         discovered = []
-        session = await self.get_session(use_proxy=False)
+        # 修复：发现阶段也尊重代理配置。海外/区域受限部署在 proxy_enabled=True 时，
+        # 让 GitHub API 发现经代理进行，避免区域封锁导致仓库直接被发现失败、连代理重试都没有。
+        proxy_for_discover = bool(self.network_config.get('proxy_enabled', False))
+        session = await self.get_session(use_proxy=proxy_for_discover)
         mirror_url = self.network_config.get('github_mirror', 'https://ghproxy.com/').rstrip('/')
 
         for entry in github_sources:

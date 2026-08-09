@@ -7,6 +7,7 @@ Config 类 — 纯 SQLite 版配置管理。
 所有配置读写直接走 SQLite app_config 表，无 INI 文件依赖。
 """
 
+import json
 import logging
 import os
 from typing import Any, ClassVar
@@ -49,11 +50,10 @@ class Config:
             'https://raw.githubusercontent.com/fanmingming/live/main/tv/m3u/ipv6.m3u\n'
             'https://live.fanmingming.cn/tv/m3u/ipv6.m3u\n'
             'https://raw.githubusercontent.com/YueChan/Live/main/IPTV.m3u\n'
-            'https://iptv-org.github.io/iptv/countries/tw.m3u\n'
-            'https://iptv-org.github.io/iptv/index.m3u'
+            'https://raw.githubusercontent.com/iptv-org/iptv/master/streams/tw.m3u\n'
+            'https://raw.githubusercontent.com/iptv-org/iptv/master/streams/hk.m3u'
         ),
         'Sources.github_sources': (
-            'wcb1969/iptv/main\n'
             'joevess/IPTV/main\n'
             'suxuang/myIPTV/main\n'
             'YueChan/Live\n'
@@ -120,7 +120,7 @@ class Config:
         'Output.include_failed': 'False',
         'Output.max_sources_per_channel': '5',
         'Output.output_all_valid': 'False',  # 开启后 live.m3u 直接用全部有效源(跳过分辨率聚合与质量过滤)
-        'Output.enable_filter': 'False',
+        'Output.enable_filter': 'True',  # 分层过滤主开关：True=正常生成 base/qualified(分辨率聚合+质量过滤)；False=base/qualified 均直接用全量有效源(等效关闭过滤)
         'Output.whitelist_force_keep': 'False',  # 白名单源即使未通过质量过滤也强制保留到输出
         # [Logging]
         'Logging.level': 'INFO',
@@ -527,8 +527,21 @@ class Config:
         else:
             github_sources = []
 
+        # 每个 GitHub 条目可选的下载方式（raw/api/proxy/mirror），JSON 字典。
+        # 例如 {"owner/repo": "proxy"} 让该仓库经代理下载；默认 {} 即全部走 raw。
+        github_source_settings_raw = self.get('Sources', 'github_source_settings', '{}')
+        github_source_settings: dict[str, str] = {}
+        if github_source_settings_raw:
+            try:
+                parsed = json.loads(github_source_settings_raw)
+                if isinstance(parsed, dict):
+                    github_source_settings = {str(k): str(v) for k, v in parsed.items()}
+            except (json.JSONDecodeError, ValueError, TypeError):
+                logging.warning('Sources.github_source_settings 解析失败，使用空配置')
+
         return {
             'local_dirs': local_dirs,
             'online_urls': online_urls,
             'github_sources': github_sources,
+            'github_source_settings': github_source_settings,
         }
