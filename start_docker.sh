@@ -705,10 +705,13 @@ except Exception as e:
         fi
     fi
 
-    init_output=$(cd /app && /app/.venv/bin/python <<PYEOF 2>&1
+    # 通过环境变量传递管理员密码，避免把密码以 bash 变量插值进 Python 源码
+    # （否则 WEB_ADMIN_PASSWORD 含单引号会破坏 Python 字符串字面量导致首启失败）。
+    init_output=$(cd /app && LSM_ADMIN_PW="$ADMIN_PW" /app/.venv/bin/python <<'PYEOF' 2>&1
 from web.models import init_db
+import os
 # 留空则传 None，由 init_db 使用默认初始密码 Admin@123（项目仅保留 admin 用户，无 viewer）
-init_db('$ADMIN_PW' if '$ADMIN_PW' else None)
+init_db(os.environ.get('LSM_ADMIN_PW') or None)
 print('DB_INIT_OK')
 PYEOF
     ) || {
