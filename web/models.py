@@ -302,6 +302,40 @@ def init_db(admin_password: str | None = None):
         logger.info('已删除查看者用户（viewer）')
     conn.commit()
 
+    # ── 候选池（Feature 2）与失效统计（Feature 5）表 ──
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS candidate_pool (
+            url            TEXT PRIMARY KEY,
+            name          TEXT DEFAULT '',
+            group_title   TEXT DEFAULT '',
+            category      TEXT DEFAULT '',
+            country       TEXT DEFAULT '',
+            region        TEXT DEFAULT '',
+            resolution    TEXT DEFAULT '',
+            bitrate       INTEGER DEFAULT 0,
+            response_time INTEGER DEFAULT 0,
+            download_speed REAL DEFAULT 0,
+            media_type    TEXT DEFAULT 'video',
+            status        TEXT DEFAULT '',
+            is_frozen     INTEGER DEFAULT 0,
+            last_tested_ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_candidate_frozen ON candidate_pool(is_frozen);
+        CREATE INDEX IF NOT EXISTS idx_candidate_name ON candidate_pool(name);
+
+        CREATE TABLE IF NOT EXISTS source_failure_stats (
+            url              TEXT PRIMARY KEY,
+            fail_count      INTEGER DEFAULT 0,
+            total_fails     INTEGER DEFAULT 0,
+            first_fail_ts   TIMESTAMP,
+            last_fail_ts    TIMESTAMP,
+            disabled        INTEGER DEFAULT 0,
+            last_disabled_ts TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_failure_disabled ON source_failure_stats(disabled);
+    """)
+    conn.commit()
+
     # ── 分类维度定义表 ───────────────────────────
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS classification_dimensions (
@@ -885,6 +919,317 @@ def _mig_mark_done(conn: sqlite3.Connection, name: str) -> None:
         'INSERT OR IGNORE INTO schema_migrations (name, applied_at) VALUES (?, ?)',
         (name, now),
     )
+
+
+# ════════════════════════════════════════════════════════════════
+# 候选池（Feature 2）：留存全部测速结果 + 手动冻结优选
+# ════════════════════════════════════════════════════════════════
+
+
+def save_candidate_pool(entries: list[dict]) -> int:
+    """批量 upsert 候选池（按 url 幂等更新）。
+
+    entries 每项含字段：url(必填), name, group_title, category, country, region,
+    resolution, bitrate, response_time, download_speed, media_type, status。
+    返回写入行数。
+    """
+    if not entries:
+        return 0
+    now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    rows = []
+    for e in entries:
+        url = e.get('url')
+        if not url:
+            continue
+        rows.append(
+            (
+                url,
+                e.get('name', '') or '',
+                e.get('group_title') or e.get('group', '') or '',
+                e.get('category', '') or '',
+                e.get('country', '') or '',
+                e.get('region', '') or '',
+                e.get('resolution', '') or '',
+                int(e.get('bitrate', 0) or 0),
+                int(e.get('response_time', 0) or 0),
+                float(e.get('download_speed', 0) or 0),
+                e.get('media_type', 'video') or 'video',
+                e.get('status', '') or '',
+                now,
+            )
+        )
+    if not rows:
+        return 0
+    conn = get_conn()
+    try:
+        conn.executemany(
+            """
+            INSERT INTO candidate_pool (
+                url, name, group_title, category, country, region, resolution,
+                bitrate, response_time, download_speed, media_type, status, last_tested_ts
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(url) DO UPDATE SET
+                name=excluded.name, group_title=excluded.group_title,
+                category=excluded.category, country=excluded.country,
+                region=excluded.region, resolution=excluded.resolution,
+                bitrate=excluded.bitrate, response_time=excluded.response_time,
+                download_speed=excluded.download_speed, media_type=excluded.media_type,
+                status=excluded.status, last_tested_ts=excluded.last_tested_ts
+            """,
+            rows,
+        )
+        conn.commit()
+        return len(rows)
+    except Exception as e:
+        logger.error(f'写入候选池失败: {e}')
+        return 0
+    finally:
+        conn.close()
+
+
+def get_candidate_pool(channel: str | None = None, only_frozen: bool = False, limit: int = 0) -> list[dict]:
+    """查询候选池。
+
+    Args:
+        channel: 按频道名(name)过滤（模糊匹配）
+        only_frozen: 仅返回手动冻结(is_frozen=1)的源
+        limit: 0 表示不限制
+
+    Returns:
+        list[dict]: 候选池条目（含 is_frozen）
+    """
+    conn = get_conn()
+    try:
+        sql = 'SELECT url, name, group_title, category, country, region, resolution, bitrate, response_time, download_speed, media_type, status, is_frozen, last_tested_ts FROM candidate_pool'
+        clauses = []
+        params: list = []
+        if channel:
+            clauses.append('name LIKE ?')
+            params.append(f'%{channel}%')
+        if only_frozen:
+            clauses.append('is_frozen = 1')
+        if clauses:
+            sql += ' WHERE ' + ' AND '.join(clauses)
+        sql += ' ORDER BY download_speed DESC, response_time ASC'
+        if limit and limit > 0:
+            sql += f' LIMIT {int(limit)}'
+        rows = conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
+    except Exception as e:
+        logger.error(f'查询候选池失败: {e}')
+        return []
+    finally:
+        conn.close()
+
+
+def get_candidate_frozen_urls() -> set[str]:
+    """返回当前被手动冻结的候选 URL 集合（供输出择优时固定保留）。"""
+    conn = get_conn()
+    try:
+        rows = conn.execute('SELECT url FROM candidate_pool WHERE is_frozen = 1').fetchall()
+        return {r['url'] for r in rows}
+    except Exception:
+        return set()
+    finally:
+        conn.close()
+
+
+def set_candidate_frozen(url: str, frozen: bool) -> bool:
+    """切换候选池中某 URL 的手动冻结状态（手动优选固定）。返回是否成功。
+
+    UPSERT：若 URL 尚未入池（如尚未测速），先插入占位行再置冻结，确保「手动冻结优选」
+    即使该源还没跑过测速也能生效；已入池则仅更新 is_frozen，保留其它字段。
+    """
+    if not url:
+        return False
+    conn = get_conn()
+    try:
+        conn.execute(
+            """
+            INSERT INTO candidate_pool (url, is_frozen, last_tested_ts)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(url) DO UPDATE SET is_frozen = excluded.is_frozen
+            """,
+            (url, 1 if frozen else 0),
+        )
+        conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f'切换候选冻结状态失败: {e}')
+        return False
+    finally:
+        conn.close()
+
+
+def clear_candidate_pool() -> int:
+    """清空候选池。返回删除行数。"""
+    conn = get_conn()
+    try:
+        conn.execute('DELETE FROM candidate_pool')
+        n = conn.total_changes
+        conn.commit()
+        return n
+    except Exception as e:
+        logger.error(f'清空候选池失败: {e}')
+        return 0
+    finally:
+        conn.close()
+
+
+def get_candidate_pool_stats() -> dict:
+    """候选池统计：总数 / 冻结数 / 成功数 / 失败数。"""
+    conn = get_conn()
+    try:
+        total = conn.execute('SELECT COUNT(*) FROM candidate_pool').fetchone()[0]
+        frozen = conn.execute('SELECT COUNT(*) FROM candidate_pool WHERE is_frozen = 1').fetchone()[0]
+        success = conn.execute("SELECT COUNT(*) FROM candidate_pool WHERE status = 'success'").fetchone()[0]
+        failed = conn.execute("SELECT COUNT(*) FROM candidate_pool WHERE status != 'success'").fetchone()[0]
+        return {'total': total, 'frozen': frozen, 'success': success, 'failed': failed}
+    except Exception:
+        return {'total': 0, 'frozen': 0, 'success': 0, 'failed': 0}
+    finally:
+        conn.close()
+
+
+# ════════════════════════════════════════════════════════════════
+# 失效统计（Feature 5）：长期失效源自动停用
+# ════════════════════════════════════════════════════════════════
+
+
+def record_source_failures(failed_urls: list[str], threshold: int, cooldown_hours: int) -> int:
+    """记录失败源并自动停用达阈值的源。返回新停用的 URL 数。
+
+    同一 URL 连续失败累加 fail_count；达到 threshold 即标记 disabled=1。
+    cooldown_hours 仅用于自动恢复（见 auto_reenable_expired_failures）。
+    """
+    if not failed_urls:
+        return 0
+    now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    newly_disabled = 0
+    conn = get_conn()
+    try:
+        for url in failed_urls:
+            if not url:
+                continue
+            row = conn.execute('SELECT fail_count, disabled FROM source_failure_stats WHERE url = ?', (url,)).fetchone()
+            if row:
+                fail_count = row['fail_count'] + 1
+                disabled = row['disabled']
+            else:
+                fail_count = 1
+                disabled = 0
+            disabled_now = disabled
+            if fail_count >= threshold and not disabled:
+                disabled_now = 1
+                newly_disabled += 1
+            conn.execute(
+                """
+                INSERT INTO source_failure_stats (url, fail_count, total_fails, first_fail_ts, last_fail_ts, disabled, last_disabled_ts)
+                VALUES (?, ?, 1, ?, ?, ?, ?)
+                ON CONFLICT(url) DO UPDATE SET
+                    fail_count = excluded.fail_count,
+                    total_fails = total_fails + 1,
+                    last_fail_ts = excluded.last_fail_ts,
+                    disabled = excluded.disabled,
+                    last_disabled_ts = CASE WHEN excluded.disabled = 1 THEN excluded.last_disabled_ts ELSE last_disabled_ts END
+                """,
+                (url, fail_count, now, now, disabled_now, now if disabled_now else None),
+            )
+        conn.commit()
+        return newly_disabled
+    except Exception as e:
+        logger.error(f'记录源失败统计失败: {e}')
+        return 0
+    finally:
+        conn.close()
+
+
+def reset_source_failure(url: str) -> None:
+    """源测速成功：重置其连续失败计数（解除停用前的计数清零，不强制解除停用）。
+
+    同时清空 first_fail_ts，使下一轮失败计数对应的「首次失败时间」准确（按连续失败窗口计）。
+    """
+    if not url:
+        return
+    conn = get_conn()
+    try:
+        conn.execute('UPDATE source_failure_stats SET fail_count = 0, first_fail_ts = NULL WHERE url = ?', (url,))
+        conn.commit()
+    except Exception:
+        pass
+    finally:
+        conn.close()
+
+
+def auto_reenable_expired_failures(cooldown_hours: int) -> int:
+    """将停用超过冷却时长的源自动恢复（防止永久误杀），返回恢复数。
+
+    cooldown_hours <= 0 视为「无冷却期」，停用即刻过期即恢复（调用方可传 0 表示立即重试）。
+    """
+    if cooldown_hours < 0:
+        return 0
+    conn = get_conn()
+    try:
+        conn.execute(
+            """
+            UPDATE source_failure_stats
+            SET disabled = 0, fail_count = 0
+            WHERE disabled = 1 AND last_disabled_ts IS NOT NULL
+              AND datetime(last_disabled_ts, ?) <= datetime('now', 'localtime')
+            """,
+            (f'+{int(cooldown_hours)} hours',),
+        )
+        n = conn.total_changes
+        conn.commit()
+        return n
+    except Exception as e:
+        logger.error(f'自动恢复失效源失败: {e}')
+        return 0
+    finally:
+        conn.close()
+
+
+def get_disabled_source_urls() -> set[str]:
+    """返回当前已停用(disabled=1)的源 URL 集合（供解析时跳过）。"""
+    conn = get_conn()
+    try:
+        rows = conn.execute('SELECT url FROM source_failure_stats WHERE disabled = 1').fetchall()
+        return {r['url'] for r in rows}
+    except Exception:
+        return set()
+    finally:
+        conn.close()
+
+
+def get_failure_stats() -> list[dict]:
+    """返回全部失效统计条目（含停用状态）。"""
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            'SELECT url, fail_count, total_fails, disabled, first_fail_ts, last_fail_ts, last_disabled_ts FROM source_failure_stats ORDER BY fail_count DESC, last_fail_ts DESC'
+        ).fetchall()
+        return [dict(r) for r in rows]
+    except Exception as e:
+        logger.error(f'查询失效统计失败: {e}')
+        return []
+    finally:
+        conn.close()
+
+
+def reenable_source(url: str) -> bool:
+    """手动恢复某停用源（解除停用并清零计数）。返回是否成功。"""
+    if not url:
+        return False
+    conn = get_conn()
+    try:
+        conn.execute('UPDATE source_failure_stats SET disabled = 0, fail_count = 0 WHERE url = ?', (url,))
+        conn.commit()
+        return conn.total_changes > 0
+    except Exception as e:
+        logger.error(f'恢复源失败: {e}')
+        return False
+    finally:
+        conn.close()
 
 
 def _run_one_time_source_migrations() -> None:

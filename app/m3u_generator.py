@@ -99,24 +99,39 @@ class M3UGenerator:
             ua_pos = self.ua_position
         return ua_pos
 
-    def generate_m3u(self, sources: list[dict], level: str = 'base') -> str:
+    def generate_m3u(self, sources: list[dict], level: str = 'base', ip_family: str = 'all') -> str:
         """生成M3U文件内容（别名，保持对外接口一致）
 
         Args:
             sources: 源数据列表
             level: 层级标识 (base/qualified)
+            ip_family: IP 族过滤 'all' | 'ipv4' | 'ipv6'
 
         Returns:
             str: M3U文件内容
         """
-        return self.generate_enhanced_m3u(sources, level)
+        return self.generate_enhanced_m3u(sources, level, ip_family)
 
-    def generate_enhanced_m3u(self, sources: list[dict], level: str = 'base') -> str:
+    @staticmethod
+    def is_ipv6_url(url: str) -> bool:
+        """判断 URL 是否指向 IPv6 地址（字面量 [..] 或 host 含冒号）。"""
+        if not url:
+            return False
+        try:
+            from urllib.parse import urlparse
+
+            host = urlparse(url).hostname or ''
+            return ':' in host
+        except Exception:
+            return False
+
+    def generate_enhanced_m3u(self, sources: list[dict], level: str = 'base', ip_family: str = 'all') -> str:
         """生成增强版M3U文件内容
 
         Args:
             sources: 源数据列表
             level: 层级标识 (base/qualified)
+            ip_family: IP 族过滤 'all' | 'ipv4' | 'ipv6'
 
         Returns:
             str: M3U文件内容
@@ -156,6 +171,15 @@ class M3UGenerator:
 
         if len(expanded_sources) != len(filtered_sources):
             self.logger.info(f'多分类展开: {len(filtered_sources)} → {len(expanded_sources)} 个源')
+
+        # ── Feature 3：IPv4/IPv6 分文件过滤 ──
+        if ip_family in ('ipv4', 'ipv6'):
+            before = len(expanded_sources)
+            if ip_family == 'ipv4':
+                expanded_sources = [s for s in expanded_sources if not self.is_ipv6_url(s.get('url', ''))]
+            else:
+                expanded_sources = [s for s in expanded_sources if self.is_ipv6_url(s.get('url', ''))]
+            self.logger.info(f'IP 族过滤[{ip_family}]: {before} → {len(expanded_sources)} 个源')
 
         # 按增强分组对源进行排序和分组
         grouped_sources = self.enhanced_group_and_sort_sources(expanded_sources, level)
@@ -197,24 +221,26 @@ class M3UGenerator:
 
         return '\n'.join(output_lines)
 
-    def generate_txt(self, sources: list[dict], level: str = 'base') -> str:
+    def generate_txt(self, sources: list[dict], level: str = 'base', ip_family: str = 'all') -> str:
         """生成TXT文件内容（别名，保持对外接口一致）
 
         Args:
             sources: 源数据列表
             level: 层级标识 (base/qualified)
+            ip_family: IP 族过滤 'all' | 'ipv4' | 'ipv6'
 
         Returns:
             str: TXT文件内容
         """
-        return self.generate_enhanced_txt(sources, level)
+        return self.generate_enhanced_txt(sources, level, ip_family)
 
-    def generate_enhanced_txt(self, sources: list[dict], level: str = 'base') -> str:
+    def generate_enhanced_txt(self, sources: list[dict], level: str = 'base', ip_family: str = 'all') -> str:
         """生成增强版TXT文件内容
 
         Args:
             sources: 源数据列表
             level: 层级标识 (base/qualified)
+            ip_family: IP 族过滤 'all' | 'ipv4' | 'ipv6'
 
         Returns:
             str: TXT文件内容
@@ -228,6 +254,13 @@ class M3UGenerator:
         else:
             filtered_sources = self.enhanced_filter_sources(sources)
             self.logger.info(f'高级层级TXT: 从 {len(sources)} 个源中筛选出 {len(filtered_sources)} 个合格源')
+
+        # ── Feature 3：IPv4/IPv6 分文件过滤 ──
+        if ip_family in ('ipv4', 'ipv6'):
+            if ip_family == 'ipv4':
+                filtered_sources = [s for s in filtered_sources if not self.is_ipv6_url(s.get('url', ''))]
+            else:
+                filtered_sources = [s for s in filtered_sources if self.is_ipv6_url(s.get('url', ''))]
 
         # 按增强分组对源进行排序和分组
         grouped_sources = self.enhanced_group_and_sort_sources(filtered_sources, level)

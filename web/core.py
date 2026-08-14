@@ -136,6 +136,30 @@ SECTION_SCHEMA: dict[str, dict[str, tuple]] = {
             'GitHub源下载方式',
             'JSON：{条目: 方式}，方式=raw(默认)/api/proxy/mirror。海外/区域受限仓库设 "proxy" 经代理拉取',
         ),
+        'per_source_ua': (
+            'textarea',
+            '{}',
+            '每源UA',
+            'JSON：{源URL: User-Agent}，在线/本地源均生效（频道级覆盖，优先级最高）',
+        ),
+        'auto_disable_enabled': (
+            'bool',
+            'True',
+            '失效自动停用',
+            '连续失败达到阈值的源自动停用，不再参与测试/发布，冷却后自动恢复重试',
+        ),
+        'auto_disable_fail_threshold': (
+            'int',
+            '5',
+            '停用阈值',
+            '同一源连续失败达到该次数后自动停用',
+        ),
+        'auto_disable_cooldown_hours': (
+            'int',
+            '24',
+            '恢复冷却(小时)',
+            '停用源经过该小时数后自动恢复并重试，防止永久误杀',
+        ),
     },
     'Network': {
         'proxy_enabled': ('bool', 'False', '启用代理', 'True/False'),
@@ -272,6 +296,12 @@ SECTION_SCHEMA: dict[str, dict[str, tuple]] = {
             '实时测试次数',
             '每个地址的总测试次数：1=测一次；2=测两次(含1次自动重试)；默认1',
         ),
+        'test_method': (
+            'str',
+            'ffprobe',
+            '测速引擎',
+            'ffprobe=默认，使用 ffprobe/ffmpeg 探测完整元数据(分辨率/编码/比特率)；aiohttp=异步下载分片算速+延迟，轻量但无分辨率元数据',
+        ),
     },
     'Output': {
         'filename': ('str', 'live.m3u', '输出文件名'),
@@ -296,6 +326,26 @@ SECTION_SCHEMA: dict[str, dict[str, tuple]] = {
             '白名单强制保留',
             '白名单源即使未过质量过滤也保留到输出',
         ),
+        'candidate_pool_enabled': (
+            'bool',
+            'True',
+            '候选池择优',
+            '启用后每次测速留存全部结果到候选池，输出时按指标选 Top N 并固定手动冻结的优选源（对标 iptv-api）',
+        ),
+        'auto_select_metric': (
+            'str',
+            'speed',
+            '择优指标',
+            'speed=快源优先；latency=延迟低优先；resolution=分辨率高优先',
+        ),
+        'separate_ipv4_ipv6': (
+            'bool',
+            'True',
+            'IPv4/IPv6 分文件',
+            '在 live.m3u(双栈共存) 之外，额外生成 live-ipv4.m3u 与 live-ipv6.m3u 单栈文件',
+        ),
+        'ipv4_filename': ('str', 'live-ipv4.m3u', 'IPv4 文件名'),
+        'ipv6_filename': ('str', 'live-ipv6.m3u', 'IPv6 文件名'),
     },
     'Logging': {
         'level': ('str', 'INFO', '日志级别'),

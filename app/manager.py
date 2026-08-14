@@ -771,6 +771,11 @@ class EnhancedLiveSourceManager:
             self.logger_info('=== 步骤3: 测试流媒体源 ===')
             test_results = self.stream_tester.test_all_sources(sources)
 
+            # 候选池留存（Feature 2）：全部测速结果写入候选池，供闭环择优 + 手动冻结
+            self._persist_candidate_pool(test_results)
+            # 失效统计（Feature 5）：真实失败累加计数，达阈值自动停用
+            self.source_manager.record_test_outcomes(test_results)
+
             # 步骤4: 分层筛选
             self.logger_info('=== 步骤4: 分层筛选 ===')
             valid_sources, base_sources, qualified_sources = self.hierarchical_filtering(test_results)
@@ -800,6 +805,11 @@ class EnhancedLiveSourceManager:
                 live_sources = base_sources
                 live_label = '基础'
 
+            # ── Feature 2：候选池择优闭环 ──
+            # 启用时按配置指标从候选池选 Top N / 频道，并固定手动冻结的优选源
+            if live_sources and self.config.get_output_params().get('candidate_pool_enabled', True):
+                live_sources = self._apply_candidate_selection(live_sources)
+
             # 生成基础播放列表（第二层筛选结果 / 或全部有效源）
             if live_sources:
                 success = self._generate_enhanced_playlist(generator, live_sources, '', live_label)
@@ -807,6 +817,26 @@ class EnhancedLiveSourceManager:
                     self.logger_error('生成基础播放列表文件失败')
             else:
                 self.logger_warning('没有基础源，跳过基础播放列表文件生成')
+
+            # ── Feature 3：IPv4/IPv6 分文件发布 ──
+            # live.m3u 已含双栈；另生成 live-ipv4.m3u / live-ipv6.m3u 单栈文件（默认开启）
+            separate = self.config.get_output_params().get('separate_ipv4_ipv6', True)
+            if separate and live_sources:
+                for fam in ('ipv4', 'ipv6'):
+                    fam_sources = [
+                        s for s in live_sources if (fam == 'ipv6') == generator.is_ipv6_url(s.get('url', ''))
+                    ]
+                    if not fam_sources:
+                        self.logger_info(f'无 {fam.upper()} 源，跳过生成对应单栈文件')
+                        continue
+                    fam_name = self.config.get_output_params().get(f'ipv{fam}_filename', f'live-{fam}.m3u')
+                    ok = self._generate_enhanced_playlist(
+                        generator, fam_sources, '', fam.upper(), base_filename_override=fam_name, ip_family=fam
+                    )
+                    if ok:
+                        self.logger_info(f'✓ 已生成单栈文件 {fam_name}（{len(fam_sources)} 个源）')
+                    else:
+                        self.logger_error(f'生成单栈文件 {fam_name} 失败')
 
             # 生成高级播放列表（第三层筛选结果）
             if qualified_sources:
@@ -843,7 +873,13 @@ class EnhancedLiveSourceManager:
             return False
 
     def _generate_enhanced_playlist(
-        self, generator: M3UGenerator, sources: list[dict], prefix: str, level: str
+        self,
+        generator: M3UGenerator,
+        sources: list[dict],
+        prefix: str,
+        level: str,
+        base_filename_override: str | None = None,
+        ip_family: str = 'all',
     ) -> bool:
         """生成增强版播放列表文件 - 增强错误处理版
 
@@ -852,6 +888,8 @@ class EnhancedLiveSourceManager:
             sources: 源数据列表
             prefix: 文件名前缀
             level: 层级描述
+            base_filename_override: 覆盖基础文件名（如 live-ipv4）；含 .m3u 扩展名
+            ip_family: IP 族过滤 'all' | 'ipv4' | 'ipv6'（Feature 3）
 
         Returns:
             bool: 生成是否成功
@@ -859,7 +897,7 @@ class EnhancedLiveSourceManager:
         try:
             # 生成M3U文件内容 - 添加异常捕获
             try:
-                m3u_content = generator.generate_m3u(sources)
+                m3u_content = generator.generate_m3u(sources, level, ip_family=ip_family)
             except Exception as e:
                 self.logger_error(f'生成M3U内容失败: {e}')
                 # 生成一个简单的备份M3U文件
@@ -867,14 +905,17 @@ class EnhancedLiveSourceManager:
 
             # 生成TXT文件内容 - 添加异常捕获
             try:
-                txt_content = generator.generate_txt(sources)
+                txt_content = generator.generate_txt(sources, level, ip_family=ip_family)
             except Exception as e:
                 self.logger_error(f'生成TXT内容失败: {e}')
                 # 生成一个简单的备份TXT文件
                 txt_content = self._create_backup_txt_content(sources, level)
 
             # 获取基础文件名
-            base_filename = self.config.get_output_params()['filename'].replace('.m3u', '')
+            if base_filename_override:
+                base_filename = base_filename_override.replace('.m3u', '')
+            else:
+                base_filename = self.config.get_output_params()['filename'].replace('.m3u', '')
 
             # 直接写入到输出目录
             output_dir = self.config.get_output_params()['output_dir']
@@ -918,6 +959,111 @@ class EnhancedLiveSourceManager:
         except Exception as e:
             self.logger_error(f'生成{level}播放列表文件时发生错误: {e}')
             return False
+
+    # ────────────────────────────────────────────────
+    # Feature 2：候选池留存 + 择优闭环
+    # ────────────────────────────────────────────────
+
+    def _persist_candidate_pool(self, test_results: list[dict]) -> None:
+        """将测速结果批量写入候选池（按 url 幂等更新）。"""
+        if not test_results:
+            return
+        try:
+            from web import models
+
+            entries = []
+            for r in test_results:
+                url = r.get('url')
+                if not url:
+                    continue
+                entries.append(
+                    {
+                        'url': url,
+                        'name': r.get('name', ''),
+                        'group': r.get('group') or r.get('group_title', ''),
+                        'category': r.get('category', ''),
+                        'country': r.get('country', ''),
+                        'region': r.get('region', ''),
+                        'resolution': r.get('resolution', ''),
+                        'bitrate': r.get('bitrate', 0),
+                        'response_time': r.get('response_time', 0),
+                        'download_speed': r.get('download_speed', 0),
+                        'media_type': r.get('media_type', 'video'),
+                        'status': r.get('status', ''),
+                    }
+                )
+            n = models.save_candidate_pool(entries)
+            self.logger_info(f'✓ 候选池已留存 {n} 条测速结果')
+        except Exception as e:
+            self.logger_warning(f'候选池留存失败(忽略): {e}')
+
+    def _apply_candidate_selection(self, sources: list[dict]) -> list[dict]:
+        """候选池择优（Feature 2 闭环核心）。
+
+        按频道名分组，每组：
+        - 固定保留手动冻结(is_frozen=1)的优选源（不受 Top N 名额限制）；
+        - 其余源按配置指标（speed/latency/resolution）排序选 Top N。
+        未启用候选池时原样返回（调用方已判断开关）。
+        """
+        if not sources:
+            return sources
+        try:
+            from web import models
+
+            frozen_urls = models.get_candidate_frozen_urls()
+            metric = (self.config.get_output_params().get('auto_select_metric') or 'speed').lower()
+            max_n = int(self.config.get_output_params().get('max_sources_per_channel', 5) or 5)
+        except Exception:
+            return sources
+
+        groups: dict[str, list[dict]] = {}
+        for s in sources:
+            groups.setdefault(s.get('name', '') or 'unknown', []).append(s)
+
+        selected: list[dict] = []
+        for channel, group in groups.items():
+            pinned = [s for s in group if s.get('url') in frozen_urls]
+            rest = [s for s in group if s.get('url') not in frozen_urls]
+            if metric == 'latency':
+                rest.sort(key=lambda x: x.get('response_time', 9999) or 9999)
+            elif metric == 'resolution':
+                rest.sort(key=lambda x: -self._parse_resolution_height(x.get('resolution', '') or ''))
+            else:  # speed
+                rest.sort(key=lambda x: -(x.get('download_speed', 0) or 0))
+            keep = max(0, max_n - len(pinned))
+            selected.extend(pinned)
+            selected.extend(rest[:keep])
+            if pinned:
+                self.logger_debug(
+                    f'频道[{channel}]：固定保留 {len(pinned)} 个冻结优选，再选 {len(rest[:keep])}/{len(rest)} 个'
+                )
+
+        self.logger_info(
+            f'候选池择优：{len(sources)} → {len(selected)} 个源'
+            + (
+                f'（指标={metric}, TopN={max_n}, 冻结={len(frozen_urls)}）'
+                if frozen_urls
+                else f'（指标={metric}, TopN={max_n}）'
+            )
+        )
+        return selected
+
+    @staticmethod
+    def _parse_resolution_height(resolution: str) -> int:
+        """从分辨率字符串解析高度（如 1920x1080 -> 1080, 720p -> 720）。"""
+        if not resolution:
+            return 0
+        if 'x' in resolution:
+            try:
+                return int(resolution.split('x')[1])
+            except (ValueError, IndexError):
+                return 0
+        if resolution.endswith('p'):
+            try:
+                return int(resolution[:-1])
+            except ValueError:
+                return 0
+        return 0
 
     def _create_backup_m3u_content(self, sources: list[dict], level: str) -> str:
         """创建备份M3U文件内容

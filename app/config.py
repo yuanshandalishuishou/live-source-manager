@@ -66,6 +66,11 @@ class Config:
         'Sources.github_source_settings': '{}',
         'Sources.source_file_ua_settings': '{}',
         'Sources.channel_ua_overrides': '{}',
+        'Sources.per_source_ua': '{}',  # 每源 UA：JSON {源URL: User-Agent}，在线源与本地源均生效（频道级覆盖，优先级最高）
+        # 失效自动停用（长期失效源）：连续失败达阈值即停用，冷却后自动重试
+        'Sources.auto_disable_enabled': 'True',  # 启用失效自动停用
+        'Sources.auto_disable_fail_threshold': '5',  # 连续失败达到该次数后停用该源
+        'Sources.auto_disable_cooldown_hours': '24',  # 停用后经过该小时数自动恢复重试（防永久误杀）
         # [Network]
         'Network.proxy_enabled': 'False',
         'Network.proxy_type': 'socks5',
@@ -114,6 +119,7 @@ class Config:
         'Testing.global_whitelist': '',  # 全局白名单：URL/host，逗号或换行分隔（豁免黑名单）
         'Testing.output_sort_by': 'speed',  # 输出排序方式：speed(默认,快源在前)/name/resolution
         'Testing.max_test_attempts': '1',  # 实时测试次数(总): 1=每个地址测一次; 2=测两次(含1次重试); 默认1
+        'Testing.test_method': 'ffprobe',  # 测速引擎：ffprobe(默认,完整元数据) / aiohttp(异步下载分片算速+延迟,无分辨率元数据)
         # [Output]
         'Output.filename': 'live.m3u',
         'Output.group_by': 'category',
@@ -122,6 +128,13 @@ class Config:
         'Output.output_all_valid': 'False',  # 开启后 live.m3u 直接用全部有效源(跳过分辨率聚合与质量过滤)
         'Output.enable_filter': 'True',  # 分层过滤主开关：True=正常生成 base/qualified(分辨率聚合+质量过滤)；False=base/qualified 均直接用全量有效源(等效关闭过滤)
         'Output.whitelist_force_keep': 'False',  # 白名单源即使未通过质量过滤也强制保留到输出
+        # 候选池择优闭环（对标 iptv-api）：留存全部测速结果 + 自动按指标选 Top N + 手动冻结优选
+        'Output.candidate_pool_enabled': 'True',  # 启用候选池：每次测速后留存结果，输出时按指标选 Top N 并固定手动冻结源
+        'Output.auto_select_metric': 'speed',  # 候选池自动择优指标：speed(默认,快源优先)/latency(延迟低优先)/resolution(分辨率高优先)
+        # IPv4/IPv6 分文件发布（live.m3u 双栈共存；另生成 ipv4/ipv6 单栈文件）
+        'Output.separate_ipv4_ipv6': 'True',  # 生成 live-ipv4.m3u / live-ipv6.m3u 单栈文件
+        'Output.ipv4_filename': 'live-ipv4.m3u',  # IPv4 单栈输出文件名
+        'Output.ipv6_filename': 'live-ipv6.m3u',  # IPv6 单栈输出文件名
         # [Logging]
         'Logging.level': 'INFO',
         'Logging.file': './log/app.log',
@@ -177,8 +190,22 @@ class Config:
         """从 SQLite 读取全量配置"""
         return self._get_models().get_all_config()
 
+    # ── 环境变量覆盖 ──────────────────────────────
+    # 借鉴 iptv-api 的环境变量覆盖范式：任何配置键均可被环境变量 LSM_<SECTION>_<KEY> 覆盖。
+    # 例如 Testing.test_method 可被 LSM_TESTING_TEST_METHOD=aiohttp 覆盖。
+    # 优先级：环境变量 > SQLite(用户/默认值) > 代码默认值。
+    @staticmethod
+    def _env_override(section: str, key: str) -> str | None:
+        env_name = 'LSM_' + '_'.join(p.upper() for p in f'{section}.{key}'.split('.'))
+        val = os.environ.get(env_name)
+        return val if val is not None else None
+
     def get(self, section: str, key: str, default: Any = None) -> str | None:
-        """从 SQLite 读取单个配置值"""
+        """从 SQLite 读取单个配置值（环境变量 LSM_<SECTION>_<KEY> 可覆盖）"""
+        # 环境变量覆盖优先（借鉴 iptv-api）
+        env_val = self._env_override(section, key)
+        if env_val is not None:
+            return env_val
         try:
             val = self._get_models().get_app_config(f'{section}.{key}')
             if val is not None:
@@ -352,6 +379,7 @@ class Config:
                 self._default('Testing', 'global_whitelist'),
             ),
             'output_sort_by': self.get('Testing', 'output_sort_by', self._default('Testing', 'output_sort_by')),
+            'test_method': self.get('Testing', 'test_method', self._default('Testing', 'test_method')),
             'max_workers': 50,
         }
 
@@ -399,6 +427,19 @@ class Config:
                 'whitelist_force_keep',
                 self._default_bool('Output', 'whitelist_force_keep'),
             ),
+            # 候选池择优闭环
+            'candidate_pool_enabled': self.getboolean(
+                'Output', 'candidate_pool_enabled', self._default_bool('Output', 'candidate_pool_enabled')
+            ),
+            'auto_select_metric': self.get(
+                'Output', 'auto_select_metric', self._default('Output', 'auto_select_metric')
+            ),
+            # IPv4/IPv6 分文件发布
+            'separate_ipv4_ipv6': self.getboolean(
+                'Output', 'separate_ipv4_ipv6', self._default_bool('Output', 'separate_ipv4_ipv6')
+            ),
+            'ipv4_filename': self.get('Output', 'ipv4_filename', self._default('Output', 'ipv4_filename')),
+            'ipv6_filename': self.get('Output', 'ipv6_filename', self._default('Output', 'ipv6_filename')),
             'output_dir': output_dir,
         }
 
@@ -539,9 +580,35 @@ class Config:
             except (json.JSONDecodeError, ValueError, TypeError):
                 logging.warning('Sources.github_source_settings 解析失败，使用空配置')
 
+        # 每源 UA：JSON {URL: User-Agent}，在线/本地源均生效（频道级覆盖，优先级最高）
+        per_source_ua_raw = self.get('Sources', 'per_source_ua', '{}')
+        per_source_ua: dict[str, str] = {}
+        if per_source_ua_raw:
+            try:
+                parsed = json.loads(per_source_ua_raw)
+                if isinstance(parsed, dict):
+                    per_source_ua = {str(k): str(v) for k, v in parsed.items()}
+            except (json.JSONDecodeError, ValueError, TypeError):
+                logging.warning('Sources.per_source_ua 解析失败，使用空配置')
+
+        # 失效自动停用
+        auto_disable_enabled = self.getboolean(
+            'Sources', 'auto_disable_enabled', self._default_bool('Sources', 'auto_disable_enabled')
+        )
+        auto_disable_fail_threshold = self.getint(
+            'Sources', 'auto_disable_fail_threshold', self._default_int('Sources', 'auto_disable_fail_threshold')
+        )
+        auto_disable_cooldown_hours = self.getint(
+            'Sources', 'auto_disable_cooldown_hours', self._default_int('Sources', 'auto_disable_cooldown_hours')
+        )
+
         return {
             'local_dirs': local_dirs,
             'online_urls': online_urls,
             'github_sources': github_sources,
             'github_source_settings': github_source_settings,
+            'per_source_ua': per_source_ua,
+            'auto_disable_enabled': auto_disable_enabled,
+            'auto_disable_fail_threshold': auto_disable_fail_threshold,
+            'auto_disable_cooldown_hours': auto_disable_cooldown_hours,
         }

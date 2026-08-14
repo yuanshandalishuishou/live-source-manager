@@ -10,6 +10,7 @@
 - 质量合格性评估（延迟 / 分辨率 / 比特率 / 速度）
 """
 
+import asyncio
 import concurrent.futures
 import contextlib
 import json
@@ -197,6 +198,21 @@ class StreamTester:
         self.logger = logger
         self.testing_params = config.get_testing_params()
         self.filter_params = config.get_filter_params()
+
+        # ---- 测速引擎开关（Feature 1，对标 iptv-api） ----
+        # ffprobe(默认)：ffprobe/ffmpeg 探测完整元数据；aiohttp：异步下载分片算速+延迟（轻量、无分辨率）
+        # aiohttp 未安装时自动回退 ffprobe，保证向后兼容。
+        _method = (self.testing_params.get('test_method') or 'ffprobe').lower()
+        if _method not in ('ffprobe', 'aiohttp'):
+            self.logger.warning(f'⚠ 未知 test_method="{_method}"，回退为 ffprobe')
+            _method = 'ffprobe'
+        if _method == 'aiohttp' and aiohttp is None:
+            self.logger.warning('⚠ test_method=aiohttp 但 aiohttp 未安装，回退为 ffprobe')
+            _method = 'ffprobe'
+        self.test_method = _method
+        # aiohttp 异步探针并发限流（独立于 ffprobe Semaphore）
+        _aiohttp_max = int(self.testing_params.get('concurrent_threads', 50)) or 50
+        self._aiohttp_semaphore = threading.Semaphore(min(_aiohttp_max, 200))
 
         # 实例级缓存（替代模块级全局变量）
         self._url_cache = {}
@@ -697,8 +713,11 @@ class StreamTester:
 
                 # 成功则跳出重试循环
                 if test_status == 'success':
-                    # 速度测试(如果启用)
-                    if self.testing_params['enable_speed_test']:
+                    # 速度测试：aiohttp 模式探针已在元数据内算出 download_speed，无需重复；
+                    # ffprobe 路径则按需用 requests 下载分片测速（受 enable_speed_test 控制）
+                    if self.test_method == 'aiohttp':
+                        download_speed = metadata.get('download_speed', 0.0)
+                    elif self.testing_params['enable_speed_test']:
                         download_speed = self.test_download_speed(url, user_agent)
                         metadata['download_speed'] = download_speed
                     metadata['media_type'] = self._determine_media_type(metadata)
@@ -782,7 +801,28 @@ class StreamTester:
         增强（纪码追加）：
         - 细化超时层级：区分 connect / read / probe
         - finally 资源清理：确保 socket 和文件句柄关闭
+        - Feature 1：test_method=aiohttp 时走异步下载分片探针算速+延迟
         """
+        # ── Feature 1：aiohttp 异步测速分支 ──
+        if self.test_method == 'aiohttp':
+            with self._aiohttp_semaphore:
+                if self._abort.is_set():
+                    return 'interrupted', {'error_reason': 'aborted'}
+                try:
+                    status, metadata = asyncio.run(
+                        self._aiohttp_probe(
+                            url,
+                            user_agent,
+                            connect_timeout or self.connect_timeout,
+                            read_timeout or self.read_timeout,
+                        )
+                    )
+                except Exception as e:  # asyncio.run 内部未捕获的异常兜底
+                    self.logger.debug(f'aiohttp 探针异常 {url}: {e!r}')
+                    return 'failed', {'error_reason': f'aiohttp_error: {e!s}'}
+            # aiohttp 探针已将 download_speed/response_time 写入 metadata，直接返回
+            return status, metadata
+
         try:
             # ---- 纪码增强：使用细化超时 ----
             actual_probe_timeout = probe_timeout or self.testing_params['timeout']
@@ -950,6 +990,107 @@ class StreamTester:
             # 其他异常
             self.logger.debug(f'FFprobe测试异常 {url}: {e}')
             return 'failed', {'error_reason': f'exception: {e!s}'}
+
+    # ============================================================
+    # Feature 1：aiohttp 异步下载分片探针（算速 + 延迟）
+    # ============================================================
+
+    async def _aiohttp_probe(
+        self, url: str, user_agent: str | None, connect_timeout: int, read_timeout: int
+    ) -> tuple[str, dict]:
+        """用 aiohttp 异步下载分片，计算首字节延迟与下载速度。
+
+        与 ffprobe 路径互补：不依赖外部二进制、不需要探测完整元数据，
+        适合仅需「可达性 + 速度 + 延迟」的轻量测速场景（对标 iptv-api 的
+        aiohttp 带宽采样）。无法获取分辨率/编码/比特率（置空，由质量过滤按
+        延迟/速度判定）。
+
+        Args:
+            url: 流媒体 URL
+            user_agent: 可选的 User-Agent
+            connect_timeout: 连接超时（秒）
+            read_timeout: 读取超时（秒）
+
+        Returns:
+            Tuple[str, Dict]: (测试状态, 元数据字典)
+        """
+        if aiohttp is None:
+            return 'failed', {'error_reason': 'aiohttp_not_installed'}
+
+        # 地址族：启用 IPv6 时用 AF_UNSPEC（同时尝试 v4/v6），否则仅 v4
+        family = socket.AF_UNSPEC if self.check_ipv6_support() else socket.AF_INET
+        # 总超时 = 读取超时 + 测速窗口 + 余量，避免单源长时间占用
+        sample_duration = max(1, int(self.testing_params.get('speed_test_duration', 3)))
+        total_to = max(read_timeout, 1) + sample_duration + 5
+        timeout = aiohttp.ClientTimeout(
+            total=total_to, connect=connect_timeout, sock_connect=connect_timeout, sock_read=max(read_timeout, 1)
+        )
+        headers = {'User-Agent': user_agent} if user_agent else {}
+
+        metadata: dict = {
+            'resolution': '',
+            'bitrate': 0,
+            'is_hd': False,
+            'is_4k': False,
+            'video_codec': '',
+            'audio_codec': '',
+            'has_video_stream': False,
+            'stream_count': 0,
+            'video_stream_count': 0,
+            'audio_stream_count': 0,
+            'media_type': 'unknown',
+            'download_speed': 0.0,
+            'response_time': 0,
+        }
+
+        connector = None
+        try:
+            connector = aiohttp.TCPConnector(family=family, ssl=False, limit=0, limit_per_host=0)
+            async with aiohttp.ClientSession(connector=connector, timeout=timeout, headers=headers) as session:
+                start = time.time()
+                try:
+                    async with session.get(url) as resp:
+                        if resp.status != 200:
+                            return 'failed', {'error_reason': f'http_status_{resp.status}'}
+                        # 媒体类型启发式（aiohttp 无法解析容器，按扩展名/类型粗判）
+                        ctype = (resp.headers.get('Content-Type') or '').lower()
+                        if '.m3u' in url.lower() or 'mpegurl' in ctype or 'm3u8' in url.lower():
+                            metadata['media_type'] = 'video'
+                            metadata['has_video_stream'] = True
+                        elif 'audio' in ctype:
+                            metadata['media_type'] = 'audio'
+
+                        # 在 sample_duration 窗口内累计下载字节，计算速度
+                        total_bytes = 0
+                        first_byte_t = None
+                        async for chunk in resp.content.iter_chunked(64 * 1024):
+                            if self._abort.is_set():
+                                return 'interrupted', {'error_reason': 'aborted'}
+                            if first_byte_t is None:
+                                first_byte_t = time.time()
+                            total_bytes += len(chunk)
+                            if time.time() - start >= sample_duration:
+                                break
+                except Exception as e:
+                    if self._abort.is_set():
+                        return 'interrupted', {'error_reason': 'aborted'}
+                    return 'failed', {'error_reason': _classify_stream_error(str(e))}
+        except Exception as e:
+            if self._abort.is_set():
+                return 'interrupted', {'error_reason': 'aborted'}
+            return 'failed', {'error_reason': _classify_stream_error(str(e))}
+        finally:
+            if connector is not None:
+                with contextlib.suppress(Exception):
+                    await connector.close()
+
+        elapsed = time.time() - start
+        # 首字节延迟（毫秒）；若未采到首字节则用整体耗时兜底
+        response_time = round((first_byte_t - start) * 1000) if first_byte_t else round(elapsed * 1000)
+        download_speed = (total_bytes / 1024 / elapsed) if elapsed > 0 else 0.0
+        metadata['download_speed'] = round(download_speed, 2)
+        metadata['response_time'] = response_time
+        return 'success', metadata
 
     # ============================================================
     # 纪码增强：看门狗定时器

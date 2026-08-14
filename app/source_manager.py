@@ -70,6 +70,24 @@ class SourceManager:
         self.github_config = config.get_github_config()
         self.user_agents = config.get_user_agents()
         self.ua_enabled = config.is_ua_enabled()
+        # 每源 UA（Feature 5）：JSON {URL: UA}，与 channel_ua_overrides 合并为频道级覆盖
+        _sources_cfg = config.get_sources()
+        self.per_source_ua = _sources_cfg.get('per_source_ua', {}) or {}
+        self.auto_disable_enabled = _sources_cfg.get('auto_disable_enabled', True)
+        self.auto_disable_fail_threshold = _sources_cfg.get('auto_disable_fail_threshold', 5) or 5
+        self.auto_disable_cooldown_hours = _sources_cfg.get('auto_disable_cooldown_hours', 24) or 24
+        # 失效自动停用：加载已停用 URL 集合（解析时跳过），并先执行冷却恢复
+        self.disabled_urls: set[str] = set()
+        if self.auto_disable_enabled:
+            try:
+                from web import models
+
+                models.auto_reenable_expired_failures(self.auto_disable_cooldown_hours)
+                self.disabled_urls = models.get_disabled_source_urls()
+                if self.disabled_urls:
+                    self.logger.info(f'已加载 {len(self.disabled_urls)} 个失效停用源（本批跳过测试/发布）')
+            except Exception as e:
+                self.logger.warning(f'加载失效停用列表失败(忽略): {e}')
         # 解析阶段被「窄门禁」排除的 URL 汇总（可见化，杜绝静默丢弃）
         self.last_parse_exclusion_summary: dict = {
             'total': 0,
@@ -134,6 +152,48 @@ class SourceManager:
         # M4: 当前调用create_session的地方改为使用get_session
         # 保留此方法供直接调用兼容
         return await self.get_session(use_proxy)
+
+    def refresh_disabled(self) -> None:
+        """刷新失效停用列表（Feature 5）：先自动恢复冷却到期的源，再重载停用集合。"""
+        if not self.auto_disable_enabled:
+            self.disabled_urls = set()
+            return
+        try:
+            from web import models
+
+            models.auto_reenable_expired_failures(self.auto_disable_cooldown_hours)
+            self.disabled_urls = models.get_disabled_source_urls()
+        except Exception as e:
+            self.logger.warning(f'刷新失效停用列表失败(忽略): {e}')
+
+    def record_test_outcomes(self, test_results: list[dict]) -> None:
+        """根据测速结果更新失效统计（Feature 5）。
+
+        - 真实失败(failed/timeout/error/interrupted)累加连续失败计数，达阈值则停用；
+        - 成功源重置连续失败计数（但不强制解除手动/冷却停用）；
+        - 刷新内存中的停用集合，供后续流程跳过。
+        """
+        if not self.auto_disable_enabled:
+            return
+        try:
+            from web import models
+
+            # 真实失败才累计停用计数；'interrupted'（用户中止运行）不计入，避免误停健康源
+            genuine_fail = [r['url'] for r in test_results if r.get('status') in ('failed', 'timeout', 'error')]
+            success_urls = [r['url'] for r in test_results if r.get('status') == 'success']
+            if genuine_fail:
+                models.record_source_failures(
+                    genuine_fail, self.auto_disable_fail_threshold, self.auto_disable_cooldown_hours
+                )
+            for u in success_urls:
+                models.reset_source_failure(u)
+            self.disabled_urls = models.get_disabled_source_urls()
+            if genuine_fail:
+                self.logger.info(
+                    f'失效统计：本批真实失败 {len(genuine_fail)} 个，当前停用源共 {len(self.disabled_urls)} 个'
+                )
+        except Exception as e:
+            self.logger.warning(f'记录失效统计失败(忽略): {e}')
 
     async def get_session(self, use_proxy: bool = False) -> aiohttp.ClientSession:
         """M4: 获取或创建共享的aiohttp会话(复用session代替每次创建销毁)
@@ -664,6 +724,18 @@ class SourceManager:
         file_ua_settings = self.config.get_source_file_ua_settings()
         channel_ua_overrides = self.config.get_channel_ua_overrides()
 
+        # 每源 UA（Feature 5）：归一化为 {url: {ua_value, ua_position}} 后与「频道级覆盖」合并。
+        # per_source_ua 在配置中存为 {url: UA字符串}，必须转成与 channel_ua_overrides 一致的结构，
+        # 否则下方 override.get('ua_value') 会对纯字符串调用 .get 而 AttributeError 崩溃。
+        # 合并置于最后，URL 冲突时 per_source_ua 优先级最高（每源 UA 覆盖频道级 UA）。
+        if self.per_source_ua:
+            normalized = {
+                str(u): {'ua_value': str(ua), 'ua_position': 'extinf'} for u, ua in self.per_source_ua.items() if ua
+            }
+            merged = dict(channel_ua_overrides)
+            merged.update(normalized)
+            channel_ua_overrides = merged
+
         if not file_ua_settings and not channel_ua_overrides:
             return sources
 
@@ -888,6 +960,12 @@ class SourceManager:
                         if len(url_parts) > 1 and 'User-Agent=' in url_parts[1]:
                             url_user_agent = url_parts[1].replace('User-Agent=', '')
 
+                        # ── Feature 5：失效自动停用的源跳过解析（不再进入测试/发布）──
+                        if stream_url in self.disabled_urls:
+                            self.logger.info(f'跳过失效停用源(不再发布): {stream_url}')
+                            i += 1
+                            continue
+
                         # 提取频道信息
                         channel_info = self.channel_rules.extract_channel_info(name, source_id=None)
 
@@ -940,6 +1018,12 @@ class SourceManager:
 
                     if len(url_parts) > 1 and 'User-Agent=' in url_parts[1]:
                         url_user_agent = url_parts[1].replace('User-Agent=', '')
+
+                    # ── Feature 5：失效自动停用的源跳过解析 ──
+                    if stream_url in self.disabled_urls:
+                        self.logger.info(f'跳过失效停用源(不再发布): {stream_url}')
+                        i += 1
+                        continue
 
                     # 构建源数据
                     source_data = {

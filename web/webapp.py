@@ -32,6 +32,7 @@ from web.core import (
     logger,
 )
 from web.routes.auth import router as auth_router
+from web.routes.candidates import router as candidates_router
 from web.routes.config_api import router as config_router
 from web.routes.dashboard import router as dashboard_router
 from web.routes.epg import router as epg_router
@@ -50,6 +51,7 @@ app.include_router(config_router)
 app.include_router(rules_router)
 app.include_router(system_router)
 app.include_router(epg_router)
+app.include_router(candidates_router)
 
 
 # ══════════════════════════════════════════════════

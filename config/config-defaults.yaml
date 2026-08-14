@@ -57,28 +57,25 @@ Output:
   include_failed: 'False'
   max_sources_per_channel: '5'
   output_all_valid: 'False'
+  separate_ipv4_ipv6: 'True'
+  ipv4_filename: live-ipv4.m3u
+  ipv6_filename: live-ipv6.m3u
+  candidate_pool_enabled: 'True'
+  auto_select_metric: speed
   whitelist_force_keep: 'False'
 Sources:
   channel_ua_overrides: '{}'
   github_source_settings: '{}'
   github_sources: 'joevess/IPTV/main
-
     suxuang/myIPTV/main
-
     YueChan/Live
-
     YanG-1989/m3u
-
     qwerttvv/Beijing-IPTV
-
     joevess/IPTV
-
     cymz6/AutoIPTV-Hotel
-
     Rivens7/Livelist'
   local_dirs: ./config/sources
   online_urls: 'https://live.zbds.org/tv/iptv4.m3u
-
     https://myernestlu.github.io/zby.txt
 
     https://raw.githubusercontent.com/Rivens7/Livelist/main/CCTV.m3u
@@ -117,6 +114,10 @@ Sources:
 
     https://raw.githubusercontent.com/iptv-org/iptv/master/streams/hk.m3u'
   source_file_ua_settings: '{}'
+  per_source_ua: '{}'
+  auto_disable_enabled: 'True'
+  auto_disable_fail_threshold: '5'
+  auto_disable_cooldown_hours: '24'
 Testing:
   ad_keywords: no_signal,/ad/,advertisement,测试卡,无信号,test_pattern,colorbar,broadcast_test,signal_lost
   ad_max_duration: '90'
@@ -139,6 +140,7 @@ Testing:
   max_test_attempts: '1'
   output_sort_by: speed
   speed_test_duration: '3'
+  test_method: ffprobe
   timeout: '10'
 UserAgents:
   ua_enabled: 'False'
