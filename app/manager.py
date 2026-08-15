@@ -872,6 +872,104 @@ class EnhancedLiveSourceManager:
             self.logger_error(traceback.format_exc())
             return False
 
+    def generate_from_web_test(self, test_results: list[dict]) -> dict:
+        """基于 Web 实时测试结果生成播放列表（修复「测试后生成的 live.m3u 未反映测试结果」断链）。
+
+        test_results 为 latest_test_sources.json 中的 sources 列表，每条含完整频道元数据
+        （name/url/group_title/tvg-* 等）与真实测试状态（status=='success' 视为有效）。
+
+        复用分层筛选 + 生成管线（候选池留存 / 失效统计 / 分辨率聚合 / 质量过滤 / 候选举优 /
+        EPG 注入 / 单栈分文件），使最终 live.m3u 真正由本次测速通过的有效源构成。
+
+        Returns:
+            dict: {'success': bool, 'valid': int, 'base': int, 'qualified': int, 'files': list, 'reason': str}
+        """
+        if not self.source_manager or not self.stream_tester:
+            self.logger_error('必要的组件未正确初始化')
+            return {'success': False, 'valid': 0, 'base': 0, 'qualified': 0, 'files': [], 'reason': '组件未初始化'}
+        if not test_results:
+            return {'success': False, 'valid': 0, 'base': 0, 'qualified': 0, 'files': [], 'reason': '无测试结果'}
+
+        try:
+            self.logger_info('=== 基于 Web 测试结果生成播放列表 ===')
+
+            # 候选池留存（Feature 2）+ 失效统计（Feature 5）：让系统学习本次 Web 测试
+            self._persist_candidate_pool(test_results)
+            self.source_manager.record_test_outcomes(test_results)
+
+            # 步骤4: 分层筛选（status=='success' 视为有效源）
+            valid_sources, base_sources, qualified_sources = self.hierarchical_filtering(test_results)
+
+            # enable_filter 主开关：关闭时 base/qualified 均等于全量有效源
+            enable_filter = self.config.get_output_params().get('enable_filter', True)
+            if not enable_filter:
+                self.logger_info('⚠ enable_filter 关闭：base/qualified 均使用全量有效源')
+                base_sources = valid_sources
+                qualified_sources = valid_sources
+
+            # 步骤5: 生成不同层次的播放列表
+            generator = M3UGenerator(self.config, self.logger)
+
+            output_all_valid = self.config.get_output_params().get('output_all_valid', False)
+            if output_all_valid:
+                self.logger_info('⚠ 已开启「输出全部有效源」：live.m3u 将包含全部有效源')
+                live_sources = valid_sources
+                live_label = '全部有效'
+            else:
+                live_sources = base_sources
+                live_label = '基础'
+
+            if live_sources and self.config.get_output_params().get('candidate_pool_enabled', True):
+                live_sources = self._apply_candidate_selection(live_sources)
+
+            files: list[str] = []
+            if live_sources:
+                ok = self._generate_enhanced_playlist(generator, live_sources, '', live_label)
+                if ok:
+                    files.append(self.config.get_output_params()['filename'])
+                else:
+                    self.logger_error('生成基础播放列表文件失败')
+            else:
+                self.logger_warning('没有基础源，跳过基础播放列表文件生成')
+
+            # 单栈分文件发布
+            separate = self.config.get_output_params().get('separate_ipv4_ipv6', True)
+            if separate and live_sources:
+                for fam in ('ipv4', 'ipv6'):
+                    fam_sources = [
+                        s for s in live_sources if (fam == 'ipv6') == generator.is_ipv6_url(s.get('url', ''))
+                    ]
+                    if not fam_sources:
+                        continue
+                    fam_name = self.config.get_output_params().get(f'ipv{fam}_filename', f'live-{fam}.m3u')
+                    ok = self._generate_enhanced_playlist(
+                        generator, fam_sources, '', fam.upper(), base_filename_override=fam_name, ip_family=fam
+                    )
+                    if ok:
+                        files.append(fam_name)
+
+            if qualified_sources:
+                ok = self._generate_enhanced_playlist(generator, qualified_sources, 'qualified_', '高级')
+                if ok:
+                    files.append('qualified_' + self.config.get_output_params()['filename'])
+            else:
+                self.logger_warning('没有合格源，跳过高级播放列表文件生成')
+
+            self.enhanced_output_statistics(valid_sources, base_sources, qualified_sources)
+            self.logger_info(f'✓ 基于 Web 测试结果生成完成：有效 {len(valid_sources)} 个，生成文件 {files}')
+            return {
+                'success': True,
+                'valid': len(valid_sources),
+                'base': len(base_sources),
+                'qualified': len(qualified_sources),
+                'files': files,
+                'reason': '',
+            }
+        except Exception as e:
+            self.logger_error(f'基于 Web 测试结果生成失败: {e}')
+            self.logger_error(traceback.format_exc())
+            return {'success': False, 'valid': 0, 'base': 0, 'qualified': 0, 'files': [], 'reason': str(e)}
+
     def _generate_enhanced_playlist(
         self,
         generator: M3UGenerator,

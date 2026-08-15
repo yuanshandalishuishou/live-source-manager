@@ -24,7 +24,7 @@ URL 级 XSS / 命令注入 / 路径遍历检测。后者一旦接线会静默蒸
 import ipaddress
 import logging
 import re
-from typing import Any, TypedDict
+from typing import TypedDict
 from urllib.parse import urlparse
 
 logger = logging.getLogger('app.security')

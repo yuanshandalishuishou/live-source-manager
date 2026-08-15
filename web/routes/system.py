@@ -166,6 +166,57 @@ async def api_test_status(current_user: dict = Depends(get_current_user)):
     }
 
 
+@router.post('/api/test/generate-playlist')
+async def api_test_generate_playlist(current_user: dict = Depends(require_admin)):
+    """基于最近一次 Web 测试结果生成播放列表（live.m3u 等）。
+
+    读取 latest_test_sources.json（含完整频道元数据 + 真实测试结果），构造 Manager
+    将测速通过的有效源直接喂入生成管线，使 live.m3u / live-ipv4.m3u / live-ipv6.m3u
+    / qualified_*.m3u 真正反映本次测试结果（修复「测试后生成的 live.m3u 未反映测试结果」）。
+    """
+    status_file = os.path.join(PROJECT_ROOT, 'data', 'status', 'latest_test_sources.json')
+    if not os.path.exists(status_file):
+        return JSONResponse(
+            status_code=400,
+            content={'status': 'error', 'detail': '尚未找到测试结果快照，请先运行一次「实时测试」再生成播放列表'},
+        )
+    try:
+        with open(status_file, encoding='utf-8') as f:
+            data = json.load(f)
+    except Exception as e:
+        return JSONResponse(status_code=500, content={'status': 'error', 'detail': f'读取测试结果失败: {e}'})
+
+    results = data.get('sources') or []
+    if not results:
+        return JSONResponse(status_code=400, content={'status': 'error', 'detail': '测试结果为空，无法生成'})
+
+    # 生成涉及 EPG/分类 IO，放到后台线程避免阻塞事件循环
+    try:
+        result = await asyncio.to_thread(_build_and_generate_playlist, results)
+    except Exception as e:
+        return JSONResponse(status_code=500, content={'status': 'error', 'detail': f'生成失败: {e}'})
+
+    models.add_audit_log(
+        user_id=current_user['user_id'],
+        username=current_user['username'],
+        action='test_generate_playlist',
+        target='live.m3u',
+        ip_address='',
+    )
+    if not result.get('success'):
+        return JSONResponse(
+            status_code=500,
+            content={'status': 'error', 'detail': result.get('reason', '生成失败')},
+        )
+    return {
+        'status': 'ok',
+        'valid': result.get('valid', 0),
+        'base': result.get('base', 0),
+        'qualified': result.get('qualified', 0),
+        'files': result.get('files', []),
+    }
+
+
 @router.post('/api/test/trigger')
 async def api_trigger_test(request: Request, current_user: dict = Depends(require_admin)):
     """触发流测试：启动后台线程并发测试所有源，实时通过 WS / 状态文件上报进度。
@@ -719,6 +770,84 @@ def _publish_test_state() -> None:
             logger.warning(f'WS 广播测试状态失败: {e}')
 
 
+def _persist_tested_sources(sources: list[dict], results: list[dict], cancelled: bool, total: int) -> None:
+    """落盘本次 Web 测试的完整源（含频道元数据 + 真实测试结果）到 latest_test_sources.json。
+
+    每条结果保留原始解析源的全部字段（name/url/group_title/tvg-* 等），仅把展示态
+    status（passed/failed/cancelled/waiting）映射为生成管线使用的真实态（success/failed）。
+    供「基于测试结果生成播放列表」端点读取，使 live.m3u 真正反映本次测速结果。
+    """
+    tested: list[dict] = []
+    try:
+        status_dir = os.path.join(PROJECT_ROOT, 'data', 'status')
+        os.makedirs(status_dir, exist_ok=True)
+        for bi, res in enumerate(results):
+            if bi >= len(sources):
+                break
+            src = dict(sources[bi])  # 完整频道元数据
+            disp = res.get('status')
+            # 真实通过才视为 success；未测完(取消/waiting)或失败均视为不通，避免失效源混入 live.m3u
+            src['status'] = 'success' if disp == 'passed' else 'failed'
+            for k in ('response_time', 'resolution', 'reason'):
+                if k in res and res[k] is not None:
+                    src[k] = res[k]
+            tested.append(src)
+        payload = {
+            'generated_at': time.time(),
+            'total': total,
+            'count': len(tested),
+            'cancelled': cancelled,
+            'sources': tested,
+        }
+        target = os.path.join(status_dir, 'latest_test_sources.json')
+        tmp = target + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(payload, f, ensure_ascii=False)
+        os.replace(tmp, target)
+        logger.info(f'[TEST] 已落盘本次测试源 {len(tested)} 个（含频道元数据）到 latest_test_sources.json')
+    except Exception as e:
+        logger.warning(f'[TEST] 落盘测试源失败(忽略): {e}')
+    return tested
+
+
+def _build_and_generate_playlist(results: list[dict]) -> dict:
+    """构造 Manager 并基于测试结果生成播放列表（供手动端点与测试收尾自动回写共用）。"""
+    from app.manager import Manager
+
+    m = Manager()
+    if not m.initialize():
+        return {'success': False, 'valid': 0, 'base': 0, 'qualified': 0, 'files': [], 'reason': 'Manager 初始化失败'}
+    return m.generate_from_web_test(results)
+
+
+def _auto_generate_from_tested(tested: list[dict]) -> None:
+    """测试收尾自动回写：把检测有效(success)的源写回 live.m3u / live-ipv4.m3u 等。
+
+    确保「测试结果反映进输出」是自动化动作，而非依赖人工点击「生成播放列表」按钮。
+    凡检测有效的源都会被回写；取消/中断场景下仅回写已测出有效的源，不混入失败源。
+    """
+    valid = [s for s in tested if s.get('status') == 'success']
+    if not valid:
+        logger.info('[TEST] 本次无检测有效源，跳过自动回写 live.m3u')
+        return
+    logger.info('[TEST] 测试收尾自动回写：将 %d 个检测有效源写入 live.m3u', len(valid))
+    try:
+        result = _build_and_generate_playlist(tested)
+    except Exception as e:
+        logger.warning('[TEST] 自动回写 live.m3u 异常(忽略): %s', e)
+        return
+    if result.get('success'):
+        logger.info(
+            '[TEST] 已自动回写 live.m3u：有效 %d / 基础 %d / 优质 %d，文件 %s',
+            result.get('valid'),
+            result.get('base'),
+            result.get('qualified'),
+            result.get('files'),
+        )
+    else:
+        logger.warning('[TEST] 自动回写 live.m3u 失败: %s', result.get('reason'))
+
+
 def _run_test_task(sources: list[dict], limit: int | None = None, gen: int = 0) -> None:
     """后台线程：分批并发测试所有源并实时上报进度，支持暂停/取消控制。
 
@@ -1140,3 +1269,8 @@ def _run_test_task(sources: list[dict], limit: int | None = None, gen: int = 0) 
         else:
             _test_state['status'] = 'completed'
     _publish_test_state()
+    # 落盘本次测试的完整源（含频道元数据 + 真实结果），供「基于测试结果生成播放列表」复用，
+    # 修复 Web 测试与 live.m3u 生成断链（测试结果不反映到输出）。
+    tested = _persist_tested_sources(sources, _test_state.get('results', []), cancelled, total)
+    # 自动回写：把检测有效的源直接写回 live.m3u，确保测试结果反映进输出（无需人工点按钮）。
+    _auto_generate_from_tested(tested)

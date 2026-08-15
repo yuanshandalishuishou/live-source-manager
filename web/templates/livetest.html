@@ -59,6 +59,9 @@
             <button class="btn btn-danger btn-sm" id="btn-cancel" style="display:none" onclick="cancelTest()">
                 ⏹ 取消测试
             </button>
+            <button class="btn btn-success btn-sm" id="btn-generate" style="display:none" onclick="generatePlaylist()">
+                🎬 基于测试结果生成播放列表
+            </button>
             {% endif %}
         </div>
     </div>
@@ -468,15 +471,50 @@ function updateControlButtons(status) {
     var btnPause = document.getElementById('btn-pause');
     var btnResume = document.getElementById('btn-resume');
     var btnCancel = document.getElementById('btn-cancel');
+    var btnGenerate = document.getElementById('btn-generate');
     if (!btnStart) return;
     var showStart = (status === 'idle' || status === 'completed' || status === 'error' || status === 'cancelled');
     var showPause = (status === 'running');
     var showResume = (status === 'paused');
     var showCancel = (status === 'running' || status === 'paused');
+    // 生成按钮：测试完成（有结果）后展示，供用户把测速结果落盘为 live.m3u
+    var showGenerate = (status === 'completed');
     btnStart.style.display = showStart ? '' : 'none';
     btnPause.style.display = showPause ? '' : 'none';
     btnResume.style.display = showResume ? '' : 'none';
     btnCancel.style.display = showCancel ? '' : 'none';
+    if (btnGenerate) btnGenerate.style.display = showGenerate ? '' : 'none';
+}
+
+// 基于本次测试结果生成播放列表（live.m3u 等），让测试结果真正反映到输出
+function generatePlaylist() {
+    var csrfToken = window.__csrf_token || '';
+    var btn = document.getElementById('btn-generate');
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ 生成中…'; }
+    var statusEl = document.getElementById('test-status-text');
+    fetch('/api/test/generate-playlist', {
+        method: 'POST',
+        headers: { 'X-CSRF-Token': csrfToken }
+    })
+        .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+        .then(function(res) {
+            var d = res.data;
+            if (res.ok && d.status === 'ok') {
+                var files = (d.files || []).join('、');
+                var msg = '✅ 已基于测试结果生成播放列表：有效 ' + (d.valid || 0) + ' 个'
+                    + (d.qualified ? ('，高级 ' + d.qualified + ' 个') : '')
+                    + '。文件：' + (files || '(无)');
+                if (statusEl) statusEl.textContent = msg;
+            } else {
+                if (statusEl) statusEl.textContent = '⚠️ 生成失败：' + (d.detail || d.reason || JSON.stringify(d));
+            }
+        })
+        .catch(function(err) {
+            if (statusEl) statusEl.textContent = '❌ 生成请求失败: ' + err;
+        })
+        .finally(function() {
+            if (btn) { btn.disabled = false; btn.textContent = '🎬 基于测试结果生成播放列表'; }
+        });
 }
 
 // 通用控制请求（暂停 / 继续 / 取消）
