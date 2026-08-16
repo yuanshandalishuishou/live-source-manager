@@ -231,6 +231,25 @@ function renderAllTabs() {
                     html += 'class="form-input" value="' + escapeHtml(String(value || '')) + '" ';
                     html += 'onchange="onFieldChange(this)" oninput="onFieldInput(this)">';
                 }
+            } else if (ftype === 'choice') {
+                const choices = (meta && Array.isArray(meta[4])) ? meta[4] : null;
+                if (choices) {
+                    html += '<select id="' + fieldId + '" ';
+                    html += 'data-section="' + section + '" data-key="' + key + '" ';
+                    html += 'class="form-input" onchange="onFieldChange(this)">';
+                    for (const ch of choices) {
+                        const cv = Array.isArray(ch) ? String(ch[0]) : String(ch);
+                        const cl = Array.isArray(ch) ? String(ch[1]) : String(ch);
+                        const sel = (cv === String(value)) ? ' selected' : '';
+                        html += '<option value="' + escapeHtml(cv) + '"' + sel + '>' + escapeHtml(cl) + '</option>';
+                    }
+                    html += '</select>';
+                } else {
+                    html += '<input type="text" id="' + fieldId + '" ';
+                    html += 'data-section="' + section + '" data-key="' + key + '" ';
+                    html += 'class="form-input" value="' + escapeHtml(String(value || '')) + '" ';
+                    html += 'onchange="onFieldChange(this)" oninput="onFieldInput(this)">';
+                }
             } else {
                 html += '<input type="text" id="' + fieldId + '" ';
                 html += 'data-section="' + section + '" data-key="' + key + '" ';

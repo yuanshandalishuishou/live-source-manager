@@ -309,10 +309,11 @@ SECTION_SCHEMA: dict[str, dict[str, tuple]] = {
             '每个地址的总测试次数：1=测一次；2=测两次(含1次自动重试)；默认1',
         ),
         'test_method': (
-            'str',
+            'choice',
             'ffprobe',
             '测速引擎',
             'ffprobe=默认，使用 ffprobe/ffmpeg 探测完整元数据(分辨率/编码/比特率)；aiohttp=异步下载分片算速+延迟，轻量但无分辨率元数据',
+            [['ffprobe', 'FFprobe（默认）— 完整元数据'], ['aiohttp', 'Aiohttp — 异步轻量，无分辨率']],
         ),
     },
     'Output': {
@@ -467,6 +468,12 @@ def validate_and_coerce(section: str, key: str, value: str, field_def: tuple) ->
             return int(value), ''
         except (ValueError, TypeError):
             return default, f'{label} 必须是整数'
+    if ftype == 'choice':
+        options = field_def[4] if len(field_def) > 4 else ()
+        opts = [o[0] if isinstance(o, (list, tuple)) else o for o in options]
+        if value in opts:
+            return str(value), ''
+        return default, f'{label} 必须是以下之一: {", ".join(opts)}'
     if ftype == 'bool':
         return ('True' if value and str(value).lower() in ('true', '1', 'yes', 'on') else 'False'), ''
     if ftype == 'textarea' or ftype == 'str':
