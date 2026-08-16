@@ -40,6 +40,27 @@ def _track_task(task):
     task.add_done_callback(_epg_tasks.discard)
 
 
+def _parse_hhmm(at: str, default: tuple[int, int] = (3, 30)) -> tuple[int, int]:
+    """安全解析 HH:MM 时间字符串，返回 (hour, minute)。
+
+    无效格式或越界值返回 default，并记录 warning。
+    """
+    at = (at or '').strip()
+    if not at:
+        return default
+    try:
+        parts = at.split(':')
+        if len(parts) != 2:
+            raise ValueError(f'expected HH:MM, got {at!r}')
+        h, m = int(parts[0]), int(parts[1])
+        if not (0 <= h <= 23 and 0 <= m <= 59):
+            raise ValueError(f'out of range: {at!r}')
+        return h, m
+    except Exception as e:
+        logger.warning(f'[EPG-SCHED] 无效的 refresh_at 值 {at!r} ({e})，回退到 {default[0]:02d}:{default[1]:02d}')
+        return default
+
+
 _STATE_DIR = os.path.join(PROJECT_ROOT, 'data', 'status')
 _STATE_PATH = os.path.join(_STATE_DIR, 'epg_fetch_state.json')
 
@@ -187,10 +208,7 @@ async def epg_scheduler():
                         due.append(int(s['id']))
                 else:  # daily
                     at = (s.get('refresh_at') or global_at).strip()
-                    try:
-                        h, m = (int(x) for x in at.split(':'))
-                    except Exception:
-                        h, m = 3, 30
+                    h, m = _parse_hhmm(at)
                     if now.hour == h and now.minute == m and (last_dt is None or last_dt.date() < now.date()):
                         due.append(int(s['id']))
 

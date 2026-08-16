@@ -15,6 +15,8 @@ import logging.handlers
 import os
 import sys
 
+from app.utils import force_remove
+
 # 统一日志格式
 UNIFIED_LOG_FORMAT = '[%(asctime)s] [%(levelname)s] [%(name)s] %(message)s'
 UNIFIED_LOG_DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
@@ -72,7 +74,7 @@ class Logger:
 
                 if config.get('clear_on_startup', False) and os.path.exists(log_file):
                     try:
-                        os.remove(log_file)
+                        force_remove(log_file)
                     except Exception as e:
                         print(f'无法清空日志文件: {e}')
 

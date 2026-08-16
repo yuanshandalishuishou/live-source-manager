@@ -195,6 +195,26 @@ class SourceManager:
         except Exception as e:
             self.logger.warning(f'记录失效统计失败(忽略): {e}')
 
+    def _get_http_proxy_url(self) -> str | None:
+        """返回 HTTP 代理 URL（仅 HTTP 代理类型；SOCKS5 在连接器层面处理）。
+
+        aiohttp 的 HTTP 代理需通过 session.get(url, proxy=...) 逐请求传递，
+        TCPConnector 本身不携带代理信息。
+        """
+        if not self.network_config.get('proxy_enabled'):
+            return None
+        proxy_type = str(self.network_config.get('proxy_type', 'http')).lower()
+        if proxy_type in ('socks5', 'socks5h'):
+            return None  # SOCKS5 代理在 ProxyConnector 层面处理
+        host = self.network_config.get('proxy_host', '')
+        port = self.network_config.get('proxy_port', 0)
+        if not host or not port:
+            return None
+        user = self.network_config.get('proxy_username', '')
+        pwd = self.network_config.get('proxy_password', '')
+        auth = f'{user}:{pwd}@' if user and pwd else ''
+        return f'http://{auth}{host}:{port}'
+
     async def get_session(self, use_proxy: bool = False) -> aiohttp.ClientSession:
         """M4: 获取或创建共享的aiohttp会话(复用session代替每次创建销毁)
 
@@ -455,10 +475,15 @@ class SourceManager:
             if self.api_token:
                 headers['Authorization'] = f'token {self.api_token}'
 
+            # HTTP 代理 URL（SOCKS5 在连接器层面处理，此处返回 None）
+            proxy_url = self._get_http_proxy_url()
+
             # 如果未指定分支,先获取默认分支
             if not branch:
                 repo_api = f'https://api.github.com/repos/{owner}/{repo}'
-                async with session.get(repo_api, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                async with session.get(
+                    repo_api, headers=headers, timeout=aiohttp.ClientTimeout(total=15), proxy=proxy_url
+                ) as resp:
                     if resp.status != 200:
                         self.logger.warning(f'GitHub API 获取仓库信息失败 {owner}/{repo}: HTTP {resp.status}')
                         return []
@@ -467,7 +492,9 @@ class SourceManager:
 
             # 获取仓库文件树
             tree_api = f'https://api.github.com/repos/{owner}/{repo}/git/trees/{branch}?recursive=1'
-            async with session.get(tree_api, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+            async with session.get(
+                tree_api, headers=headers, timeout=aiohttp.ClientTimeout(total=15), proxy=proxy_url
+            ) as resp:
                 if resp.status != 200:
                     self.logger.warning(f'GitHub API 获取文件树失败 {owner}/{repo}/{branch}: HTTP {resp.status}')
                     return []
@@ -607,7 +634,10 @@ class SourceManager:
                 headers['Accept'] = 'application/vnd.github.v3.raw'
                 self.logger.debug(f'使用 GitHub API raw content: {url[:60]}...')
 
-            async with session.get(url, timeout=timeout_config, headers=headers) as response:
+            # HTTP 代理 URL（SOCKS5 在连接器层面处理，此处返回 None）
+            proxy_url = self._get_http_proxy_url()
+
+            async with session.get(url, timeout=timeout_config, headers=headers, proxy=proxy_url) as response:
                 if response.status == 200:
                     content = await response.text()
 

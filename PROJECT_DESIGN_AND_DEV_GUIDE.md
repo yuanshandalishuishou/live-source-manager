@@ -79,7 +79,7 @@ Web 管理后台（端口 23456 FastAPI）查看/配置/触发测试/审计
 ```
 live-source-manager/
 ├── app/                      # 后端引擎（纯 Python，无 Web 依赖）
-│   ├── __init__.py           # 包入口，暴露 SourceManager/StreamTester/ChannelRules/Config/Logger
+│   ├── __init__.py           # 包入口，暴露 SourceManager/StreamTester/ChannelRules/Config/Logger/EPGManager
 │   ├── config.py             # Config 类：读取 app_config 表，get_*_config()
 │   ├── manager.py            # EnhancedLiveSourceManager：主流程编排（采集→测试→筛选→生成）
 │   ├── source_manager.py     # SourceManager：多源下载 + parse_all_files()
@@ -87,21 +87,24 @@ live-source-manager/
 │   ├── rules.py              # ChannelRules：DB 驱动分类引擎（6 维度 + 三层防御）
 │   ├── security.py           # SSRF 窄门禁 is_static_safe() + 完整校验版
 │   ├── m3u_generator.py      # M3UGenerator：生成 M3U/TXT + 多分类展开
+│   ├── epg.py                # EPG 模块：XMLTVParser / EPGFetcher / EPGManager
 │   ├── exceptions.py         # 异常体系 + ErrorStats + catch_exception 装饰器
 │   ├── logger.py             # Logger.setup_logging()
 │   └── utils.py              # atomic_write / safe_read_file / force_remove
 ├── web/                      # Web 管理端
-│   ├── webapp.py             # 挂载 7 个 router + main() 端口探测
+│   ├── webapp.py             # 挂载 9 个 router + main() 端口探测
 │   ├── core.py               # 共享基础设施（app 实例 / lifespan / 中间件 / Session / CSRF / RBAC / _render）
 │   ├── models.py             # SQLite 建表 + 所有 DB 读写函数
 │   ├── crypto_utils.py       # Fernet 加密 + 机器绑定加密
-│   ├── routes/               # 7 个路由模块
+│   ├── routes/               # 9 个路由模块
 │   │   ├── pages.py          # 页面渲染（GET）
 │   │   ├── auth.py           # 登录/用户/密码/加密密钥
 │   │   ├── config_api.py     # 配置读写
 │   │   ├── dashboard.py      # 仪表盘统计
 │   │   ├── sources.py        # 源文件/频道管理
 │   │   ├── rules.py          # 分类规则/映射/字典
+│   │   ├── epg.py            # EPG 源管理/抓取/生成/节目单
+│   │   ├── candidates.py     # 候选池/失败源管理
 │   │   └── system.py         # 测试触发/日志/审计/WS
 │   ├── templates/            # Jinja2 模板
 │   ├── static/js/            # app.js / audit-components.js / lsm-components.js
@@ -128,7 +131,7 @@ L0  异常/日志/工具:  app/exceptions.py  app/logger.py  app/utils.py
   ↑
 L1  配置/安全:       app/config.py  app/security.py
   ↑
-L2  业务引擎:        app/rules.py  app/source_manager.py  app/stream_tester.py
+L2  业务引擎:        app/rules.py  app/source_manager.py  app/stream_tester.py  app/epg.py
   ↑
 L3  生成器:          app/m3u_generator.py
   ↑
@@ -216,7 +219,7 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 配置读取链：
 1. `app/config.py` `Config._DEFAULT_VALUES`（种子，64 键）
 2. `config/config-defaults.yaml`（外部化，运行时合并进 `SECTION_SCHEMA`）
-3. `web/core.py.SECTION_SCHEMA`（UI 字段定义，61 键，含类型/默认/标签/帮助）
+3. `web/core.py.SECTION_SCHEMA`（UI 字段定义，64 键，含类型/默认/标签/帮助）
 4. 运行时写入：`app_config` 表（SQLite 唯一事实来源）
 
 > 维护同步规则：改默认值必须同时改 **`_DEFAULT_VALUES`**（种子）+ `SECTION_SCHEMA` + `config-defaults.yaml` 三处，否则 UI 会丢字段。
@@ -249,7 +252,7 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 | | max_concurrent_ffprobe | int | 16 |
 | | cache_ttl | int | 120 |
 | | enable_speed_test | bool | True |
-| | speed_test_duration | int | 6 |
+| | speed_test_duration | int | 3 |
 | | auto_scan_enabled | bool | False |
 | | auto_scan_mode | str | interval |
 | | auto_scan_interval_hours | int | 24 |
@@ -274,6 +277,9 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 | | proxy_password | str | （空，敏感） |
 | | github_mirror | str | https://ghproxy.com/ |
 | | ipv6_enabled | bool | True |
+| | download_connect_timeout | int | 10 |
+| | download_total_timeout | int | 30 |
+| | download_batch_size | int | 12 |
 | Sources | local_dirs | str | ./config/sources |
 | | online_urls | textarea | 20 个公开 IPTV 源 URL（见 SECTION_SCHEMA） |
 | | github_sources | textarea | 9 个 owner/repo |
@@ -549,7 +555,42 @@ class M3UGenerator:
 - `www/output/qualified_live.m3u` — qualified 级（过滤后）
 - 同目录 `.txt` 列表与多分类展开文件
 
-### 4.10 `app/manager.py` — EnhancedLiveSourceManager（主流程编排）
+### 4.10 `app/epg.py` — EPG 电子节目单（L2 层）
+
+**三个核心类**：
+
+```python
+class XMLTVParser:
+    """流式解析 XMLTV（ET.iterparse + elem.clear() 防 OOM），支持 gzip 自动解压。"""
+    def __init__(self, default_offset_minutes=480): ...
+    def parse_file(self, path) -> tuple[list[dict], list[dict]]:     # (channels, programmes)
+    def parse_stream(self, stream) -> tuple[list[dict], list[dict]]: # 同上，流式
+
+class EPGFetcher:
+    """下载远端 EPG（复用 Network 代理/超时/IPv6 配置）。
+    SOCKS5 代理走 aiohttp_socks.ProxyConnector；HTTP 代理走 session.get(url, proxy=)。
+    支持 file:// 和本地绝对路径。"""
+    def __init__(self, network_config=None, timeout=60): ...
+    def _build_connector(self) -> aiohttp.BaseConnector  # SOCKS5 或 TCP
+    def _http_proxy(self) -> str | None                  # HTTP 代理 URL（供 session.get 传参）
+    async def fetch_to_file(self, url, dest_dir=None) -> str  # 下载到临时文件，返回路径
+
+class EPGManager:
+    """EPG 全生命周期管理：抓取→解析→入库→频道对齐→导出合并 XMLTV→过期清理。"""
+    def __init__(self, config=None): ...
+    async def refresh_source(self, source: dict) -> dict         # 抓取+解析单个 EPG 源
+    async def refresh_all(self, source_ids=None) -> dict         # 批量抓取所有 EPG 源
+    def generate_xmltv(self, output_path=None) -> dict           # 导出合并 XMLTV（.gz 自动压缩）
+    def cleanup_expired(self) -> int                             # 清理过期节目单
+    @staticmethod
+    def _load_local_channel_names() -> list[str]                 # 从 parse_all_files 获取本地频道名
+```
+
+**频道对齐机制**：EPG 源的频道名与本地 M3U 频道名通过 `channel_name_mapping` 表映射。`_load_local_channel_names()` 调用 `SourceManager.parse_all_files()` 获取本地频道列表，再与 EPG 频道做模糊匹配（Unicode 归一化 + 大小写不敏感）。
+
+**EPG 调度器**（`web/routes/epg.py::epg_scheduler()`）：根据配置的 `epg_refresh_at`（HH:MM 格式）定时刷新。使用 `_parse_hhmm()` 安全解析时间字符串，无效格式回退到默认 03:30 并记录 warning。
+
+### 4.11 `app/manager.py` — EnhancedLiveSourceManager（主流程编排）
 
 ```python
 class EnhancedLiveSourceManager:
@@ -666,7 +707,7 @@ def re_encrypt_all(new_key)                     # 两阶段提交原子重加密
 
 ### 5.4 路由端点全清单
 
-挂载（`web/webapp.py`）：`pages / auth / dashboard / sources / config / rules / system` 共 7 个 router。
+挂载（`web/webapp.py`）：`pages / auth / dashboard / sources / config / rules / epg / candidates / system` 共 9 个 router。
 
 > 通用约定：所有写操作（POST/PUT/DELETE/PATCH）必须带 `X-CSRF-Token` 头（CSRF 中间件校验，豁免 `/api/auth/login`、`/login`、WS）。页面请求 401 → 重定向 `/login`。source_id 用 `MD5(name|url)[:12]`。
 
@@ -746,6 +787,34 @@ def re_encrypt_all(new_key)                     # 两阶段提交原子重加密
 | GET/batch-import | `/api/channel-mappings` |
 | reset-defaults/GET/POST/DELETE/PUT | `/api/category-dictionary` |
 
+#### EPG（epg.py）
+| 方法 | 路由 | 说明 |
+|---|---|---|
+| GET | `/epg` | EPG 页面 |
+| GET | `/epg/sources` | EPG 源列表（页面用） |
+| GET | `/api/epg/sources` | EPG 源列表（API） |
+| POST | `/api/epg/sources` | 添加 EPG 源 |
+| PUT | `/api/epg/sources/{source_id}` | 修改 EPG 源 |
+| DELETE | `/api/epg/sources/{source_id}` | 删除 EPG 源 |
+| POST | `/api/epg/sources/{source_id}/refresh` | 刷新单个 EPG 源 |
+| POST | `/api/epg/refresh-all` | 刷新所有 EPG 源 |
+| POST | `/api/epg/generate` | 生成合并 XMLTV |
+| GET | `/api/epg/grid` | 节目单网格 |
+| GET | `/api/epg/channels` | EPG 频道列表 |
+| GET | `/api/epg/now` | 当前播放节目 |
+| POST | `/api/epg/channels/{channel_id}/match` | 手动匹配频道 |
+| GET | `/api/epg/status` | EPG 状态 |
+| GET | `/api/epg/url` | EPG 发布 URL |
+
+#### 候选池（candidates.py）
+| 方法 | 路由 | 说明 |
+|---|---|---|
+| GET | `/api/candidates` | 候选源列表（含冻结状态） |
+| POST | `/api/candidates/freeze` | 冻结指定源 |
+| POST | `/api/candidates/clear` | 清空候选池 |
+| GET | `/api/sources/failures` | 失败源列表（含冻结剩余时间） |
+| POST | `/api/sources/failures/reenable` | 重新启用冻结源 |
+
 #### 系统（system.py）
 | 方法 | 路由 | 说明 |
 |---|---|---|
@@ -766,7 +835,7 @@ def re_encrypt_all(new_key)                     # 两阶段提交原子重加密
 
 ### 5.5 前端页面与交互
 
-- **模板**：`web/templates/`（base/config/dashboard/login/logs/livetest/rules/source_form/sources/users/audit.html）。`base.html` 注入 `csrf_token` 与导航。
+- **模板**：`web/templates/`（base/config/dashboard/epg/login/logs/livetest/rules/source_form/sources/users/audit.html）。`base.html` 注入 `csrf_token` 与导航。
 - **`web/static/js/app.js`**（601 行，IIFE 暴露 `window.LSM`）：
   - HTMX 401 → 重定向 `/login`
   - `formatSourceList` / `formatUserList`：JSON → 表格（分页 + 管理员操作按钮）
@@ -795,7 +864,7 @@ def main():
 `app` 实例在 `web/core.py` 定义，挂载 lifespan（见 §5.2）→ 自动建库（`models.init_db` 幂等）→ 启动文件发布服务 → 启动后台任务。
 
 **自动建库幂等**：
-- `has_app_config_data()` 为空 → `seed_app_config_defaults()`（约 61 键）
+- `has_app_config_data()` 为空 → `seed_app_config_defaults()`（约 64 键）
 - 始终 `fill_missing_app_config_defaults()`（补全 schema 新增键，不覆盖已有值）
 - `init_db(admin_password)`：首次使用默认初始密码 Admin@123 并写日志（`ADMIN_PASSWORD_INITIALIZED=...`），后续仅校验。
 - 输出文件（`Output.output_dir/Output.filename`）默认加入 `local_dirs`（`init_db` 幂等 ensure：过滤空串 + 去重，仅值变化才写回）。
@@ -881,6 +950,9 @@ Docker 容器 CMD，也供 `setup_linux.sh` source 复用（有守卫不重复 m
 8. **配置唯一来源**：所有配置读写走 `app_config` 表；改默认值须同步 `_DEFAULT_VALUES` + `SECTION_SCHEMA` + `config-defaults.yaml` 三处。
 9. **登录锁定**：5 次失败锁定 15 分钟（依据《网络安全法》第24条）。
 10. **首登强改密**：admin 首次登录必须改密码（`password_change_required`）。
+11. **文件删除安全**：所有 `os.remove` 调用必须替换为 `app.utils.force_remove`（Windows 调 kernel32.DeleteFileW 绕过沙箱拦截）。
+12. **Web API 统一错误响应**：异常处理器统一返回 `{success: false, error, detail, code}` 格式（保留 `detail` 向后兼容前端 `data.detail`）。路由层错误必须 `raise HTTPException`，不得返回非标 `{'ok': false, ...}`。
+13. **HTTP 代理传递**：aiohttp 的 HTTP 代理必须通过 `session.get(url, proxy=proxy_url)` 逐请求传递；SOCKS5 代理走 `aiohttp_socks.ProxyConnector`。`source_manager._get_http_proxy_url()` 和 `epg.EPGFetcher._http_proxy()` 负责生成代理 URL。
 
 ---
 
@@ -888,22 +960,22 @@ Docker 容器 CMD，也供 `setup_linux.sh` source 复用（有守卫不重复 m
 
 让另一个 AI 1:1 实现时，按以下清单逐项核对：
 
-- [ ] **目录结构**符合 §2.1（app/ 9 模块 + web/ 7 路由 + config/ + deploy/）
+- [ ] **目录结构**符合 §2.1（app/ 10 模块含 epg.py + web/ 9 路由含 epg/candidates + config/ + deploy/）
 - [ ] **分层依赖**单向无环（web→app，app 内部 L0→L4）
 - [ ] **SQLite 表**全部建表（注意 stream_sources 不建，以 channel_name_mapping 为权威）
-- [ ] **配置默认值**与 §3.2 表逐项一致（含 61 键 SECTION_SCHEMA）
+- [ ] **配置默认值**与 §3.2 表逐项一致（含 64 键 SECTION_SCHEMA，含 download_connect_timeout/download_total_timeout/download_batch_size）
 - [ ] **is_static_safe** 窄门禁实现（不做 DNS/境外/黑白名单）
 - [ ] **StreamTester** 含 ThreadPoolExecutor + Semaphore + 看门狗 + 冻结退避 + host 缓存 + 错误分类
 - [ ] **ChannelRules** 6 维度 + 三层联合防御（高优先级/负向排除/最长匹配+省际排除）
 - [ ] **M3UGenerator** base/qualified 两级 + 多分类展开 + UA 注入
-- [ ] **FastAPI 端点**与 §5.4 全清单一致（含 CSRF 豁免、MD5 source_id）
+- [ ] **FastAPI 端点**与 §5.4 全清单一致（含 CSRF 豁免、MD5 source_id、EPG + 候选池路由）
 - [ ] **认证** Session Cookie(httponly,samesite=lax) + RBAC + CSRF(绑定 UA) + 审计日志
 - [ ] **加密** Fernet + 机器绑定(MENC:) + 密钥三来源
 - [ ] **lifespan** 启动链路与 §5.2 一致（含零配置自动生成 admin 密码）
 - [ ] **前端** Jinja2 + HTMX + app.js(window.LSM) + CSRF 自动注入
 - [ ] **部署** Dockerfile/compose/nginx.conf/start_docker.sh/setup_linux.sh/setup_windows.ps1 五件套
-- [ ] **红线** §8 全部遵守
-- [ ] **测试** pytest 套件（209 用例通过）：`.venv/Scripts/python.exe -m pytest`
+- [ ] **红线** §8 全部遵守（含 force_remove、统一错误响应、HTTP 代理传递）
+- [ ] **测试** pytest 套件（262 用例通过）：`.venv/Scripts/python.exe -m pytest`
 
 ### 复刻时最容易踩的坑
 
@@ -917,4 +989,4 @@ Docker 容器 CMD，也供 `setup_linux.sh` source 复用（有守卫不重复 m
 
 ---
 
-> **文档版本**：基于 2026-07-20 源码快照逆向生成。如后续代码演进，以 `app/`、`web/`、`config/` 实际源码为准，本指南作为架构与复刻基准。
+> **文档版本**：基于 2026-08-16 源码快照更新（含 H1-H3/M1-M4 修复 + EPG 模块补全）。如后续代码演进，以 `app/`、`web/`、`config/` 实际源码为准，本指南作为架构与复刻基准。

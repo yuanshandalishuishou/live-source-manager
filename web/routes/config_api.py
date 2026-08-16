@@ -226,7 +226,7 @@ async def api_reload_config(request: Request, current_user: dict = Depends(requi
             detail=f'重载失败: {e}',
             ip_address=request.client.host if request.client else '',
         )
-        return {'status': 'error', 'message': f'配置重载失败: {e}', 'reloaded': 0}
+        return {'status': 'error', 'message': f'配置重载失败: {e}', 'reloaded': 0, 'success': False}
 
     # 清空 SourceManager 缓存实例，下次 API 调用时重新创建
     reset_source_manager_cache()

@@ -8,7 +8,7 @@
 - /api/sources/failures/reenable POST 手动恢复某停用源
 """
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from web import models
@@ -45,7 +45,7 @@ async def list_candidates(
         return {'ok': True, 'items': items, 'stats': stats}
     except Exception as e:
         logger.warning(f'查询候选池失败: {e}')
-        return {'ok': False, 'error': str(e), 'items': [], 'stats': {}}
+        raise HTTPException(status_code=500, detail=f'查询候选池失败: {e}') from e
 
 
 @router.post('/api/candidates/freeze')
@@ -74,7 +74,7 @@ async def list_failures(_: object = Depends(require_admin)):
         return {'ok': True, 'items': items, 'disabled_count': disabled}
     except Exception as e:
         logger.warning(f'查询失效统计失败: {e}')
-        return {'ok': False, 'error': str(e), 'items': [], 'disabled_count': 0}
+        raise HTTPException(status_code=500, detail=f'查询失效统计失败: {e}') from e
 
 
 @router.post('/api/sources/failures/reenable')

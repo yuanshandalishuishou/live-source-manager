@@ -175,6 +175,24 @@ SECTION_SCHEMA: dict[str, dict[str, tuple]] = {
             '用于 mirror 下载方式的代理网站URL',
         ),
         'ipv6_enabled': ('bool', 'True', '启用IPv6', ''),
+        'download_connect_timeout': (
+            'int',
+            '10',
+            '下载连接超时(秒)',
+            'TCP 连接建立超时，短超时让不可达源快速失败',
+        ),
+        'download_total_timeout': (
+            'int',
+            '30',
+            '下载总超时(秒)',
+            '单个源文件下载的总超时（含连接+传输）',
+        ),
+        'download_batch_size': (
+            'int',
+            '12',
+            '下载并发数',
+            '同时下载的源文件数量，越大越快但更占带宽',
+        ),
     },
     'HTTPServer': {
         'enabled': ('bool', 'True', '启用HTTP'),
@@ -221,7 +239,7 @@ SECTION_SCHEMA: dict[str, dict[str, tuple]] = {
         'max_concurrent_ffprobe': ('int', '16', 'ffprobe并发数(实时测试)'),
         'cache_ttl': ('int', '120', '缓存有效期(分)'),
         'enable_speed_test': ('bool', 'True', '启用速率测试'),
-        'speed_test_duration': ('int', '6', '速率测试时长(秒)'),
+        'speed_test_duration': ('int', '3', '速率测试时长(秒)', '单源下载测速时长(秒)；3s可显著缩短整体检测耗时'),
         'auto_scan_enabled': ('bool', 'False', '启用自动扫描测试'),
         'auto_scan_mode': (
             'str',
@@ -1210,14 +1228,23 @@ async def api_health():
 # 纪枢 P1-1: 确保浏览器请求得到 HTML 响应而非 JSON
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
+    """统一 HTTP 错误响应格式：{success, error, detail, code}
+
+    保留 detail 字段向后兼容前端 data.detail 用法。
+    """
     if exc.status_code == 401:
         accept = request.headers.get('accept', '')
         if 'text/html' in accept:
             return RedirectResponse(url='/login', status_code=303)
-        return JSONResponse(status_code=401, content={'detail': exc.detail or 'Not authenticated'})
+    detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
     return JSONResponse(
         status_code=exc.status_code,
-        content={'detail': exc.detail},
+        content={
+            'success': False,
+            'error': detail,
+            'detail': detail,  # 向后兼容
+            'code': exc.status_code,
+        },
     )
 
 

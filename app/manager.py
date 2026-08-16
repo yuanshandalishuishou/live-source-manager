@@ -38,6 +38,7 @@ from app.m3u_generator import M3UGenerator
 from app.rules import ChannelRules, get_channel_name_mapping_for_app
 from app.source_manager import SourceManager, dedup_sources_by_url
 from app.stream_tester import StreamTester
+from app.utils import force_remove
 
 
 class EnhancedLiveSourceManager:
@@ -262,7 +263,7 @@ class EnhancedLiveSourceManager:
             try:
                 with open(test_file, 'w') as f:
                     f.write('test')
-                os.remove(test_file)
+                force_remove(test_file)
                 self.logger_info('✓ Nginx目录权限验证通过')
                 return True
             except Exception as e:
