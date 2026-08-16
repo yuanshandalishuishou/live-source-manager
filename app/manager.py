@@ -1014,12 +1014,15 @@ class EnhancedLiveSourceManager:
             xmltv_path = os.path.join(out_dir, epg_filename)
 
             # 是否已具备可用 EPG 数据
+            conn = None
             try:
                 conn = web_models.get_conn()
                 ch_count = conn.execute('SELECT COUNT(*) FROM epg_channels').fetchone()[0]
-                conn.close()
             except Exception:
                 ch_count = 0
+            finally:
+                if conn:
+                    conn.close()
             have_data = ch_count > 0 and os.path.exists(xmltv_path)
 
             if not have_data:

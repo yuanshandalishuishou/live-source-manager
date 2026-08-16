@@ -351,6 +351,7 @@ def _enrich_channels_with_mappings(channels: list) -> list:
         return channels
     # 批量查询 channel_name_mapping
     mappings = {}
+    conn = None
     try:
         conn = models.get_conn()
         placeholders = ','.join('?' for _ in names)
@@ -358,11 +359,13 @@ def _enrich_channels_with_mappings(channels: list) -> list:
             f'SELECT channel_name, content, region, language, quality, media_type, genre FROM channel_name_mapping WHERE channel_name IN ({placeholders})',
             names,
         ).fetchall()
-        conn.close()
         for row in rows:
             mappings[row['channel_name']] = dict(row)
     except Exception:
         pass
+    finally:
+        if conn:
+            conn.close()
 
     for ch in channels:
         ch_name = ch.get('name', '')

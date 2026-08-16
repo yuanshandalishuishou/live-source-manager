@@ -637,6 +637,7 @@ def create_session(user: dict) -> str:
         'created_at': time.time(),
         'last_active': time.time(),
     }
+    conn = None
     try:
         conn = models.get_conn()
         now = time.time()
@@ -645,9 +646,11 @@ def create_session(user: dict) -> str:
             (session_id, user['id'], user['username'], user['role'], now, now),
         )
         conn.commit()
-        conn.close()
     except Exception as e:
         logger.warning(f'Failed to persist session to SQLite: {e}')
+    finally:
+        if conn:
+            conn.close()
     return session_id
 
 

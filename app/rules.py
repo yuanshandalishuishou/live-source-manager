@@ -543,7 +543,7 @@ class ChannelRules:
                    'quality': '高清', 'media_type': '电视节目', 'genre': '综合'}
         """
         if not channel_name:
-            return {dim: '未知' for dim in self.DIMENSIONS}
+            return dict.fromkeys(self.DIMENSIONS, '未知')
 
         # 缓存查找
         with self._cache_lock:

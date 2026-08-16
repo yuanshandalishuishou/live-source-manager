@@ -49,6 +49,7 @@ async def api_config_history(
     )
     result = {'total': 0, 'page': page, 'size': size, 'history': []}
 
+    conn = None
     try:
         conn = models.get_conn()
         offset = (page - 1) * size
@@ -68,9 +69,11 @@ async def api_config_history(
             result['history'] = [dict(r) for r in rows]
             result['total'] = total
 
-        conn.close()
     except Exception as e:
         logger.error(f'读取配置变更历史失败: {e}')
+    finally:
+        if conn:
+            conn.close()
 
     return result
 

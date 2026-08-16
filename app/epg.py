@@ -638,6 +638,7 @@ class EPGManager:
     @staticmethod
     def _load_local_channel_names() -> list[str]:
         """从已分类的源表取本地频道名（去重）"""
+        conn = None
         try:
             models = EPGManager._models()
             conn = models.get_conn()
@@ -647,11 +648,13 @@ class EPGManager:
             names = [r[0] for r in rows]
             rows = conn.execute('SELECT channel_name FROM channel_name_mapping').fetchall()
             names.extend(r[0] for r in rows)
-            conn.close()
             return list(dict.fromkeys(n for n in names if n))
         except Exception as e:
             logger.warning(f'读取本地频道名失败: {e}')
             return []
+        finally:
+            if conn:
+                conn.close()
 
     # ── 清理 ──────────────────────────────────────────────
     def cleanup_expired(self) -> int:

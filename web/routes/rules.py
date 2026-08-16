@@ -143,7 +143,7 @@ async def api_update_rule(
         username=current_user['username'],
         action='rule_update',
         target=str(rule_id),
-        detail=json.dumps({k: v for k, v in update_dict.items()}, ensure_ascii=False),
+        detail=json.dumps(dict(update_dict), ensure_ascii=False),
         ip_address=request.client.host if request.client else '',
     )
 
@@ -439,9 +439,11 @@ async def api_reimport_rules(
 
     # 先清空现有规则
     conn = models.get_conn()
-    conn.execute('DELETE FROM classification_rules')
-    conn.commit()
-    conn.close()
+    try:
+        conn.execute('DELETE FROM classification_rules')
+        conn.commit()
+    finally:
+        conn.close()
 
     count = 0
     with open(CHANNEL_RULES_PATH, encoding='utf-8') as f:
@@ -489,15 +491,19 @@ async def api_reimport_rules(
 
     # 重新初始化排除映射
     conn = models.get_conn()
-    conn.execute('DELETE FROM province_exclusion_map')
-    conn.commit()
-    conn.close()
+    try:
+        conn.execute('DELETE FROM province_exclusion_map')
+        conn.commit()
+    finally:
+        conn.close()
 
     # 使用 models 中的 _seed_from_yaml 逻辑走一遍
     # 直接调用 init_db 的种子逻辑重建
     conn = models.get_conn()
-    models._seed_from_yaml(conn)
-    conn.close()
+    try:
+        models._seed_from_yaml(conn)
+    finally:
+        conn.close()
 
     models.add_audit_log(
         user_id=current_user['user_id'],
