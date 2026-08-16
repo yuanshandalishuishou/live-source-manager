@@ -791,6 +791,12 @@ class EnhancedLiveSourceManager:
 
             # 步骤5: 生成不同层次的播放列表
             self.logger_info('=== 步骤5: 生成播放列表文件 ===')
+
+            # 生成前确保 EPG 数据就绪：带 EPG 时尽力而为（无数据则带超时补抓一次；
+            # 已存在则仅重跑频道对齐 + 重新生成 xmltv），使 live.m3u 真正携带可用 EPG。
+            # 任何异常均记录告警并跳过，绝不阻断主流程。
+            await self._ensure_epg_ready()
+
             generator = M3UGenerator(self.config, self.logger)
 
             # 「输出全部有效源」开关：开启后 live.m3u 直接用第一层全部有效源，
@@ -908,6 +914,19 @@ class EnhancedLiveSourceManager:
                 qualified_sources = valid_sources
 
             # 步骤5: 生成不同层次的播放列表
+            # 生成前确保 EPG 频道对齐 + xmltv 反映最新数据（纯 DB 操作，不触发网络抓取；
+            # 网络抓取由 EPG 调度器 / 服务启动负责）。仅当 EPG 启用且 inject 时生效。
+            try:
+                from app.epg import EPGManager
+
+                ec = self.config.get_epg_config()
+                if ec.get('enabled') and ec.get('inject_into_m3u'):
+                    _em = EPGManager(self.config)
+                    _em.match_channels()
+                    _em.generate_xmltv()
+            except Exception as _e:
+                self.logger_warning(f'[EPG] 生成前对齐失败（不影响主流程）: {_e}')
+
             generator = M3UGenerator(self.config, self.logger)
 
             output_all_valid = self.config.get_output_params().get('output_all_valid', False)
@@ -969,6 +988,57 @@ class EnhancedLiveSourceManager:
             self.logger_error(f'基于 Web 测试结果生成失败: {e}')
             self.logger_error(traceback.format_exc())
             return {'success': False, 'valid': 0, 'base': 0, 'qualified': 0, 'files': [], 'reason': str(e)}
+
+    async def _ensure_epg_ready(self) -> None:
+        """生成 M3U 前确保 EPG 数据就绪（带 EPG 时）。
+
+        仅当 EPG 启用且 inject_into_m3u 时生效。尽力而为，绝不阻断主流程：
+        - 若 epg_channels 已有数据且 epg.xml.gz 存在：仅重跑频道对齐 + 重新生成 xmltv
+          （纯 DB 操作，快），保证 tvg-id / url-tvg 与最新数据一致。
+        - 若尚无数据：尽力触发一次抓取（带超时），成功后再对齐 + 生成 xmltv。
+        任何异常均记录告警并跳过，不影响 live.m3u 正常生成。
+        """
+        try:
+            from web import models as web_models
+
+            from app.epg import EPGManager
+
+            epg_cfg = self.config.get_epg_config()
+            if not (epg_cfg.get('enabled') and epg_cfg.get('inject_into_m3u')):
+                return
+
+            mgr = EPGManager(self.config)
+            out_params = self.config.get_output_params()
+            out_dir = (out_params.get('output_dir') or './www/output').rstrip('/\\')
+            epg_filename = epg_cfg.get('output_filename') or 'epg.xml.gz'
+            xmltv_path = os.path.join(out_dir, epg_filename)
+
+            # 是否已具备可用 EPG 数据
+            try:
+                conn = web_models.get_conn()
+                ch_count = conn.execute('SELECT COUNT(*) FROM epg_channels').fetchone()[0]
+                conn.close()
+            except Exception:
+                ch_count = 0
+            have_data = ch_count > 0 and os.path.exists(xmltv_path)
+
+            if not have_data:
+                self.logger_info('[EPG] 尚未抓取到节目单，生成前尽力补抓一次（超时 120s）')
+                try:
+                    await asyncio.wait_for(mgr.refresh_all(), timeout=120)
+                except Exception as e:  # 网络不可达/超时等均视为「本次跳过 EPG」
+                    self.logger_warning(f'[EPG] 生成前补抓失败，跳过 EPG 注入: {e}')
+                    return
+
+            # 对齐频道 + 重新生成 xmltv（确保 tvg-id / url-tvg 与最新数据一致）
+            try:
+                await asyncio.to_thread(mgr.match_channels)
+                await asyncio.to_thread(mgr.generate_xmltv)
+                self.logger_info('[EPG] 已对齐频道并生成 xmltv，live.m3u 将携带 EPG')
+            except Exception as e:
+                self.logger_warning(f'[EPG] 频道对齐/生成 xmltv 失败: {e}')
+        except Exception as e:
+            self.logger_warning(f'[EPG] 生成前准备失败（不影响主流程）: {e}')
 
     def _generate_enhanced_playlist(
         self,

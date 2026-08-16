@@ -4,6 +4,7 @@
 支持分层筛选、智能分类和多维分组。
 """
 
+import os
 import re
 
 from app.config import Config
@@ -72,6 +73,16 @@ class M3UGenerator:
                 return ''
             url = EPGManager(config).get_epg_url()
             if not url:
+                return ''
+            # 防 404：仅当 EPG 输出文件真实存在才注入 url-tvg。
+            # 否则播放器按该地址拉取会得到 404，部分播放器会弹错甚至拒载整个列表，
+            # 比完全不注入更糟。EPG 数据由调度器 / 生成前准备步骤负责产出。
+            out_params = config.get_output_params() if hasattr(config, 'get_output_params') else {}
+            out_dir = (out_params.get('output_dir') or './www/output').rstrip('/\\')
+            epg_filename = epg_cfg.get('output_filename') or 'epg.xml.gz'
+            epg_file = os.path.join(out_dir, epg_filename)
+            if not os.path.exists(epg_file) or os.path.getsize(epg_file) == 0:
+                self.logger.info('EPG 文件 %s 不存在或为空，跳过 url-tvg 注入（EPG 数据未就绪）', epg_file)
                 return ''
             safe = url.replace('"', '')
             return f' url-tvg="{safe}" x-tvg-url="{safe}"'

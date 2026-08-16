@@ -69,6 +69,8 @@ def test_inject_enabled():
     with (
         patch('web.models.get_all_channel_tvg_map', return_value=_tvg_map()),
         patch('app.epg.EPGManager', side_effect=_fake_epg_manager),
+        patch('app.m3u_generator.os.path.exists', return_value=True),
+        patch('app.m3u_generator.os.path.getsize', return_value=100),
     ):
         gen = _make_gen(inject=True)
         out = gen.generate_enhanced_m3u(

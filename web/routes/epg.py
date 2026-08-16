@@ -132,6 +132,21 @@ async def epg_scheduler():
     """
     await asyncio.sleep(20)  # 启动后稍候，待缓存预热
     while True:
+        # 首次启动且从未成功抓取过：立即触发一次全量刷新，使 EPG 数据在服务启动后尽快就绪。
+        # 否则仅按 03:30 定时触发，用户白天生成的 live.m3u 会一直缺 EPG（url-tvg 指向 404）。
+        # 用 _epg_fetch_running 防重复触发（抓取进行中不二次发起）。
+        try:
+            _st0 = _state_load()
+            if not _st0.get('last_refresh') and not _epg_fetch_running:
+                _stats0 = models.get_epg_stats()
+                if (_stats0.get('channels', 0) or 0) == 0:
+                    logger.info('[EPG-SCHED] 首次启动且未抓取过 EPG，立即触发一次全量刷新')
+                    _track_task(asyncio.create_task(run_refresh(None)))
+                    await asyncio.sleep(60)
+                    continue
+        except Exception as _e:
+            logger.warning(f'[EPG-SCHED] 首次启动检查失败: {_e}')
+
         try:
             from app.config import Config
 
