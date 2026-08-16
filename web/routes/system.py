@@ -251,6 +251,7 @@ async def api_trigger_test(request: Request, current_user: dict = Depends(requir
         # 解析请求体：支持 {"limit": 300|500|1000|"all"}（规模测试）或 {"file_id": "<源文件ID>"}（按文件测试）
         limit = MAX_TEST_SOURCES
         file_id = None
+        engine = None
         try:
             body = await request.body()
             if body:
@@ -267,8 +268,12 @@ async def api_trigger_test(request: Request, current_user: dict = Depends(requir
                 else:
                     limit = MAX_TEST_SOURCES
                 file_id = payload.get('file_id') or None
+                raw_engine = payload.get('engine') or None
+                # 仅接受已知引擎；非法/缺省 → 跟随系统配置（不覆盖）
+                engine = raw_engine if raw_engine in ('ffprobe', 'aiohttp') else None
         except Exception:
             limit = MAX_TEST_SOURCES
+            engine = None
 
         sm = _load_source_manager()
         if not sm:
@@ -319,7 +324,9 @@ async def api_trigger_test(request: Request, current_user: dict = Depends(requir
 
         # 文件模式不限制上限（limit 仅用于规模测试截断），传 None 避免 _run_test_task 误报"已限制上限"
         thread_limit = None if mode == 'file' else limit
-        _test_thread = threading.Thread(target=_run_test_task, args=(sources, thread_limit, my_gen), daemon=True)
+        _test_thread = threading.Thread(
+            target=_run_test_task, args=(sources, thread_limit, my_gen, engine), daemon=True
+        )
         _test_thread.start()
 
         models.add_audit_log(
@@ -848,7 +855,7 @@ def _auto_generate_from_tested(tested: list[dict]) -> None:
         logger.warning('[TEST] 自动回写 live.m3u 失败: %s', result.get('reason'))
 
 
-def _run_test_task(sources: list[dict], limit: int | None = None, gen: int = 0) -> None:
+def _run_test_task(sources: list[dict], limit: int | None = None, gen: int = 0, engine: str | None = None) -> None:
     """后台线程：分批并发测试所有源并实时上报进度，支持暂停/取消控制。
 
     采用分批提交（每批约 max_ff*1.5 个），批次之间与每完成一个源时检查
@@ -893,6 +900,23 @@ def _run_test_task(sources: list[dict], limit: int | None = None, gen: int = 0) 
         # 记录实例并清除上次残留的中断标志，供暂停/取消立即终止子进程
         _test_tester = tester
         tester.clear_abort()
+
+        # 临时引擎覆盖（前端下拉指定，不依赖全局配置；engine=None 时跟随配置不覆盖）
+        if engine:
+            try:
+                import aiohttp as _aiohttp_mod
+            except Exception:
+                _aiohttp_mod = None
+            if engine == 'aiohttp' and _aiohttp_mod is None:
+                logger.warning('[TEST] 临时引擎=aiohttp 但 aiohttp 未安装，回退 ffprobe')
+                tester.test_method = 'ffprobe'
+            else:
+                tester.test_method = engine
+            logger.warning(
+                '[TEST] 临时引擎覆盖生效: %s（全局配置=%s）',
+                tester.test_method,
+                sm.config.get_testing_params().get('test_method'),
+            )
     except Exception as e:
         with _test_lock:
             _test_state = {

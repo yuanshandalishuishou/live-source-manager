@@ -43,6 +43,11 @@
                     style="display:none;max-width:280px" title="选择要测试的源文件（在线/本地）">
                 <option value="">— 请选择文件 —</option>
             </select>
+            <select id="test-engine-select" class="form-select form-select-sm" title="测速引擎（临时覆盖，不依赖全局配置；留空=跟随系统设置）">
+                <option value="">跟随配置（默认）</option>
+                <option value="ffprobe">FFprobe（完整元数据）</option>
+                <option value="aiohttp">Aiohttp（异步轻量）</option>
+            </select>
             <span class="test-details" id="test-status-badge" style="font-size:13px">空闲</span>
         </div>
         <div class="toolbar-right">
@@ -411,6 +416,13 @@ function triggerTest() {
     } else {
         payload = { limit: limitVal };
         scopeLabel = (limitVal === 'all' ? '全部源' : (limitVal + ' 个源'));
+    }
+
+    // 临时引擎覆盖：留空=跟随系统配置（不覆盖）
+    var engineSel = document.getElementById('test-engine-select');
+    var engineVal = engineSel ? engineSel.value : '';
+    if (engineVal) {
+        payload.engine = engineVal;
     }
 
     // Show immediate feedback

@@ -346,10 +346,15 @@ SECTION_SCHEMA: dict[str, dict[str, tuple]] = {
             '启用后每次测速留存全部结果到候选池，输出时按指标选 Top N 并固定手动冻结的优选源（对标 iptv-api）',
         ),
         'auto_select_metric': (
-            'str',
+            'choice',
             'speed',
             '择优指标',
             'speed=快源优先；latency=延迟低优先；resolution=分辨率高优先',
+            [
+                ['speed', '速度优先 — 下载/响应快'],
+                ['latency', '延迟优先 — 低延迟'],
+                ['resolution', '分辨率优先 — 高清优先'],
+            ],
         ),
         'separate_ipv4_ipv6': (
             'bool',
