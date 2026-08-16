@@ -17,7 +17,7 @@ Web 管理服务 — 精简入口
   2. 从各路由模块导入 router 并挂载到 app
   3. 保留 uvicorn 启动代码
   4. 确保 from web.webapp import app 仍然可用（向后兼容）
-  5. 保留 conftest.py 需要的 CSRF_EXEMPT_PATHS / _auth_sessions / _auth_csrf_tokens
+  5. 保留 conftest.py 需要的 CSRF_EXEMPT_PATHS / _auth_sessions（CSRF 令牌为无状态 HMAC，不在此导出）
 """
 
 import os

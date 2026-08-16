@@ -147,14 +147,15 @@ def is_static_safe(url: str) -> tuple[bool, str, str]:
 
 
 def _is_private_ip(host: str) -> bool:
-    """判断 host 是否为私有 / 回环 / 链路本地地址（SSRF 防护用）"""
+    """判断 host 是否为私有 / 回环 / 链路本地 / 未指定地址（SSRF 防护用）"""
     for prefix in PRIVATE_IP_PREFIXES:
         if host.startswith(prefix):
             return True
 
     try:
         ip = ipaddress.ip_address(host)
-        return ip.is_private or ip.is_loopback or ip.is_link_local
+        # is_unspecified 覆盖 0.0.0.0 / :: 等「本机任意地址」，是常见 SSRF 目标，必须拒绝
+        return ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_unspecified
     except ValueError:
         return False
 

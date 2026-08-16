@@ -683,7 +683,6 @@ def get_session(session_id: str) -> dict | None:
 def destroy_session(session_id: str):
     """销毁 session（内存和 SQLite）"""
     _auth_sessions.pop(session_id, None)
-    _auth_csrf_tokens.pop(session_id, None)
     try:
         models.destroy_session_db(session_id)
     except Exception as e:
@@ -711,35 +710,46 @@ async def require_admin(current_user: dict = Depends(get_current_user)):
 
 # ── CSRF 令牌管理 ────────────────────────────
 
-_auth_csrf_tokens: dict[str, tuple] = {}
 CSRF_EXEMPT_PATHS = frozenset({'/api/auth/login', '/login'})
+
+# CSRF 令牌改为「无状态 HMAC」方案（替代原内存字典 _auth_csrf_tokens）：
+#   令牌 = "{过期时间戳}.{HMAC(稳定密钥, session_id|user_agent|过期时间戳)}"
+# - 稳定密钥取自持久化的 CONFIG_ENCRYPT_KEY（跨重启不变），因此服务重启后已登录用户
+#   的令牌依然有效，不会像旧的内存方案那样全员 403 被迫重新登录（纪枢 P1 修复）。
+# - 仍绑定 User-Agent、1 小时过期，保留原 D-8 修复的安全属性。
+_CSFR_FALLBACK_SECRET = hashlib.sha256(os.urandom(32)).digest()
+
+
+def _csrf_secret() -> bytes:
+    """取稳定密钥：优先持久化的 CONFIG_ENCRYPT_KEY，缺席时退回进程级随机值。"""
+    raw = os.environ.get('CONFIG_ENCRYPT_KEY')
+    if raw:
+        return hashlib.sha256(raw.encode('utf-8')).digest()
+    return _CSFR_FALLBACK_SECRET
 
 
 def _get_csrf_token(session_id: str, user_agent: str = '') -> str:
-    """生成并存储 CSRF token（1小时复用），D-8 修复：绑定 User-Agent 提升安全性"""
-    now = time.time()
-    stored = _auth_csrf_tokens.get(session_id)
-    if stored:
-        token, ua, expires = stored
-        if now < expires and ua == user_agent:
-            return token
-    token = hashlib.sha256(f'{session_id}:{user_agent}:{uuid.uuid4().hex}'.encode()).hexdigest()
-    _auth_csrf_tokens[session_id] = (token, user_agent, now + CSRF_TTL)
-    return token
+    """生成无状态 CSRF 令牌（1 小时过期，绑定 User-Agent）。"""
+    expires = int(time.time()) + CSRF_TTL
+    msg = f'{session_id}|{user_agent}|{expires}'
+    sig = hmac.new(_csrf_secret(), msg.encode('utf-8'), hashlib.sha256).hexdigest()
+    return f'{expires}.{sig}'
 
 
 def verify_csrf_token(session_id: str, token: str, user_agent: str = '') -> bool:
-    """验证 CSRF token（D-8 修复：同时校验 User-Agent 一致性）"""
-    stored = _auth_csrf_tokens.get(session_id)
-    if not stored:
+    """验证无状态 CSRF 令牌（校验过期时间、User-Agent 一致性与签名）。"""
+    if not token or '.' not in token:
         return False
-    stored_token, ua, expires = stored
+    try:
+        expires_s, sig = token.split('.', 1)
+        expires = int(expires_s)
+    except (ValueError, TypeError):
+        return False
     if time.time() > expires:
-        _auth_csrf_tokens.pop(session_id, None)
         return False
-    if ua != user_agent:
-        return False
-    return hmac.compare_digest(stored_token, token)
+    msg = f'{session_id}|{user_agent}|{expires}'
+    expected = hmac.new(_csrf_secret(), msg.encode('utf-8'), hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, sig)
 
 
 # ═══════════════════════════════════════════════════

@@ -770,7 +770,7 @@ def _publish_test_state() -> None:
             logger.warning(f'WS 广播测试状态失败: {e}')
 
 
-def _persist_tested_sources(sources: list[dict], results: list[dict], cancelled: bool, total: int) -> None:
+def _persist_tested_sources(sources: list[dict], results: list[dict], cancelled: bool, total: int) -> list[dict]:
     """落盘本次 Web 测试的完整源（含频道元数据 + 真实测试结果）到 latest_test_sources.json。
 
     每条结果保留原始解析源的全部字段（name/url/group_title/tvg-* 等），仅把展示态
@@ -811,10 +811,10 @@ def _persist_tested_sources(sources: list[dict], results: list[dict], cancelled:
 
 
 def _build_and_generate_playlist(results: list[dict]) -> dict:
-    """构造 Manager 并基于测试结果生成播放列表（供手动端点与测试收尾自动回写共用）。"""
-    from app.manager import Manager
+    """构造 EnhancedLiveSourceManager 并基于测试结果生成播放列表（供手动端点与测试收尾自动回写共用）。"""
+    from app.manager import EnhancedLiveSourceManager
 
-    m = Manager()
+    m = EnhancedLiveSourceManager()
     if not m.initialize():
         return {'success': False, 'valid': 0, 'base': 0, 'qualified': 0, 'files': [], 'reason': 'Manager 初始化失败'}
     return m.generate_from_web_test(results)

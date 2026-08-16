@@ -89,12 +89,11 @@ def clean_db_before_each():
     except Exception:
         pass
 
-    # 清理内存中的 session 和 CSRF token
+    # 清理内存中的 session（CSRF 令牌已改为无状态 HMAC，无需清理）
     try:
-        from web.webapp import _auth_sessions, _auth_csrf_tokens
+        from web.core import _auth_sessions
 
         _auth_sessions.clear()
-        _auth_csrf_tokens.clear()
     except Exception:
         pass
 
