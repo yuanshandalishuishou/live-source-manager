@@ -48,6 +48,9 @@ export LSM_OUTPUT_CANDIDATE_POOL_ENABLED=False
 | proxy_password | 字符串 |  | 代理密码； | `LSM_NETWORK_PROXY_PASSWORD` |
 | github_mirror | 字符串 | https://ghproxy.com/ | GitHub镜像站；用于 mirror 下载方式的代理网站URL | `LSM_NETWORK_GITHUB_MIRROR` |
 | ipv6_enabled | 布尔 | True | 启用IPv6； | `LSM_NETWORK_IPV6_ENABLED` |
+| download_connect_timeout | 整数 | 10 | 下载连接超时(秒)；TCP 连接建立超时，短超时让不可达源快速失败 | `LSM_NETWORK_DOWNLOAD_CONNECT_TIMEOUT` |
+| download_total_timeout | 整数 | 30 | 下载总超时(秒)；单个源文件下载的总超时（含连接+传输） | `LSM_NETWORK_DOWNLOAD_TOTAL_TIMEOUT` |
+| download_batch_size | 整数 | 12 | 下载并发数；同时下载的源文件数量，越大越快但更占带宽 | `LSM_NETWORK_DOWNLOAD_BATCH_SIZE` |
 
 ## [HTTPServer]
 
@@ -71,12 +74,12 @@ export LSM_OUTPUT_CANDIDATE_POOL_ENABLED=False
 
 | 键 | 类型 | 默认值 | 说明 | 环境变量 |
 | --- | --- | --- | --- | --- |
-| timeout | 整数 | 10 | 测试超时(秒)； | `LSM_TESTING_TIMEOUT` |
-| concurrent_threads | 整数 | 50 | 并发线程数； | `LSM_TESTING_CONCURRENT_THREADS` |
+| timeout | 整数 | 10 | 测试超时(秒)；单个源探测的最长等待时间，超时即判失败 | `LSM_TESTING_TIMEOUT` |
+| concurrent_threads | 整数 | 50 | 并发线程数；同时探测的源数量，越大越快但更占资源 | `LSM_TESTING_CONCURRENT_THREADS` |
 | max_concurrent_ffprobe | 整数 | 16 | ffprobe并发数(实时测试)； | `LSM_TESTING_MAX_CONCURRENT_FFPROBE` |
 | cache_ttl | 整数 | 120 | 缓存有效期(分)； | `LSM_TESTING_CACHE_TTL` |
 | enable_speed_test | 布尔 | True | 启用速率测试； | `LSM_TESTING_ENABLE_SPEED_TEST` |
-| speed_test_duration | 整数 | 3 | 速率测试时长(秒)； | `LSM_TESTING_SPEED_TEST_DURATION` |
+| speed_test_duration | 整数 | 3 | 速率测试时长(秒)；单源下载测速时长(秒)；3s可显著缩短整体检测耗时 | `LSM_TESTING_SPEED_TEST_DURATION` |
 | auto_scan_enabled | 布尔 | False | 启用自动扫描测试； | `LSM_TESTING_AUTO_SCAN_ENABLED` |
 | auto_scan_mode | 字符串 | interval | 自动扫描模式；interval=按间隔小时数；daily=每日指定时刻（与下方参数配合） | `LSM_TESTING_AUTO_SCAN_MODE` |
 | auto_scan_interval_hours | 整数 | 24 | 间隔小时数；mode=interval 时生效：每 N 小时自动测试一次 | `LSM_TESTING_AUTO_SCAN_INTERVAL_HOURS` |
@@ -93,7 +96,7 @@ export LSM_OUTPUT_CANDIDATE_POOL_ENABLED=False
 | global_whitelist | 字符串 |  | 全局白名单；URL/host 清单，豁免于黑名单与冻结，逗号或换行分隔 | `LSM_TESTING_GLOBAL_WHITELIST` |
 | output_sort_by | 字符串 | speed | 输出排序；speed=快源在前；name=按名；resolution=按分辨率 | `LSM_TESTING_OUTPUT_SORT_BY` |
 | max_test_attempts | 整数 | 1 | 实时测试次数；每个地址的总测试次数：1=测一次；2=测两次(含1次自动重试)；默认1 | `LSM_TESTING_MAX_TEST_ATTEMPTS` |
-| test_method | 字符串 | ffprobe | 测速引擎；ffprobe=默认，使用 ffprobe/ffmpeg 探测完整元数据(分辨率/编码/比特率)；aiohttp=异步下载分片算速+延迟，轻量但无分辨率元数据 | `LSM_TESTING_TEST_METHOD` |
+| test_method | choice | ffprobe | 测速引擎；ffprobe=默认，使用 ffprobe/ffmpeg 探测完整元数据(分辨率/编码/比特率)；aiohttp=异步下载分片算速+延迟，轻量但无分辨率元数据 | `LSM_TESTING_TEST_METHOD` |
 
 ## [Output]
 
@@ -107,7 +110,7 @@ export LSM_OUTPUT_CANDIDATE_POOL_ENABLED=False
 | enable_filter | 布尔 | True | 启用分层过滤；关闭后 base/qualified 均直接用全量有效源，等效关闭分辨率聚合与质量过滤 | `LSM_OUTPUT_ENABLE_FILTER` |
 | whitelist_force_keep | 布尔 | False | 白名单强制保留；白名单源即使未过质量过滤也保留到输出 | `LSM_OUTPUT_WHITELIST_FORCE_KEEP` |
 | candidate_pool_enabled | 布尔 | True | 候选池择优；启用后每次测速留存全部结果到候选池，输出时按指标选 Top N 并固定手动冻结的优选源（对标 iptv-api） | `LSM_OUTPUT_CANDIDATE_POOL_ENABLED` |
-| auto_select_metric | 字符串 | speed | 择优指标；speed=快源优先；latency=延迟低优先；resolution=分辨率高优先 | `LSM_OUTPUT_AUTO_SELECT_METRIC` |
+| auto_select_metric | choice | speed | 择优指标；speed=快源优先；latency=延迟低优先；resolution=分辨率高优先 | `LSM_OUTPUT_AUTO_SELECT_METRIC` |
 | separate_ipv4_ipv6 | 布尔 | True | IPv4/IPv6 分文件；在 live.m3u(双栈共存) 之外，额外生成 live-ipv4.m3u 与 live-ipv6.m3u 单栈文件 | `LSM_OUTPUT_SEPARATE_IPV4_IPV6` |
 | ipv4_filename | 字符串 | live-ipv4.m3u | IPv4 文件名； | `LSM_OUTPUT_IPV4_FILENAME` |
 | ipv6_filename | 字符串 | live-ipv6.m3u | IPv6 文件名； | `LSM_OUTPUT_IPV6_FILENAME` |
@@ -156,6 +159,7 @@ export LSM_OUTPUT_CANDIDATE_POOL_ENABLED=False
 | fetch_timeout | 整数 | 60 | 抓取超时(秒)；单个 EPG 源下载超时 | `LSM_EPG_FETCH_TIMEOUT` |
 | web_base_url | 字符串 |  | EPG外链基址；留空自动探测 http://<host>:<发布端口> | `LSM_EPG_WEB_BASE_URL` |
 | inject_into_m3u | 布尔 | True | 注入M3U头；在 #EXTM3U 注入 url-tvg 指向 EPG 文件 | `LSM_EPG_INJECT_INTO_M3U` |
+| open_subscribe_epg | 布尔 | True | 订阅源EPG自动提取；解析订阅源 #EXTM3U 头的 url-tvg/x-tvg-url 并自动注册为 EPG 源 | `LSM_EPG_OPEN_SUBSCRIBE_EPG` |
 
 ## 其他内部默认键（未暴露在配置中心 UI）
 
@@ -163,6 +167,3 @@ export LSM_OUTPUT_CANDIDATE_POOL_ENABLED=False
 | --- | --- | --- |
 | Sources.source_file_ua_settings | {} | `LSM_SOURCES_SOURCE_FILE_UA_SETTINGS` |
 | Sources.channel_ua_overrides | {} | `LSM_SOURCES_CHANNEL_UA_OVERRIDES` |
-| Network.download_connect_timeout | 10 | `LSM_NETWORK_DOWNLOAD_CONNECT_TIMEOUT` |
-| Network.download_total_timeout | 30 | `LSM_NETWORK_DOWNLOAD_TOTAL_TIMEOUT` |
-| Network.download_batch_size | 12 | `LSM_NETWORK_DOWNLOAD_BATCH_SIZE` |

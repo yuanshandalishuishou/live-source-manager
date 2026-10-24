@@ -80,12 +80,31 @@ def _get_csrf_exempt_paths():
 _DEFAULTS_YAML_PATH = os.path.join(PROJECT_ROOT, 'config', 'config-defaults.yaml')
 
 
+def _normalize_multiline(value):
+    """归一化多行配置值：按行 strip、去空行、以 \\n 连接。
+
+    历史缺陷：config-defaults.yaml 曾用单引号折叠标量书写 online_urls 等多行值，
+    YAML 解析会把换行折叠为空格，导致 URL 被粘成一个巨串（D-01）。现文件已改用
+    |- 块标量；本函数作为加载端双保险，任何残留折叠/空行都在此归一化。
+    """
+    if not isinstance(value, str) or '\n' not in value:
+        return value
+    lines = [line.strip() for line in value.split('\n')]
+    return '\n'.join(line for line in lines if line)
+
+
 def _load_defaults_from_yaml() -> dict | None:
-    """从 config-defaults.yaml 加载默认值"""
+    """从 config-defaults.yaml 加载默认值（多行值经 _normalize_multiline 归一化）"""
     if os.path.exists(_DEFAULTS_YAML_PATH):
         try:
             with open(_DEFAULTS_YAML_PATH, encoding='utf-8') as f:
-                return yaml.safe_load(f)
+                data = yaml.safe_load(f)
+            if isinstance(data, dict):
+                for _section, fields in data.items():
+                    if isinstance(fields, dict):
+                        for key, value in fields.items():
+                            fields[key] = _normalize_multiline(value)
+            return data
         except Exception as e:
             logger.warning(f'加载 config-defaults.yaml 失败: {e}')
     return None
@@ -417,6 +436,12 @@ SECTION_SCHEMA: dict[str, dict[str, tuple]] = {
         'fetch_timeout': ('int', '60', '抓取超时(秒)', '单个 EPG 源下载超时'),
         'web_base_url': ('str', '', 'EPG外链基址', '留空自动探测 http://<host>:<发布端口>'),
         'inject_into_m3u': ('bool', 'True', '注入M3U头', '在 #EXTM3U 注入 url-tvg 指向 EPG 文件'),
+        'open_subscribe_epg': (
+            'bool',
+            'True',
+            '订阅源EPG自动提取',
+            '解析订阅源 #EXTM3U 头的 url-tvg/x-tvg-url 并自动注册为 EPG 源',
+        ),
     },
 }
 

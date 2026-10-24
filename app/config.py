@@ -167,6 +167,7 @@ class Config:
         'EPG.fetch_timeout': '60',  # 单个 EPG 源下载超时(秒)
         'EPG.web_base_url': '',  # 留空自动探测 http://<host>:<fileshare_port>
         'EPG.inject_into_m3u': 'True',  # 在 #EXTM3U 头注入 url-tvg
+        'EPG.open_subscribe_epg': 'True',  # 订阅源 #EXTM3U 头 url-tvg/x-tvg-url 自动注册为 EPG 源
     }
 
     def __init__(self):
