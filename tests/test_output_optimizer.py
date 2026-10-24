@@ -10,6 +10,7 @@ from app.m3u_generator import M3UGenerator
 
 
 def _make_gen(output_params: dict, whitelist: str = '') -> M3UGenerator:
+    sort_by = output_params.pop('output_sort_by', 'speed')
     cfg = MagicMock()
     cfg.get_output_params.return_value = {
         'filename': 'live.m3u',
@@ -33,8 +34,11 @@ def _make_gen(output_params: dict, whitelist: str = '') -> M3UGenerator:
     }
     cfg.get_ua_position.return_value = 'extinf'
     cfg.is_ua_enabled.return_value = False
+    # output_sort_by 归属 Testing 段（D-04 修复后从 config.get('Testing', ...) 读取）
     cfg.get.side_effect = lambda sec, key, default='': (
-        whitelist if (sec, key) == ('Testing', 'global_whitelist') else default
+        sort_by
+        if (sec, key) == ('Testing', 'output_sort_by')
+        else (whitelist if (sec, key) == ('Testing', 'global_whitelist') else default)
     )
     return M3UGenerator(cfg, MagicMock())
 
@@ -94,6 +98,20 @@ class TestOutputSortBy:
         grouped = gen.enhanced_group_and_sort_sources(srcs, 'base')
         flat = [s['name'] for grp in grouped.values() for s in grp]
         assert flat == ['high', 'low'], flat
+
+    def test_sort_by_read_from_testing_section_not_output_params(self):
+        """D-04 回归：排序键只认 Testing.output_sort_by。
+
+        Output 段历史上没有 output_sort_by 键；即使 output_params 中混入
+        该键（旧调用方残留），也不得覆盖 Testing 段的配置。
+        """
+        gen = _make_gen({}, whitelist='')
+        # 直接在 output_params 残留一个错误值，Testing 段保持默认 speed
+        gen.output_params['output_sort_by'] = 'name'
+        srcs = [_src('a', 100), _src('b', 500), _src('c', 50)]
+        grouped = gen.enhanced_group_and_sort_sources(srcs, 'base')
+        flat = [s['name'] for grp in grouped.values() for s in grp]
+        assert flat == ['b', 'a', 'c'], flat
 
 
 class TestWhitelistForceKeep:

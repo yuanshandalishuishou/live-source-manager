@@ -106,7 +106,10 @@ class SourceManager:
             _project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
             self.online_dir = os.path.join(_project_root, 'config', 'online')
         # M4: 共享session生命周期管理
-        self._session = None
+        # D-06: 直连与代理分别缓存（_session / _proxy_session），
+        # 避免代理请求误用直连会话（SOCKS5 连接器不匹配导致代理失效）
+        self._session: aiohttp.ClientSession | None = None
+        self._proxy_session: aiohttp.ClientSession | None = None
         self._session_lock = threading.Lock()
 
         # ---- 纪码增强:GitHub API Token注入 ----
@@ -123,6 +126,9 @@ class SourceManager:
         self._github_entry_map: dict[str, list[str]] = {}
         self._github_entry_map_path = os.path.join(self.online_dir, '.github_entry_map.json')
         self._load_github_entry_map()
+
+        # P0-b: 订阅源 #EXTM3U 头 url-tvg/x-tvg-url 已注册集合（实例级去重，避免重复写库）
+        self._known_epg_urls: set[str] = set()
 
     def _load_github_entry_map(self) -> None:
         """加载 GitHub 条目→文件名 映射（采集时落盘，重启后可恢复，供文件级 UA 精确匹配）"""
@@ -215,10 +221,35 @@ class SourceManager:
         auth = f'{user}:{pwd}@' if user and pwd else ''
         return f'http://{auth}{host}:{port}'
 
-    async def get_session(self, use_proxy: bool = False) -> aiohttp.ClientSession:
-        """M4: 获取或创建共享的aiohttp会话(复用session代替每次创建销毁)
+    def _is_proxy_connector(self, session: aiohttp.ClientSession) -> bool:
+        """判断会话连接器是否为 SOCKS5 代理连接器。"""
+        return aiohttp_socks is not None and isinstance(session.connector, aiohttp_socks.ProxyConnector)
 
-        当 session 已存在且未关闭时复用,避免每个请求创建/销毁 session。
+    def _connector_matches(self, session: aiohttp.ClientSession, effective_proxy: bool) -> bool:
+        """校验缓存会话的连接器类型与请求模式匹配（D-06）。
+
+        SOCKS5 代理模式应为 ProxyConnector；直连（及 HTTP 代理逐请求转发）应为
+        普通 TCPConnector。运行时代理开关/类型可能变化，复用前校验避免错配。
+        """
+        if session.connector is None:
+            return False
+        is_proxy = self._is_proxy_connector(session)
+        return is_proxy if effective_proxy else not is_proxy
+
+    def _get_cached_session(self, effective_proxy: bool) -> aiohttp.ClientSession | None:
+        """按 effective_proxy 返回已缓存且可用的会话，否则 None。"""
+        session = self._proxy_session if effective_proxy else self._session
+        if session is None or session.closed:
+            return None
+        if not self._connector_matches(session, effective_proxy):
+            return None
+        return session
+
+    async def get_session(self, use_proxy: bool = False) -> aiohttp.ClientSession:
+        """M4/D-06: 获取或创建共享的aiohttp会话(复用session代替每次创建销毁)
+
+        直连与代理分别缓存复用，避免每个请求创建/销毁 session；代理未启用时
+        代理请求退化为直连，与直连请求共用同一会话，不重复建连接。
 
         Args:
             use_proxy: 是否使用代理
@@ -226,57 +257,77 @@ class SourceManager:
         Returns:
             aiohttp.ClientSession: HTTP会话实例
         """
-        # 检查现有session是否可用
-        if self._session is not None and not self._session.closed:
-            return self._session
+        # 代理开关未启用时，use_proxy=True 的请求同样走直连缓存槽
+        effective_proxy = bool(use_proxy and self.network_config.get('proxy_enabled'))
+
+        cached = self._get_cached_session(effective_proxy)
+        if cached is not None:
+            return cached
 
         with self._session_lock:
             # 双重检查
-            if self._session is not None and not self._session.closed:
-                return self._session
+            cached = self._get_cached_session(effective_proxy)
+            if cached is not None:
+                return cached
 
-            connector = None
-
-            # 共享会话默认超时（短一点，死源快速失败；实际下载在 download_file 另设）
-            timeout = aiohttp.ClientTimeout(total=30, connect=10, sock_connect=10, sock_read=20)
-
-            # 设置地址族(支持IPv6)
-            family = socket.AF_INET
-            if self.network_config['ipv6_enabled']:
-                family = socket.AF_UNSPEC
-
-            # 代理配置处理
-            if use_proxy and self.network_config['proxy_enabled']:
-                proxy_type = self.network_config['proxy_type'].lower()
-                proxy_host = self.network_config['proxy_host']
-                proxy_port = self.network_config['proxy_port']
-                proxy_username = self.network_config['proxy_username']
-                proxy_password = self.network_config['proxy_password']
-
-                try:
-                    if proxy_type in ['socks5', 'socks5h']:
-                        # SOCKS5代理配置
-                        if proxy_username and proxy_password:
-                            proxy_url = f'{proxy_type}://{proxy_username}:{proxy_password}@{proxy_host}:{proxy_port}'
-                        else:
-                            proxy_url = f'{proxy_type}://{proxy_host}:{proxy_port}'
-
-                        connector = aiohttp_socks.ProxyConnector.from_url(
-                            proxy_url, family=family, verify_ssl=False, limit=100
-                        )
-                    else:
-                        # HTTP代理配置
-                        connector = aiohttp.TCPConnector(family=family, verify_ssl=False, limit=100)
-                except Exception as e:
-                    self.logger.warning(f'创建代理连接器失败: {e}, 将使用直连')
-                    connector = aiohttp.TCPConnector(family=family, verify_ssl=False, limit=100)
+            session = await self._create_session(effective_proxy)
+            # 替换槽位中的陈旧会话（连接器不匹配或已关闭），先建后关避免窗口期无会话
+            stale = self._proxy_session if effective_proxy else self._session
+            if effective_proxy:
+                self._proxy_session = session
             else:
-                # 直连配置
-                connector = aiohttp.TCPConnector(family=family, verify_ssl=False, limit=100)
+                self._session = session
+            if stale is not None and stale is not session and not stale.closed:
+                try:
+                    await stale.close()
+                except Exception as e:
+                    self.logger.warning(f'关闭陈旧会话失败(忽略): {e}')
+            return session
 
-            self._session = aiohttp.ClientSession(connector=connector, timeout=timeout)
-            assert self._session is not None
-            return self._session
+    async def _create_session(self, use_proxy: bool) -> aiohttp.ClientSession:
+        """按代理/直连模式创建新的 aiohttp 会话（调用方负责持有 _session_lock）。"""
+        connector = None
+
+        # 共享会话默认超时（短一点，死源快速失败；实际下载在 download_file 另设）
+        timeout = aiohttp.ClientTimeout(total=30, connect=10, sock_connect=10, sock_read=20)
+
+        # 设置地址族(支持IPv6)
+        family = socket.AF_INET
+        if self.network_config['ipv6_enabled']:
+            family = socket.AF_UNSPEC
+
+        # 代理配置处理
+        if use_proxy and self.network_config['proxy_enabled']:
+            proxy_type = self.network_config['proxy_type'].lower()
+            proxy_host = self.network_config['proxy_host']
+            proxy_port = self.network_config['proxy_port']
+            proxy_username = self.network_config['proxy_username']
+            proxy_password = self.network_config['proxy_password']
+
+            try:
+                if proxy_type in ['socks5', 'socks5h']:
+                    # SOCKS5代理配置
+                    if proxy_username and proxy_password:
+                        proxy_url = f'{proxy_type}://{proxy_username}:{proxy_password}@{proxy_host}:{proxy_port}'
+                    else:
+                        proxy_url = f'{proxy_type}://{proxy_host}:{proxy_port}'
+
+                    connector = aiohttp_socks.ProxyConnector.from_url(
+                        proxy_url, family=family, verify_ssl=False, limit=100
+                    )
+                else:
+                    # HTTP代理配置
+                    connector = aiohttp.TCPConnector(family=family, verify_ssl=False, limit=100)
+            except Exception as e:
+                self.logger.warning(f'创建代理连接器失败: {e}, 将使用直连')
+                connector = aiohttp.TCPConnector(family=family, verify_ssl=False, limit=100)
+        else:
+            # 直连配置
+            connector = aiohttp.TCPConnector(family=family, verify_ssl=False, limit=100)
+
+        session = aiohttp.ClientSession(connector=connector, timeout=timeout)
+        assert session is not None
+        return session
 
     async def download_all_sources(self, github_download_methods: dict | None = None) -> list[str]:
         """
@@ -869,6 +920,91 @@ class SourceManager:
 
         return sources
 
+    # url-tvg / x-tvg-url 属性提取（大小写不敏感，单双引号均可）
+    _TVG_URL_ATTR_RE = re.compile(
+        r'(?:url-tvg|x-tvg-url)\s*=\s*(?:"([^"]*)"|\'([^\']*)\')',
+        re.IGNORECASE,
+    )
+
+    def _extract_tvg_url(self, header_line: str) -> str | None:
+        """从 #EXTM3U 头行提取 url-tvg / x-tvg-url 属性值。
+
+        Args:
+            header_line: #EXTM3U 开头的文件头行
+
+        Returns:
+            str | None: 首个合法的 http(s) EPG URL；无属性或非法时返回 None
+        """
+        if not header_line:
+            return None
+        for match in self._TVG_URL_ATTR_RE.finditer(header_line):
+            candidate = (match.group(1) or match.group(2) or '').strip()
+            if candidate.lower().startswith(('http://', 'https://')):
+                return candidate
+        return None
+
+    def _register_subscribe_epg(self, url: str, label: str) -> bool:
+        """P0-b: 将订阅源 #EXTM3U 头中的 EPG URL 自动注册为 EPG 源。
+
+        - 开关：EPG.open_subscribe_epg（默认 True，可在配置中心关闭）
+        - 去重：实例级 _known_epg_urls + add_epg_source 按 URL 去重（重复返回 0）
+        - 安全：过 is_static_safe 窄门禁（SSRF/协议）
+        - 降级：web.models 导入/写入失败时静默降级，不影响解析主流程
+
+        Args:
+            url: EPG 文件 URL（http/https）
+            label: 来源标识（通常为源文件名）
+
+        Returns:
+            bool: 是否新注册成功（重复/关闭/失败均为 False）
+        """
+        if not url:
+            return False
+
+        # 开关查询（默认开启）；配置不可用时保守不注册
+        try:
+            if not self.config.getboolean('EPG', 'open_subscribe_epg', True):
+                return False
+        except Exception as e:
+            self.logger.warning(f'读取 EPG.open_subscribe_epg 失败,跳过自动注册: {e}')
+            return False
+
+        # 实例级去重：同一 URL 只处理一次
+        if url in self._known_epg_urls:
+            return False
+        self._known_epg_urls.add(url)
+
+        # SSRF 窄门禁（与下载/解析链路同一口径）
+        safe, reason, category = is_static_safe(url)
+        if not safe:
+            self.logger.warning(f'订阅源 EPG URL 未过窄门禁({category}),跳过注册: {reason}')
+            return False
+
+        try:
+            from web import models
+        except Exception:
+            # web 层不可用（如纯 app 层运行）时静默降级
+            return False
+
+        try:
+            new_id = models.add_epg_source(
+                name=f'订阅源EPG-{label}',
+                url=url,
+                enabled=True,
+                priority=200,
+                remark='auto/subscribe',
+            )
+        except Exception as e:
+            self.logger.warning(f'注册订阅源 EPG 失败(忽略): {e}')
+            return False
+
+        if new_id:
+            self.logger.info(f'已从订阅源自动注册 EPG 源: {url}')
+            return True
+        # URL 已存在（add_epg_source 重复返回 0），视为已覆盖
+        self.logger.debug(f'订阅源 EPG 已存在,跳过: {url}')
+        return False
+
     def parse_file(
         self,
         file_path: str,
@@ -925,6 +1061,10 @@ class SourceManager:
 
             # 跳过M3U文件头
             if line.startswith('#EXTM3U'):
+                # P0-b: 订阅源 EPG 自动提取（url-tvg/x-tvg-url，每个文件仅一次）
+                tvg_url = self._extract_tvg_url(line)
+                if tvg_url:
+                    self._register_subscribe_epg(tvg_url, os.path.basename(file_path))
                 i += 1
                 continue
 
@@ -1187,14 +1327,19 @@ class SourceManager:
             return False
 
     async def close(self):
-        """M4: 关闭共享的aiohttp会话,释放连接资源"""
-        if self._session is not None and not self._session.closed:
-            try:
-                await self._session.close()
-                self.logger.info('共享aiohttp会话已关闭')
-            except Exception as e:
-                self.logger.warning(f'关闭aiohttp会话失败: {e}')
-        self._session = None
+        """M4/D-06: 关闭全部共享aiohttp会话(直连+代理),释放连接资源; 幂等可重复调用"""
+        closed_any = False
+        for attr in ('_session', '_proxy_session'):
+            session = getattr(self, attr, None)
+            if session is not None and not session.closed:
+                try:
+                    await session.close()
+                    closed_any = True
+                except Exception as e:
+                    self.logger.warning(f'关闭aiohttp会话失败: {e}')
+            setattr(self, attr, None)
+        if closed_any:
+            self.logger.info('共享aiohttp会话已关闭')
 
 
 def dedup_sources_by_url(sources: list) -> list:

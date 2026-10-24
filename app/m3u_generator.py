@@ -418,7 +418,8 @@ class M3UGenerator:
                 grouped[audio_group_key].extend(media_sources)
 
         # 第三步：对每个分组内的源进行排序 - 修复None值问题
-        sort_by = (self.output_params.get('output_sort_by') or 'speed').lower()
+        # output_sort_by 归属 Testing 段（Output 段无此键，历史上从 output_params 读取恒为空）
+        sort_by = (self.config.get('Testing', 'output_sort_by', 'speed') or 'speed').lower()
         for group_key, group_sources in grouped.items():
             # 根据媒体类型使用不同的排序策略
             if '收音机' in group_key or '在线音频' in group_key:
@@ -473,50 +474,18 @@ class M3UGenerator:
             return 'All Channels'
 
     def _build_group_title(self, source: dict) -> str:
-        """根据配置的 group_title_format 构建分组标题
+        """构建 group-title（当前固定使用主内容分类，向后兼容）
 
-        支持的格式化字段：
-        {content} - 主内容分类
-        {region} - 地域
-        {language} - 语言
-        {quality} - 清晰度
-        {media_type} - 媒体类型
-        {genre} - 节目类型
-        {category} - 同 {content}（向后兼容）
+        历史说明：曾计划支持配置化的 group_title_format，但 `m3u_group_title_format`
+        键从未进入 SECTION_SCHEMA/_DEFAULT_VALUES，且旧代码 `Config.get()` 的
+        section/key 签名用反恒取空值，整段为不可达死代码，V_1.1 已移除；
+        不引入新配置键，需要自定义分组标题时请走 Output.group_by。
 
         Returns:
-            str: 格式化后的分组标题
+            str: 分组标题
         """
         # 默认格式：仅主分类（向后兼容）
-        group_title_format = self.config.get('m3u_group_title_format', '')
-
-        if not group_title_format:
-            # 默认使用 content 维度作为 group-title
-            return source.get('content') or source.get('category') or source.get('group', 'Unknown')
-
-        try:
-            group_title = group_title_format.format(
-                content=source.get('content', source.get('category', 'Unknown')),
-                category=source.get('category', 'Unknown'),
-                region=source.get('region', ''),
-                language=source.get('language', 'zh'),
-                quality=source.get('quality', ''),
-                media_type=source.get('media_type', 'Other'),
-                genre=source.get('genre', ''),
-            )
-            # 去除多余的分隔符（如 // 或 /- ）
-            if not isinstance(group_title, str):
-                group_title = ''
-            import re as _re
-
-            group_title = _re.sub(r'[/\\-]{2,}', '/', group_title)
-            group_title = _re.sub(r'^[/\\-]+|[/\\-]+$', '', group_title)
-            if not group_title:
-                group_title = source.get('content') or source.get('category', 'Unknown')
-            return group_title
-        except KeyError:
-            # 如果格式包含不支持的字段，回退到默认
-            return source.get('content') or source.get('category') or source.get('group', 'Unknown')
+        return source.get('content') or source.get('category') or source.get('group', 'Unknown')
 
     def build_enhanced_extinf(self, source: dict, level: str, tvg_map: dict[str, dict[str, str]] | None = None) -> str:
         """构建增强版EXTINF行
