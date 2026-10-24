@@ -46,7 +46,7 @@ ENV TZ=Asia/Shanghai \
 
 LABEL maintainer="Live Source Manager <admin@example.com>" \
       description="Live Source Manager with Nginx" \
-      version="3.0"
+      version="2.1.0"
 
 # 运行时 apt：只装绝对必需的包
 # 优先使用清华镜像源加速国内构建

@@ -1,0 +1,7 @@
+# 开发/测试依赖（CI test job 与本地 pytest 使用）
+# 运行时依赖见 requirements.txt；版本与 pyproject.toml [project.optional-dependencies].dev 保持一致
+-r requirements.txt
+
+pytest>=8.0
+pytest-asyncio>=1.0
+httpx2>=2.16.0

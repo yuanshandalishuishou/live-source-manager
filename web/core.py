@@ -30,12 +30,14 @@ from contextlib import asynccontextmanager, suppress
 from typing import Any
 
 import yaml
+
+# ── 项目内 import ────────────────────────
+from app import __version__
 from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-# ── 项目内 import ────────────────────────
 from . import models
 
 # ═══════════════════════════════════════════════════
@@ -1212,7 +1214,7 @@ category_keywords:
 # ── FastAPI 应用实例 ──────────────────────────────
 app = FastAPI(
     title='Live Source Manager - Web Admin',
-    version='1.0.0',
+    version=__version__,
     description='直播源管理器 Web 管理界面',
     lifespan=lifespan,
 )

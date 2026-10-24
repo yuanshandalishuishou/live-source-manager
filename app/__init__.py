@@ -218,3 +218,12 @@ __all__ = [
     'setup_logger',
     'validate_url',
 ]
+
+
+# ═══════════════════════════════════════════════════
+# 版本号 — 单一来源（D-02）
+# pyproject.toml [project].version 与 web.core FastAPI(version=...)
+# 均引用本常量，三处必须保持一致（tests/test_version_consistency.py 守护）。
+# ═══════════════════════════════════════════════════
+
+__version__ = '2.1.0'
