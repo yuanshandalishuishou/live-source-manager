@@ -109,7 +109,11 @@
                 // DOM 已就绪，同步初始化 toggle（U-06 修复：无 setTimeout，
                 // 初始文本用 data-active 直接同步渲染）
                 el.querySelectorAll('[data-rule-id]').forEach(function(container) {
-                    var isActive = container.dataset.active === 'true';
+                    // is_active 来自 SQLite 整数 1/0，经 JSON 序列化后为数字，
+                    // 拼入 data-active 后 dataset.active 是字符串 "1"/"0"，
+                    // 必须按数值判定，而非 'true' 字符串比较（修复"全部显示已禁用"）
+                    var rawActive = container.dataset.active;
+                    var isActive = rawActive === '1' || rawActive === 'true' || rawActive === 1 || rawActive === true;
                     container.innerHTML = '';
                     if (window.IS_ADMIN) {
                         var toggle = LSM.createToggle(isActive, function(checked) {
