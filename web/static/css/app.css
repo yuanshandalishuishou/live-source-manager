@@ -145,7 +145,6 @@ body {
 
 /* Loading */
 .loading { text-align: center; padding: 40px; color: var(--text-light); }
-.spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid #fff; border-top-color: transparent; border-radius: 50%; animation: spin .6s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* Progress Bar */
@@ -277,7 +276,7 @@ tr.status-disabled { opacity: .55; }
 
 /* ══════════════════════════════════════════════════════════════
    未定义引用清零（设计文档 §1.2 — T01 批）
-   补定义: 按钮变体 / 统计卡 / 状态栅格 / 快速操作 / htmx 指示器等
+   补定义: 按钮变体 / 统计卡 / 状态栅格 / 快速操作
    ══════════════════════════════════════════════════════════════ */
 
 /* ── 全局焦点态与动效保护 ────────────────────── */
@@ -306,11 +305,6 @@ tr.status-disabled { opacity: .55; }
 /* 按钮 loading 态（统一 LSM.setBtnLoading 与手写版） */
 .btn-loading { position: relative; pointer-events: none; opacity: .7; }
 .btn-loading::after { content: ''; display: inline-block; width: 14px; height: 14px; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; animation: spin .6s linear infinite; }
-
-/* ── htmx 指示器（htmx 不内置指示器 CSS，F11：登录 spinner 常显） ── */
-.htmx-indicator { display: none; }
-.htmx-request .htmx-indicator,
-.htmx-request.htmx-indicator { display: inline-block; }
 
 /* ── 仪表盘统计卡家族 ────────────────────────── */
 .stat-card { background: var(--card-bg); border-radius: var(--radius); box-shadow: var(--shadow); padding: 20px; border-top: 3px solid var(--border); }

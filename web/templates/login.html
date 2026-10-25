@@ -10,11 +10,7 @@
         <h2>直播源管理器</h2>
         <p>Live Source Manager — Web 管理</p>
     </div>
-    <form hx-post="/api/auth/login"
-          hx-target="body"
-          hx-push-url="/"
-          hx-indicator="#login-spinner"
-          class="login-form">
+    <form class="login-form">
         <div class="form-group">
             <label for="username">用户名</label>
             <input type="text" id="username" name="username" class="form-input" required autofocus>
@@ -28,10 +24,7 @@
             <small class="form-help pwd-capslock" id="password-capslock" style="display:none">{{ icon('warning') }}大写锁定已开启（CapsLock）</small>
         </div>
         <div id="login-error" class="alert alert-error" style="display:none"></div>
-        <button type="submit" class="btn btn-primary btn-block" id="login-btn">
-            <span id="login-spinner" class="spinner htmx-indicator"></span>
-            登录
-        </button>
+        <button type="submit" class="btn btn-primary btn-block" id="login-btn">登录</button>
     </form>
 </div>
 {% endblock %}

@@ -75,33 +75,53 @@
         wirePwdToggle('password', 'password-toggle');
         wireCapsLock('password', 'password-capslock');
 
-        // 失败照实展示后端 detail（决策②，保持既有行为）
-        form.addEventListener('htmx:responseError', function(evt) {
+        // 原生 fetch 登录（替代表单 POST）：失败照实展示后端 detail，
+        // 成功按 force_change_password 跳改密页或控制台（保持既有行为）。
+        form.addEventListener('submit', async function(evt) {
+            evt.preventDefault();
             var errDiv = document.getElementById('login-error');
-            if (!errDiv) return;
-            errDiv.style.display = 'block';
-            try {
-                var data = JSON.parse(evt.detail.xhr.responseText);
-                errDiv.textContent = data.detail || '登录失败';
-            } catch (e) {
-                errDiv.textContent = '登录失败';
-            }
-        });
+            var username = document.getElementById('username').value;
+            var password = document.getElementById('password').value;
+            var btn = document.getElementById('login-btn');
 
-        // 成功：首次登录/默认密码强制改密 → 跳改密页，否则进控制台（S2 修复保持）
-        form.addEventListener('htmx:afterRequest', function(evt) {
-            if (!evt.detail.successful) return;
-            var raw = {};
+            if (errDiv) errDiv.style.display = 'none';
+            LSM.setBtnLoading(btn, true, '登录中...');
             try {
-                raw = JSON.parse(evt.detail.xhr.responseText || '{}');
+                // CSRF 调用时读取（禁加载时捕获，F13）；登录接口虽在豁免清单，带上无妨
+                var csrfToken = await LSM.ensureCsrfToken();
+                var resp = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'X-CSRF-Token': csrfToken
+                    },
+                    credentials: 'same-origin',
+                    body: new URLSearchParams({ username: username, password: password })
+                });
+                var data = {};
+                try { data = await resp.json(); } catch (e) { /* 响应体非 JSON 时用状态码兜底 */ }
+                if (resp.ok) {
+                    // 登录成功后强制刷新 CSRF token（旧 token 属于匿名态，已失效）
+                    LSM.ensureCsrfToken(true);
+                    if (data && data.force_change_password) {
+                        window.location.href = '/force-password-change';
+                        return;
+                    }
+                    window.location.href = '/';
+                    return;
+                }
+                if (errDiv) {
+                    errDiv.textContent = data.detail || '登录失败';
+                    errDiv.style.display = 'block';
+                }
             } catch (e) {
-                raw = {};
+                if (errDiv) {
+                    errDiv.textContent = '网络错误，请重试';
+                    errDiv.style.display = 'block';
+                }
+            } finally {
+                LSM.setBtnLoading(btn, false);
             }
-            if (raw && raw.force_change_password) {
-                window.location.href = '/force-password-change';
-                return;
-            }
-            window.location.href = '/';
         });
     }
 

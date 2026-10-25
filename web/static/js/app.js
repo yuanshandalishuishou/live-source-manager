@@ -1,9 +1,10 @@
 /* ── Live Source Manager — 应用胶水 ─────────────────
  * 组件实现已统一迁至 lsm-components.js（window.LSM，唯一实现）。
- * 本文件只保留：全局别名、htmx 事件胶水、加密密钥横幅。
+ * 本文件只保留：全局别名、原生登出、加密密钥横幅。
  * 已删除（死代码/迁出）：formatSourceList/formatUserList/loadSourcesPage/
  * deleteSource/showSourceCategories/saveSourceCategories/hideSourceCatModal、
- * 裸 showToast/escapeHtml/escapeJs 实现体、LSM IIFE、console.log。
+ * 裸 showToast/escapeHtml/escapeJs 实现体、LSM IIFE、console.log、
+ * 表单/登出的事件胶水（已改原生 fetch，见 pages/auth.js 与本文件 doLogout）。
  * ─────────────────────────────────────────────────── */
 (function() {
     'use strict';
@@ -18,68 +19,26 @@
     window.formatDate = window.LSM.formatDate;
     window.isAdmin = window.LSM.isAdmin;
 
-    // ── htm 写操作结果提示 ────────────────────────────
-    // 成功提示仅对声明 data-toast 属性的触发元素补报，避免与 swap 目标自行渲染双报
-    function showHtmxAlert(evt) {
-        var el = evt.detail.elt;
-        if (!el) return;
-        var status = evt.detail.xhr ? evt.detail.xhr.status : 0;
-        if (!(el.matches('form') || el.matches('[hx-post]') || el.matches('[hx-put]') || el.matches('[hx-delete]'))) {
-            return;
+    // ── 原生登出（base.html 退出登录按钮 onclick 调用） ──
+    // 无论成功或失败（含会话已失效的 401/403 或网络异常），都回到登录页。
+    window.doLogout = async function() {
+        var csrfToken = '';
+        try {
+            csrfToken = await window.LSM.ensureCsrfToken();
+        } catch (e) {
+            csrfToken = window.__csrf_token || '';
         }
-        if (status >= 200 && status < 300) {
-            if (el.dataset && el.dataset.toast) {
-                window.LSM.showToast(el.dataset.toast, 'success');
-            }
-        } else if (status >= 400) {
-            try {
-                var data = JSON.parse(evt.detail.xhr.responseText);
-                window.LSM.showToast(data.detail || '操作失败', 'error');
-            } catch (e) {
-                window.LSM.showToast('操作失败 (' + status + ')', 'error');
-            }
+        try {
+            await fetch('/api/auth/logout', {
+                method: 'POST',
+                headers: { 'X-CSRF-Token': csrfToken },
+                credentials: 'same-origin'
+            });
+        } catch (e) {
+            // 网络异常同样回登录页，不阻断用户登出
         }
-    }
-
-    // ── htmx 全局胶水 ─────────────────────────────────
-    // 本文件在 <head> 同步执行时 document.body 尚未解析，
-    // 全部 body 级监听必须在 DOM 就绪后注册。
-    function initHtmxGlue() {
-        // 请求标记 + 写请求 CSRF 自动注入
-        document.body.addEventListener('htmx:configRequest', function(evt) {
-            evt.detail.headers['HX-Request'] = 'true';
-            var verb = (evt.detail.verb || '').toUpperCase();
-            if (window.__csrf_token && verb !== 'GET') {
-                evt.detail.headers['X-CSRF-Token'] = window.__csrf_token;
-            }
-        });
-
-        // 401 未认证 → 登录页
-        document.body.addEventListener('htmx:responseError', function(evt) {
-            if (evt.detail.xhr && evt.detail.xhr.status === 401) {
-                window.location.href = '/login';
-            }
-        });
-
-        // swap 后统一提示入口
-        document.body.addEventListener('htmx:afterSwap', function(evt) {
-            showHtmxAlert(evt);
-        });
-
-        // 登录成功后强制刷新 CSRF token（旧 token 属于匿名态，已失效）
-        document.body.addEventListener('htmx:afterRequest', function(evt) {
-            if (evt.detail.pathInfo && evt.detail.pathInfo.requestPath === '/api/auth/login'
-                && evt.detail.successful) {
-                window.LSM.ensureCsrfToken(true);
-            }
-        });
-    }
-
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', initHtmxGlue);
-    } else {
-        initHtmxGlue();
-    }
+        window.location.href = '/login';
+    };
 
     // ── 加密密钥提示横幅（样式类化，见 app.css） ───────
     document.addEventListener('DOMContentLoaded', function() {
