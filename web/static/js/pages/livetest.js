@@ -1,0 +1,519 @@
+/* ================================================================
+ * pages/livetest.js — 实时测试页面脚本
+ * WS 优先 + 轮询兜底双通道；停滞检测；错误分布面板交互；
+ * 控制按钮状态机（运行=primary/暂停=warning/取消=danger/完成=success）；
+ * 状态徽标中文化 + 语义色；写请求统一 LSM.ensureCsrfToken。
+ * ================================================================ */
+(function() {
+    'use strict';
+
+    var testWS = null;
+    var testData = null;
+    var testPollTimer = null;
+
+    // 错误类别 → 中文标签（供「错误类别」列与「失败原因分布」面板展示）
+    var CATEGORY_LABELS = {
+        'connection_failed': '连接失败',
+        'connection_refused': '连接被拒',
+        'dns_failed': 'DNS解析失败',
+        'auth_blocked': '鉴权/防盗链',
+        'not_found': '资源不存在',
+        'timeout': '超时',
+        'network_incompatible': '网络不兼容',
+        'ad_playlist': '广告/占位源',
+        'no_valid_streams': '无有效流',
+        'no_probe_tool_available': '无探测工具',
+        'json_parse_error': '解析错误',
+        'global_blacklist': '全局黑名单',
+        'frozen': '已冻结冷却',
+        'aborted': '已中断',
+        'exception': '异常',
+        'ffprobe_error': 'ffprobe错误',
+        'ffprobe_failed_no_output': 'ffprobe无输出',
+        'unknown': '未知',
+    };
+
+    // 状态 → 中文徽标（label + .badge 语义色）
+    var STATUS_BADGES = {
+        'running':   { label: '运行中', cls: 'badge badge-blue' },
+        'paused':    { label: '已暂停', cls: 'badge badge-yellow' },
+        'completed': { label: '已完成', cls: 'badge badge-green' },
+        'cancelled': { label: '已取消', cls: 'badge badge-gray' },
+        'error':     { label: '出错',   cls: 'badge badge-red' },
+        'idle':      { label: '空闲',   cls: 'badge badge-gray' },
+    };
+
+    var currentCategoryFilter = '';
+    var _lastCompleted = -1;
+    var _lastMoveTime = Date.now();
+
+    /* ── WebSocket 通道 ─────────────────────────── */
+    function connectTestWS() {
+        var protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        var wsUrl = protocol + '//' + window.location.host + '/ws/test';
+        testWS = new WebSocket(wsUrl);
+
+        testWS.onopen = function() {
+            // 连接成功（静默，生产不留 console 调试输出）
+        };
+
+        testWS.onmessage = function(evt) {
+            try {
+                var data = JSON.parse(evt.data);
+                if (data.type === 'pong') return;   // 心跳
+                testData = data;
+                renderTestUI();
+            } catch (e) {
+                // 非 JSON 帧忽略
+            }
+        };
+
+        testWS.onclose = function() {
+            setTimeout(connectTestWS, 3000);
+        };
+
+        testWS.onerror = function() {
+            // WS 异常由 onclose 重连兜底
+        };
+    }
+
+    /* ── 渲染 ───────────────────────────────────── */
+    function updateStats(total, completed, passed, failed) {
+        document.getElementById('stat-total').textContent = total || 0;
+        document.getElementById('stat-completed').textContent = completed || 0;
+        document.getElementById('stat-passed').textContent = passed || 0;
+        document.getElementById('stat-failed').textContent = failed || 0;
+    }
+
+    function renderTestUI() {
+        if (!testData) return;
+
+        var fill = document.getElementById('progress-fill');
+        var statusText = document.getElementById('test-status-text');
+        var statusBadge = document.getElementById('test-status-badge');
+
+        var total = testData.total || 0;
+        var completed = testData.completed || 0;
+        var passed = testData.passed || 0;
+        var failed = testData.failed || 0;
+
+        var pct = total > 0 ? Math.round(completed / total * 100) : 0;
+        fill.style.width = pct + '%';
+
+        var status = testData.status || 'idle';
+        var statusLabel;
+        if (status === 'running') {
+            if (completed !== _lastCompleted) {
+                _lastCompleted = completed;
+                _lastMoveTime = Date.now();
+            } else if (Date.now() - _lastMoveTime > 45000) {
+                statusLabel = '⏳ 测试进行中... (' + completed + '/' + total + ') ⚠️ 进度长时间无变化，测试可能已停滞，可尝试「取消」后重新测试';
+            } else if (completed === 0) {
+                statusLabel = '⏳ 正在连接首批源（单源测试可能耗时数秒~数十秒）...';
+            } else {
+                statusLabel = '⏳ 测试进行中... (' + completed + '/' + total + ')';
+            }
+        } else if (status === 'paused') {
+            statusLabel = '⏸ 测试已暂停（完成 ' + completed + '/' + total + '）';
+        } else if (status === 'cancelled') {
+            statusLabel = '⏹ 测试已取消（完成 ' + completed + '/' + total + '）';
+        } else if (status === 'completed') {
+            statusLabel = (total === 0)
+                ? '⚠️ 上次测试完成，但 0 个源被测试（请先在「源管理」添加源）'
+                : '✅ 测试已完成';
+        } else if (status === 'error') {
+            statusLabel = '❌ 测试出错: ' + (testData.message || '');
+        } else {
+            statusLabel = '等待测试...';
+        }
+        statusText.textContent = statusLabel;
+
+        // 状态徽标：中文 + 语义色
+        var badge = STATUS_BADGES[status] || STATUS_BADGES['idle'];
+        statusBadge.textContent = badge.label;
+        statusBadge.className = 'test-details ' + badge.cls;
+
+        document.getElementById('test-details').textContent = testData.note || '';
+
+        updateStats(total, completed, passed, failed);
+
+        // 进度条达标次色：运行=主色 / 完成=成功
+        fill.className = 'progress-fill ' + (status === 'completed' ? 'progress-completed' : 'progress-running');
+
+        renderErrorBreakdown();
+        renderResults();
+        updateControlButtons(status);
+    }
+
+    function truncateStr(s, n) {
+        s = s || '';
+        return s.length > n ? s.substring(0, n) + '…' : s;
+    }
+
+    /* ── 失败原因分布面板 ───────────────────────── */
+    function renderErrorBreakdown() {
+        var box = document.getElementById('error-breakdown');
+        if (!box) return;
+        var bd = (testData && testData.error_breakdown) || {};
+        var keys = Object.keys(bd).sort(function(a, b) { return bd[b] - bd[a]; });
+        if (!keys.length) { box.innerHTML = ''; return; }
+        var html = '<div class="bd-title">失败原因分布（点击类别可筛选结果）</div><div class="bd-chips">';
+        keys.forEach(function(k) {
+            var label = CATEGORY_LABELS[k] || k;
+            var active = (currentCategoryFilter === k) ? ' active' : '';
+            html += '<span class="bd-chip cat-' + k + active + '" data-action="filter-category" data-category="' +
+                LSM.escapeHtml(k) + '" role="button" tabindex="0">' +
+                LSM.escapeHtml(label) + ' <b>' + bd[k] + '</b></span>';
+        });
+        if (currentCategoryFilter) {
+            html += '<span class="bd-clear" data-action="clear-category" role="button" tabindex="0">清除筛选</span>';
+        }
+        html += '</div>';
+        box.innerHTML = html;
+    }
+
+    function filterByCategory(k) {
+        currentCategoryFilter = (currentCategoryFilter === k) ? '' : k;
+        renderErrorBreakdown();
+        renderResults();
+    }
+
+    function clearCategoryFilter() {
+        currentCategoryFilter = '';
+        renderErrorBreakdown();
+        renderResults();
+    }
+
+    /* ── 测试结果列表 ───────────────────────────── */
+    function renderResults() {
+        var container = document.getElementById('test-results');
+        var results = (testData && testData.results) || [];
+        document.getElementById('result-count').textContent = '(' + results.length + ')';
+
+        if (results.length === 0) {
+            container.innerHTML = '<div class="empty-state text-center">暂无测试数据</div>';
+            return;
+        }
+
+        var filtered = results;
+        if (currentCategoryFilter) {
+            filtered = results.filter(function(r) {
+                return r.status === 'failed' && r.category === currentCategoryFilter;
+            });
+        }
+
+        // 排序：测试中 → 失败 → 通过 → 等待
+        var order = { 'testing': 0, 'failed': 1, 'passed': 2, 'waiting': 3 };
+        filtered.sort(function(a, b) {
+            return (order[a.status] || 99) - (order[b.status] || 99);
+        });
+
+        var html = '<div class="test-results-wrap"><table class="test-table"><colgroup>'
+            + '<col style="width:14%"><col style="width:8%"><col style="width:24%"><col style="width:20%"><col style="width:14%"><col style="width:20%">'
+            + '</colgroup><thead><tr>'
+            + '<th>频道</th><th>状态</th><th>真实地址</th><th>所在源</th><th>错误类别</th><th>详情</th>'
+            + '</tr></thead><tbody>';
+        filtered.forEach(function(r) {
+            var statusClass = r.status;
+            var statusLabel = r.status === 'passed' ? '通过' :
+                              r.status === 'failed' ? '失败' :
+                              r.status === 'testing' ? '测试中' :
+                              r.status === 'cancelled' ? '已取消' : '等待';
+            var detail = '';
+            if (r.retry_info) {
+                detail += '<div class="retry-info">重试: ' + LSM.escapeHtml(r.retry_info) + '</div>';
+            }
+            if (r.reason) {
+                detail += '<div class="failure-reason">原因: ' + LSM.escapeHtml(r.reason) + '</div>';
+            }
+            if (r.response_time !== undefined) {
+                detail += '<span class="test-meta">响应: ' + LSM.escapeHtml(r.response_time) + 's</span>';
+            }
+            if (r.resolution) {
+                detail += '<span class="test-meta"> | 分辨率: ' + LSM.escapeHtml(r.resolution) + '</span>';
+            }
+            var url = r.url || '';
+            var ua = r.user_agent || '';
+            var src = r.source || '';
+            var srcType = r.source_type || '';
+            html += '<tr>';
+            html += '<td><strong>' + LSM.escapeHtml(r.name || '未知') + '</strong></td>';
+            html += '<td><span class="status-badge status-' + statusClass + '">' + statusLabel + '</span></td>';
+            html += '<td><div class="url-main">' + LSM.escapeHtml(url) + '</div>'
+                  + '<div class="url-ua">UA: ' + LSM.escapeHtml(ua || '(默认)') + '</div></td>';
+            if (srcType) {
+                var tagCls = srcType === 'online' ? 'tag-online' : 'tag-local';
+                var tagTxt = srcType === 'online' ? '在线' : '本地';
+                html += '<td><span class="src-tag ' + tagCls + '">' + tagTxt + '</span>'
+                      + '<div class="src-path">' + LSM.escapeHtml(src) + '</div></td>';
+            } else {
+                html += '<td><div class="src-path">' + LSM.escapeHtml(src) + '</div></td>';
+            }
+            var catLabel = '', catCls = '';
+            if (r.status === 'failed' && r.category) {
+                catLabel = CATEGORY_LABELS[r.category] || r.category;
+                catCls = 'cat-' + r.category;
+            }
+            html += '<td>' + (catLabel ? '<span class="cat-badge ' + catCls + '">' + LSM.escapeHtml(catLabel) + '</span>' : '<span class="cat-none">—</span>') + '</td>';
+            html += '<td class="detail-cell">' + detail + '</td>';
+            html += '</tr>';
+        });
+        html += '</tbody></table></div>';
+        container.innerHTML = html;
+    }
+
+    /* ── 轮询兜底 ───────────────────────────────── */
+    function pollTestStatus() {
+        fetch('/api/test/status', { credentials: 'same-origin' })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                testData = data;
+                renderTestUI();
+                if (data.status === 'completed' || data.status === 'error' || data.status === 'cancelled') {
+                    stopPolling();
+                }
+            })
+            .catch(function() { /* 轮询失败静默，WS 通道仍可刷新 */ });
+    }
+
+    function startPolling() {
+        if (testPollTimer) return;
+        testPollTimer = setInterval(pollTestStatus, 1200);
+    }
+
+    function stopPolling() {
+        if (testPollTimer) {
+            clearInterval(testPollTimer);
+            testPollTimer = null;
+        }
+    }
+
+    /* ── 控制操作 ───────────────────────────────── */
+    function triggerTest() {
+        var limitSel = document.getElementById('test-limit-select');
+        var limitVal = limitSel ? limitSel.value : 'all';
+
+        var payload;
+        var scopeLabel;
+        if (limitVal === 'file') {
+            var fileSel = document.getElementById('test-file-select');
+            var fileId = fileSel ? fileSel.value : '';
+            if (!fileId) {
+                document.getElementById('test-status-text').textContent = '⚠️ 请先在下拉中选择一个源文件';
+                return;
+            }
+            payload = { file_id: fileId };
+            scopeLabel = '所选文件';
+        } else {
+            payload = { limit: limitVal };
+            scopeLabel = (limitVal === 'all' ? '全部源' : (limitVal + ' 个源'));
+        }
+
+        var engineSel = document.getElementById('test-engine-select');
+        var engineVal = engineSel ? engineSel.value : '';
+        if (engineVal) {
+            payload.engine = engineVal;
+        }
+
+        document.getElementById('test-status-text').textContent = '⏳ 正在触发测试...';
+        document.getElementById('progress-fill').style.width = '0%';
+
+        LSM.ensureCsrfToken().then(function(csrfToken) {
+            return fetch('/api/test/trigger', {
+                method: 'POST',
+                headers: {
+                    'X-CSRF-Token': csrfToken,
+                    'Content-Type': 'application/json'
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify(payload)
+            });
+        })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.status === 'triggered') {
+                    if (!data.total || data.total === 0) {
+                        document.getElementById('test-status-text').textContent =
+                            '⚠️ 暂无可测试的源（当前 0 个）：请先在「源管理」添加本地源文件或订阅在线源，再点击「立即测试」。';
+                        document.getElementById('progress-fill').style.width = '0%';
+                        updateControlButtons('idle');
+                        return;
+                    }
+                    var total = data.total || 0;
+                    var label = data.mode === 'file' ? '所选文件' : scopeLabel;
+                    var dedupNote = (data.dedup_removed && data.dedup_removed > 0)
+                        ? '（已自动去重 ' + data.dedup_removed + ' 个重复地址，原始 ' + (data.total_before_dedup || '?') + ' 个）'
+                        : '';
+                    document.getElementById('test-status-text').textContent =
+                        '✅ 测试已触发，正在测试 ' + label + ' 内的 ' + total + ' 个源' + dedupNote + '...';
+                    startPolling();
+                    pollTestStatus();
+                    updateControlButtons('running');
+                } else if (data.status === 'running') {
+                    document.getElementById('test-status-text').textContent =
+                        '⏳ ' + (data.message || '测试已在进行中');
+                    startPolling();
+                    pollTestStatus();
+                    updateControlButtons('running');
+                } else {
+                    document.getElementById('test-status-text').textContent =
+                        '⚠️ 触发返回: ' + (data.detail || JSON.stringify(data));
+                }
+            })
+            .catch(function(err) {
+                document.getElementById('test-status-text').textContent =
+                    '❌ 触发失败: ' + ((err && err.message) ? err.message : '网络错误');
+            });
+    }
+
+    function updateControlButtons(status) {
+        var btnStart = document.getElementById('btn-start');
+        var btnPause = document.getElementById('btn-pause');
+        var btnResume = document.getElementById('btn-resume');
+        var btnCancel = document.getElementById('btn-cancel');
+        var btnGenerate = document.getElementById('btn-generate');
+        if (!btnStart) return;
+        var showStart = (status === 'idle' || status === 'completed' || status === 'error' || status === 'cancelled');
+        var showPause = (status === 'running');
+        var showResume = (status === 'paused');
+        var showCancel = (status === 'running' || status === 'paused');
+        var showGenerate = (status === 'completed');
+        btnStart.classList.toggle('hidden', !showStart);
+        btnPause.classList.toggle('hidden', !showPause);
+        btnResume.classList.toggle('hidden', !showResume);
+        btnCancel.classList.toggle('hidden', !showCancel);
+        if (btnGenerate) btnGenerate.classList.toggle('hidden', !showGenerate);
+    }
+
+    function generatePlaylist() {
+        var btn = document.getElementById('btn-generate');
+        var statusEl = document.getElementById('test-status-text');
+        LSM.setBtnLoading(btn, true, '⏳ 生成中…');
+        LSM.ensureCsrfToken().then(function(csrfToken) {
+            return fetch('/api/test/generate-playlist', {
+                method: 'POST',
+                headers: { 'X-CSRF-Token': csrfToken },
+                credentials: 'same-origin'
+            });
+        })
+            .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+            .then(function(res) {
+                var d = res.data;
+                if (res.ok && d.status === 'ok') {
+                    var files = (d.files || []).join('、');
+                    var msg = '✅ 已基于测试结果生成播放列表：有效 ' + (d.valid || 0) + ' 个'
+                        + (d.qualified ? ('，高级 ' + d.qualified + ' 个') : '')
+                        + '。文件：' + (files || '(无)');
+                    if (statusEl) statusEl.textContent = msg;
+                } else {
+                    if (statusEl) statusEl.textContent = '⚠️ 生成失败：' + (d.detail || d.reason || JSON.stringify(d));
+                }
+            })
+            .catch(function(err) {
+                if (statusEl) statusEl.textContent = '❌ 生成请求失败: ' + ((err && err.message) ? err.message : '网络错误');
+            })
+            .finally(function() {
+                LSM.setBtnLoading(btn, false);
+            });
+    }
+
+    function postTestControl(url) {
+        LSM.ensureCsrfToken().then(function(csrfToken) {
+            return fetch(url, {
+                method: 'POST',
+                headers: { 'X-CSRF-Token': csrfToken },
+                credentials: 'same-origin'
+            });
+        })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.status === 'error') {
+                    document.getElementById('test-status-text').textContent = '⚠️ ' + (data.detail || '操作失败');
+                }
+                pollTestStatus();
+            })
+            .catch(function(err) {
+                document.getElementById('test-status-text').textContent =
+                    '❌ 操作失败: ' + ((err && err.message) ? err.message : '网络错误');
+            });
+    }
+
+    /* ── 测试范围切换 ───────────────────────────── */
+    function onTestScopeChange() {
+        var sel = document.getElementById('test-limit-select');
+        var fileSel = document.getElementById('test-file-select');
+        if (!sel || !fileSel) return;
+        if (sel.value === 'file') {
+            fileSel.classList.remove('hidden');
+            if (fileSel.options.length <= 1) {
+                loadSourceFileOptions();
+            }
+        } else {
+            fileSel.classList.add('hidden');
+        }
+    }
+
+    function loadSourceFileOptions() {
+        var fileSel = document.getElementById('test-file-select');
+        if (!fileSel) return;
+        fetch('/api/source-files', { credentials: 'same-origin' })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                var files = (data.files || []);
+                fileSel.innerHTML = '<option value="">— 请选择文件 —</option>';
+                files.forEach(function(f) {
+                    var typeLabel = f.type === 'online' ? '在线' : (f.type === 'local' ? '本地' : 'GitHub');
+                    var label = f.name + ' [' + typeLabel + ']';
+                    if (f.channel_count) label += ' · ' + f.channel_count + ' 频道';
+                    var opt = document.createElement('option');
+                    opt.value = f.id;
+                    opt.textContent = label;
+                    fileSel.appendChild(opt);
+                });
+            })
+            .catch(function() {
+                fileSel.innerHTML = '<option value="">加载文件列表失败</option>';
+            });
+    }
+
+    function loadTestStatus() {
+        fetch('/api/test/status', { credentials: 'same-origin' })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                testData = data;
+                renderTestUI();
+            })
+            .catch(function() {});
+    }
+
+    /* ── 初始化 ─────────────────────────────────── */
+    document.addEventListener('DOMContentLoaded', function() {
+        // 工具栏
+        var scopeSel = document.getElementById('test-limit-select');
+        if (scopeSel) scopeSel.addEventListener('change', onTestScopeChange);
+        var btnStart = document.getElementById('btn-start');
+        if (btnStart) btnStart.addEventListener('click', triggerTest);
+        var btnPause = document.getElementById('btn-pause');
+        if (btnPause) btnPause.addEventListener('click', function() { postTestControl('/api/test/pause'); });
+        var btnResume = document.getElementById('btn-resume');
+        if (btnResume) btnResume.addEventListener('click', function() { postTestControl('/api/test/resume'); });
+        var btnCancel = document.getElementById('btn-cancel');
+        if (btnCancel) btnCancel.addEventListener('click', function() { postTestControl('/api/test/cancel'); });
+        var btnGenerate = document.getElementById('btn-generate');
+        if (btnGenerate) btnGenerate.addEventListener('click', generatePlaylist);
+
+        // 失败原因分布面板（事件委托）
+        var breakdown = document.getElementById('error-breakdown');
+        if (breakdown) {
+            breakdown.addEventListener('click', function(e) {
+                var chip = e.target.closest('[data-action]');
+                if (!chip) return;
+                if (chip.dataset.action === 'filter-category') filterByCategory(chip.dataset.category);
+                if (chip.dataset.action === 'clear-category') clearCategoryFilter();
+            });
+        }
+
+        loadTestStatus();
+        connectTestWS();
+    });
+})();

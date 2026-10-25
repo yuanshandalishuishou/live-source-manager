@@ -1,0 +1,954 @@
+/* ================================================================
+ * pages/config.js — 统一配置管理页面脚本
+ * schema 驱动表单 / 脏检测快照 / 分段+全量保存 / 未保存守卫
+ * （beforeunload + 切 tab 确认）/ Ctrl+S / 查看者只读（IS_ADMIN
+ * 门禁）/ 分类字典管理（双输入 Modal 合并原两步 prompt）。
+ * 写请求统一 LSM.ensureCsrfToken。
+ * ================================================================ */
+(function() {
+    'use strict';
+
+    /* ── 全局状态 ───────────────────────────────── */
+    var configData = {};        // { section: { key: value, ... }, ... }
+    var fieldMeta = {};         // { section: { key: [type, default, label, help], ... }, ... }
+    var modifiedSections = {};  // { section: true/false }
+    var originalSnapshots = {}; // { section: { key: value, ... } } — 脏检测对比
+    var lastSaveTimes = {};     // { section: 'HH:MM:SS' }
+    var activeTab = 'Testing';
+    var validationErrors = {};  // { 'section.key': 'error message' }
+
+    // Tab → 字段映射（一个 Tab 可渲染多个后端配置段，见 Network）
+    var TAB_SECTIONS = {
+        Testing:  { section: 'Testing',  icon: '🧪', label: '测试' },
+        Output:   { section: 'Output',   icon: '📤', label: '输出' },
+        Network:  { sections: ['Network', 'HTTPServer'],  icon: '🌐', label: '网络' },
+        GitHub:   { section: 'GitHub',   icon: '🐙', label: 'GitHub' },
+        Filter:   { section: 'Filter',   icon: '🔍', label: '筛选' },
+    };
+
+    // 各配置段在卡片上的展示标题（一个 Tab 渲染多个段时区分用）
+    var SECTION_TITLES = {
+        'Network': '🌐 网络与代理',
+        'HTTPServer': '📡 文件发布服务',
+    };
+
+    // 密码字段白名单（用于 `<input type="password">`）
+    var PASSWORD_KEYS = ['token', 'secret', 'password', 'api_key', 'api_secret'];
+
+    var DIM_NAMES = {
+        content: '内容类型', region: '地区', language: '语言',
+        quality: '画质', media_type: '媒体类型', genre: '类型'
+    };
+
+    /* ── 工具 ───────────────────────────────────── */
+    function esc(s) { return LSM.escapeHtml(s); }
+
+    function hasUnsavedChanges() {
+        return Object.keys(modifiedSections).some(function(s) {
+            return s !== 'DEFAULT' && modifiedSections[s];
+        });
+    }
+
+    function setHidden(el, hidden) {
+        if (el) el.classList.toggle('hidden', hidden);
+    }
+
+    /* ── 加载配置 ───────────────────────────────── */
+    function loadConfig() {
+        var loadingEl = document.getElementById('config-loading');
+        var tabsWrapper = document.getElementById('config-tabs-wrapper');
+        var footerEl = document.getElementById('config-footer');
+        var statusIndicator = document.getElementById('status-indicator');
+
+        try {
+            statusIndicator.textContent = '⏳ 加载中…';
+            statusIndicator.className = 'badge badge-yellow';
+
+            Promise.all([
+                fetch('/api/config', { credentials: 'same-origin' }),
+                fetch('/api/config/fields', { credentials: 'same-origin' })
+            ])
+                .then(function(resps) {
+                    return Promise.all([resps[0].json(), resps[1].json()]);
+                })
+                .then(function(results) {
+                    configData = results[0];
+                    fieldMeta = results[1];
+
+                    // 保存原始快照用于脏检测
+                    originalSnapshots = {};
+                    Object.keys(configData).forEach(function(section) {
+                        originalSnapshots[section] = Object.assign({}, configData[section]);
+                    });
+
+                    modifiedSections = {};
+                    validationErrors = {};
+
+                    loadingEl.classList.add('hidden');
+                    tabsWrapper.classList.remove('hidden');
+                    footerEl.classList.remove('hidden');
+
+                    renderAllTabs();
+                    activateTab(activeTab);
+                    updateFooter();
+                    statusIndicator.textContent = '✅ 已加载';
+                    statusIndicator.className = 'badge badge-green';
+                })
+                .catch(function(e) {
+                    loadingEl.textContent = '❌ 加载配置失败: ' + ((e && e.message) ? e.message : '网络错误');
+                    statusIndicator.textContent = '❌ 加载失败';
+                    statusIndicator.className = 'badge badge-red';
+                });
+        } catch (e) {
+            loadingEl.textContent = '❌ 加载配置失败: ' + e.message;
+            statusIndicator.textContent = '❌ 加载失败';
+            statusIndicator.className = 'badge badge-red';
+        }
+    }
+
+    /* ── 渲染全部 Tab 面板 ──────────────────────── */
+    function renderAllTabs() {
+        var container = document.getElementById('config-content');
+        var html = '';
+
+        Object.keys(TAB_SECTIONS).forEach(function(tabKey) {
+            var info = TAB_SECTIONS[tabKey];
+            var sections = info.sections || (info.section ? [info.section] : []);
+            sections.forEach(function(section) {
+                var fields = configData[section];
+                if (!fields) {
+                    html += '<div class="tab-content" id="tab-panel-' + section + '" data-tab="' + tabKey + '">';
+                    html += '<div class="empty-state">⚠️ 未找到配置段: ' + esc(section) + '</div>';
+                    html += '</div>';
+                    return;
+                }
+
+                var cardTitle = SECTION_TITLES[section] || (info.icon + ' ' + info.label);
+                html += '<div class="tab-content" id="tab-panel-' + section + '" data-tab="' + tabKey + '">';
+                html += '<div class="card config-section">';
+                html += '<div class="card-header"><h3>' + esc(cardTitle) + '</h3></div>';
+                html += '<div class="card-body">';
+
+                // ── GitHub Tab 特殊信息栏 ──
+                if (section === 'GitHub') {
+                    html += '<div class="info-box">' +
+                        '<div class="info-box-title">🐙 GitHub API Token 说明</div>' +
+                        '<div class="text-muted">未配置 Token 时 GitHub API 限流为 <b>60次/时</b>，配置后提升至 <b>5000次/时</b>。Token 无需任何权限，仅用于提升配额。</div>' +
+                        '<div class="text-muted">获取方式：<a href="https://github.com/settings/tokens/new" target="_blank">GitHub → Settings → Developer settings → Personal access tokens → Generate new token</a>，不勾选任何权限直接生成即可。</div>' +
+                        '</div>';
+                }
+
+                var sectionMeta = fieldMeta[section] || {};
+                Object.keys(fields).forEach(function(key) {
+                    var value = fields[key];
+                    var meta = sectionMeta[key];
+                    var ftype = meta ? meta[0] : 'str';
+                    var label = meta ? (meta[2] || key) : key;
+                    var helpText = meta ? (meta[3] || '') : '';
+                    var fieldId = 'cfg-' + section + '-' + key;
+
+                    html += '<div class="form-group" id="fg-' + fieldId + '">';
+                    html += '<label for="' + fieldId + '">' + esc(label) + '</label>';
+
+                    var dataAttrs = 'data-section="' + esc(section) + '" data-key="' + esc(key) + '" ';
+
+                    if (ftype === 'bool') {
+                        var checked = value === 'True' || value === 'true' || value === '1' || value === true;
+                        html += '<label class="toggle">';
+                        html += '<input type="checkbox" id="' + fieldId + '" ' + dataAttrs +
+                            (checked ? 'checked' : '') + '>';
+                        html += '<span class="toggle-slider"></span>';
+                        html += '<span class="toggle-label" id="tl-' + fieldId + '">' + (checked ? '已启用' : '已禁用') + '</span>';
+                        html += '</label>';
+                    } else if (ftype === 'textarea' || (ftype === 'str' && value && value.length > 80)) {
+                        html += '<textarea id="' + fieldId + '" ' + dataAttrs +
+                            'class="form-input form-textarea" rows="4">' + esc(String(value || '')) + '</textarea>';
+                    } else if (ftype === 'str' && PASSWORD_KEYS.some(function(pk) { return key.toLowerCase().indexOf(pk) >= 0; })) {
+                        html += '<input type="password" id="' + fieldId + '" ' + dataAttrs +
+                            'class="form-input" value="' + esc(String(value || '')) + '">';
+                        html += '<button type="button" class="btn btn-sm btn-outline mt-4" data-action="toggle-pwd" data-target="' + fieldId + '">👁 显示/隐藏</button>';
+                    } else if (ftype === 'int') {
+                        var intChoices = (meta && Array.isArray(meta[4])) ? meta[4] : null;
+                        if (intChoices) {
+                            html += renderSelect(fieldId, dataAttrs, intChoices, value);
+                        } else {
+                            html += '<input type="number" id="' + fieldId + '" ' + dataAttrs +
+                                'class="form-input" value="' + esc(String(value || '')) + '">';
+                        }
+                    } else if (ftype === 'choice') {
+                        var choices = (meta && Array.isArray(meta[4])) ? meta[4] : null;
+                        if (choices) {
+                            html += renderSelect(fieldId, dataAttrs, choices, value);
+                        } else {
+                            html += '<input type="text" id="' + fieldId + '" ' + dataAttrs +
+                                'class="form-input" value="' + esc(String(value || '')) + '">';
+                        }
+                    } else {
+                        html += '<input type="text" id="' + fieldId + '" ' + dataAttrs +
+                            'class="form-input" value="' + esc(String(value || '')) + '">';
+                    }
+
+                    if (helpText) {
+                        html += '<small class="form-help" id="fh-' + fieldId + '">' + esc(helpText) + '</small>';
+                    }
+                    html += '<div class="field-validation" id="fv-' + fieldId + '"></div>';
+                    html += '</div>';
+                });
+
+                // ── GitHub Tab 特殊测试区 ──
+                if (section === 'GitHub') {
+                    html += '<div class="divider-top">';
+                    html += '<div class="flex-between mb-12">';
+                    html += '<button type="button" class="btn btn-outline btn-sm" data-action="test-github-token">🔌 测试 Token</button>';
+                    html += '<span id="github-token-status" class="text-sm text-muted"></span>';
+                    html += '</div>';
+                    html += '<div id="github-rate-limit" class="info-box hidden text-sm mt-8"></div>';
+                    html += '</div>';
+                }
+
+                // ── 网络(HTTPServer) Tab 重启提示 ──
+                if (section === 'HTTPServer') {
+                    html += '<div class="info-box">' +
+                        '<div class="info-box-title">🌐 文件发布服务说明</div>' +
+                        '<div class="text-muted">本段配置 <b>文件共享端口</b>（默认 12345）与文档根目录，用于对外发布生成的 M3U/TXT 播放列表。</div>' +
+                        '<div class="text-muted">⚠️ <b>修改「文件共享端口 / 监听地址」后需重启 Web 服务才能生效</b>（端口在启动时绑定）。「文档根目录」修改后同样需重启以重新挂载。</div>' +
+                        '</div>';
+                }
+
+                // 独立保存按钮（仅管理员渲染；查看者只读，后端另有 403 兜底）
+                html += '<div class="form-actions">';
+                html += '<span class="section-save-status text-sm" id="ss-' + section + '"></span>';
+                html += window.IS_ADMIN
+                    ? '<button class="btn btn-primary btn-sm" data-action="save-section" data-section="' + section + '" id="btn-save-' + section + '">💾 保存</button>'
+                    : '';
+                html += '</div>';
+
+                html += '</div>'; // card-body
+                html += '</div>'; // card
+                html += '</div>'; // tab-content
+            });
+        });
+
+        // ── 分类字典 Tab ───────────────────────────
+        html += '<div class="tab-content" id="tab-panel-CategoryDict" data-tab="CategoryDict">';
+        html += '<div class="card config-section">';
+        html += '<div class="card-header"><h3>🏷️ 频道分类数据字典</h3></div>';
+        html += '<div class="card-body">';
+        html += '<p class="text-sm text-muted mb-12">定义各维度的可选项，用于频道列表中的分类选择。修改后影响输出 M3U 的分类标记。</p>';
+        html += '<div id="category-dict-content"><div class="loading">加载中...</div></div>';
+        html += '</div></div></div>';
+
+        container.innerHTML = html;
+
+        // 查看者只读：字段控件统一禁用（值可见不可改；后端另有 403 兜底）
+        if (!window.IS_ADMIN) {
+            container.querySelectorAll('input, textarea, select, button').forEach(function(el) {
+                el.disabled = true;
+            });
+        }
+    }
+
+    function renderSelect(fieldId, dataAttrs, choices, value) {
+        var html = '<select id="' + fieldId + '" ' + dataAttrs + 'class="form-input">';
+        choices.forEach(function(ch) {
+            var cv = Array.isArray(ch) ? String(ch[0]) : String(ch);
+            var cl = Array.isArray(ch) ? String(ch[1]) : String(ch);
+            var sel = (cv === String(value)) ? ' selected' : '';
+            html += '<option value="' + esc(cv) + '"' + sel + '>' + esc(cl) + '</option>';
+        });
+        html += '</select>';
+        return html;
+    }
+
+    /* ── Tab 切换（带未保存守卫） ───────────────── */
+    function activateTab(tabKey) {
+        activeTab = tabKey;
+
+        document.querySelectorAll('#config-tabs .tab-btn').forEach(function(btn) {
+            var isActive = btn.dataset.tab === tabKey;
+            btn.classList.toggle('active', isActive);
+            btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+        });
+
+        document.querySelectorAll('.tab-content').forEach(function(panel) {
+            panel.classList.toggle('active', panel.dataset.tab === tabKey);
+        });
+
+        if (tabKey === 'CategoryDict') {
+            loadCategoryDictTab();
+        }
+
+        updateFooter();
+    }
+
+    function guardThenActivateTab(tabKey) {
+        if (tabKey === activeTab) return;
+        if (!hasUnsavedChanges()) {
+            activateTab(tabKey);
+            return;
+        }
+        LSM.confirm('当前有未保存的修改，离开此 Tab 前建议先保存。确定离开吗？', '未保存的修改')
+            .then(function(confirmed) {
+                if (confirmed) activateTab(tabKey);
+            });
+    }
+
+    /* ── 字段修改事件（容器事件委托） ───────────── */
+    function onFieldChange(el) {
+        onFieldInput(el);
+        markSectionDirty(el.dataset.section);
+        updateFooter();
+    }
+
+    function onFieldInput(el) {
+        var section = el.dataset.section;
+        var key = el.dataset.key;
+        var fieldId = 'cfg-' + section + '-' + key;
+        var valEl = document.getElementById('fv-' + fieldId);
+
+        var value;
+        if (el.type === 'checkbox') {
+            value = el.checked ? 'True' : 'False';
+            var labelEl = document.getElementById('tl-' + fieldId);
+            if (labelEl) labelEl.textContent = el.checked ? '已启用' : '已禁用';
+        } else {
+            value = el.value;
+        }
+        if (!configData[section]) configData[section] = {};
+        configData[section][key] = value;
+
+        // 实时校验（错误态走 .has-error 类 + .form-error 文案）
+        validateField(section, key, value).then(function(errorMsg) {
+            if (errorMsg) {
+                el.classList.add('has-error');
+                if (valEl) {
+                    valEl.textContent = '❌ ' + errorMsg;
+                    valEl.className = 'field-validation form-error';
+                }
+                validationErrors[section + '.' + key] = errorMsg;
+            } else {
+                el.classList.remove('has-error');
+                if (valEl) {
+                    valEl.textContent = '';
+                    valEl.className = 'field-validation';
+                }
+                delete validationErrors[section + '.' + key];
+            }
+        });
+    }
+
+    /* ── 字段校验 ───────────────────────────────── */
+    function validateField(section, key, value) {
+        var meta = (fieldMeta[section] || {})[key];
+        if (!meta) return Promise.resolve(null);
+
+        var ftype = meta[0];
+        if (ftype === 'bool') return Promise.resolve(null);
+
+        if (ftype === 'int') {
+            var num = Number(value);
+            if (value === '' || value === null || value === undefined) return Promise.resolve('此字段不能为空');
+            if (isNaN(num)) return Promise.resolve('请输入有效的整数');
+            if (num < 0) return Promise.resolve('值不能为负数');
+            return Promise.resolve(null);
+        }
+
+        if (PASSWORD_KEYS.some(function(pk) { return key.toLowerCase().indexOf(pk) >= 0; })) {
+            if (value && value.length < 6) return Promise.resolve('至少 6 个字符');
+        }
+
+        return Promise.resolve(null);
+    }
+
+    /* ── 脏检测 ─────────────────────────────────── */
+    function markSectionDirty(section) {
+        var snap = originalSnapshots[section];
+        var current = configData[section];
+        if (!snap || !current) {
+            modifiedSections[section] = true;
+            return;
+        }
+        var dirty = false;
+        Object.keys(snap).forEach(function(key) {
+            if (String(snap[key]) !== String(current[key])) {
+                dirty = true;
+            }
+        });
+        if (!dirty) {
+            Object.keys(current).forEach(function(key) {
+                if (!(key in snap)) dirty = true;
+            });
+        }
+        modifiedSections[section] = dirty;
+    }
+
+    function collectSectionData(section) {
+        var data = {};
+        var fields = configData[section] || {};
+        var sectionMeta = fieldMeta[section] || {};
+
+        Object.keys(fields).forEach(function(key) {
+            var value = fields[key];
+            var meta = sectionMeta[key];
+            var ftype = meta ? meta[0] : 'str';
+            if (ftype === 'bool') {
+                data[key] = (value === 'True' || value === 'true' || value === true || value === '1') ? 'True' : 'False';
+            } else {
+                data[key] = String(value);
+            }
+        });
+        return data;
+    }
+
+    /* ── 分段保存 ───────────────────────────────── */
+    function saveSection(section) {
+        var statusEl = document.getElementById('ss-' + section);
+        var btnEl = document.getElementById('btn-save-' + section);
+        if (!statusEl || !btnEl) return;
+
+        var hasErrors = Object.keys(validationErrors).some(function(k) {
+            return k.indexOf(section + '.') === 0;
+        });
+        if (hasErrors) {
+            statusEl.innerHTML = '<span class="text-error">❌ 请先修正字段错误</span>';
+            return;
+        }
+
+        statusEl.innerHTML = '<span class="text-muted">⏳ 保存中…</span>';
+        LSM.setBtnLoading(btnEl, true, '⏳ 保存中…');
+
+        var data = collectSectionData(section);
+        LSM.ensureCsrfToken()
+            .then(function(csrfToken) {
+                return fetch('/api/config/' + section, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-Token': csrfToken
+                    },
+                    credentials: 'same-origin',
+                    body: JSON.stringify(data)
+                });
+            })
+            .then(function(r) {
+                return r.json().then(function(d) { return { ok: r.ok, data: d }; });
+            })
+            .then(function(res) {
+                if (!res.ok) {
+                    statusEl.innerHTML = '<span class="text-error">❌ ' + esc(res.data.detail || '保存失败') + '</span>';
+                    LSM.showToast('❌ ' + (res.data.detail || '保存失败'), 'error');
+                    return;
+                }
+                statusEl.innerHTML = '<span class="text-success">✅ ' + esc(res.data.message || '配置已保存') + '</span>';
+                originalSnapshots[section] = Object.assign({}, data);
+                modifiedSections[section] = false;
+                lastSaveTimes[section] = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+                updateFooter();
+                LSM.showToast('✅ ' + (res.data.message || '配置已保存'), 'success');
+            })
+            .catch(function(e) {
+                statusEl.innerHTML = '<span class="text-error">❌ 网络错误: ' + esc((e && e.message) ? e.message : '请重试') + '</span>';
+                LSM.showToast('❌ 保存失败: ' + ((e && e.message) ? e.message : '网络错误'), 'error');
+            })
+            .finally(function() {
+                LSM.setBtnLoading(btnEl, false);
+            });
+    }
+
+    /* ── 全量保存 ───────────────────────────────── */
+    function saveAllConfig() {
+        var statusIndicator = document.getElementById('status-indicator');
+        var saveBtn = document.getElementById('btn-save-all');
+
+        // 校验所有段
+        var checks = [];
+        Object.keys(configData).forEach(function(section) {
+            if (section === 'DEFAULT') return;
+            Object.keys(configData[section]).forEach(function(key) {
+                checks.push(validateField(section, key, configData[section][key]).then(function(err) {
+                    if (err) {
+                        var fieldEl = document.getElementById('cfg-' + section + '-' + key);
+                        if (fieldEl) fieldEl.classList.add('has-error');
+                    }
+                }));
+            });
+        });
+
+        Promise.all(checks).then(function() {
+            if (Object.keys(validationErrors).length > 0) {
+                LSM.showToast('❌ 存在校验错误，请修正后重试', 'error');
+                return;
+            }
+
+            statusIndicator.textContent = '⏳ 全量保存中…';
+            statusIndicator.className = 'badge badge-yellow';
+            LSM.setBtnLoading(saveBtn, true, '⏳ 保存中…');
+
+            var payload = {};
+            Object.keys(configData).forEach(function(section) {
+                if (section === 'DEFAULT') return;
+                payload[section] = collectSectionData(section);
+            });
+
+            return LSM.ensureCsrfToken().then(function(csrfToken) {
+                return fetch('/api/config', {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-Token': csrfToken
+                    },
+                    credentials: 'same-origin',
+                    body: JSON.stringify(payload)
+                });
+            })
+                .then(function(r) {
+                    return r.json().then(function(d) { return { ok: r.ok, data: d }; });
+                })
+                .then(function(res) {
+                    if (!res.ok) {
+                        statusIndicator.textContent = '❌ ' + (res.data.detail || '保存失败');
+                        statusIndicator.className = 'badge badge-red';
+                        LSM.showToast('❌ ' + (res.data.detail || '保存失败'), 'error');
+                        return;
+                    }
+                    statusIndicator.textContent = '✅ ' + (res.data.message || '全部配置已保存');
+                    statusIndicator.className = 'badge badge-green';
+                    Object.keys(configData).forEach(function(section) {
+                        if (section === 'DEFAULT') return;
+                        originalSnapshots[section] = Object.assign({}, configData[section]);
+                        modifiedSections[section] = false;
+                        var sectionStatus = document.getElementById('ss-' + section);
+                        if (sectionStatus) sectionStatus.innerHTML = '';
+                    });
+                    var timeStr = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+                    Object.keys(configData).forEach(function(section) {
+                        if (section === 'DEFAULT') return;
+                        lastSaveTimes[section] = timeStr;
+                    });
+                    updateFooter();
+                    LSM.showToast('✅ ' + (res.data.message || '全部配置已保存'), 'success');
+                });
+        })
+            .catch(function(e) {
+                if (statusIndicator) {
+                    statusIndicator.textContent = '❌ 网络错误: ' + ((e && e.message) ? e.message : '请重试');
+                    statusIndicator.className = 'badge badge-red';
+                }
+                LSM.showToast('❌ 保存失败: ' + ((e && e.message) ? e.message : '网络错误'), 'error');
+            })
+            .finally(function() {
+                LSM.setBtnLoading(saveBtn, false);
+            });
+    }
+
+    /* ── 重置全部 ───────────────────────────────── */
+    function resetAllConfig() {
+        LSM.confirm('确定要重置所有配置项为默认值吗？', '确认重置').then(function(confirmed) {
+            if (!confirmed) return;
+
+            // 用内置默认值填充（从 fieldMeta 读取 default 值）
+            Object.keys(configData).forEach(function(section) {
+                if (section === 'DEFAULT') return;
+                var sectionMeta = fieldMeta[section] || {};
+                Object.keys(configData[section]).forEach(function(key) {
+                    var meta = sectionMeta[key];
+                    if (meta && meta[1] !== undefined && meta[1] !== null) {
+                        configData[section][key] = meta[1];
+                    }
+                });
+            });
+
+            renderAllTabs();
+            activateTab(activeTab);
+            Object.keys(configData).forEach(function(section) {
+                if (section === 'DEFAULT') return;
+                markSectionDirty(section);
+            });
+            updateFooter();
+            LSM.showToast('↺ 已重置为默认值（尚未保存）', 'info');
+        });
+    }
+
+    /* ── 重新加载配置（从服务端） ───────────────── */
+    function reloadConfig() {
+        var statusIndicator = document.getElementById('status-indicator');
+        statusIndicator.textContent = '⏳ 重新加载中…';
+        statusIndicator.className = 'badge badge-yellow';
+
+        LSM.ensureCsrfToken()
+            .then(function(csrfToken) {
+                return fetch('/api/config/reload', {
+                    method: 'POST',
+                    headers: { 'X-CSRF-Token': csrfToken },
+                    credentials: 'same-origin'
+                });
+            })
+            .then(function(r) {
+                return r.json().then(function(d) { return { ok: r.ok, data: d }; });
+            })
+            .then(function(res) {
+                if (!res.ok) {
+                    statusIndicator.textContent = '❌ ' + (res.data.detail || '重新加载失败');
+                    statusIndicator.className = 'badge badge-red';
+                    LSM.showToast('❌ ' + (res.data.detail || '重新加载失败'), 'error');
+                    return;
+                }
+                LSM.showToast('🔄 配置已从服务端重新加载', 'success');
+                loadConfig();
+            })
+            .catch(function(e) {
+                statusIndicator.textContent = '❌ 网络错误: ' + ((e && e.message) ? e.message : '请重试');
+                statusIndicator.className = 'badge badge-red';
+                LSM.showToast('❌ 重新加载失败: ' + ((e && e.message) ? e.message : '网络错误'), 'error');
+            });
+    }
+
+    /* ── 更新底部状态栏 ─────────────────────────── */
+    function updateFooter() {
+        var footerStatus = document.getElementById('footer-status');
+        var footerModified = document.getElementById('footer-modified');
+        var footerLastSave = document.getElementById('footer-last-save');
+
+        var modifiedCount = 0;
+        Object.keys(modifiedSections).forEach(function(section) {
+            if (section !== 'DEFAULT' && modifiedSections[section]) modifiedCount++;
+        });
+
+        if (modifiedCount > 0) {
+            var sections = Object.keys(modifiedSections).filter(function(s) {
+                return s !== 'DEFAULT' && modifiedSections[s];
+            });
+            footerStatus.textContent = '✏️ 存在未保存的修改';
+            footerStatus.classList.add('text-warning');
+            footerStatus.classList.remove('text-success');
+            footerModified.textContent = '修改项: ' + modifiedCount + ' 段 (' + sections.join(', ') + ')';
+            footerModified.classList.remove('hidden');
+            // #modified-count 仅在管理员工具栏渲染，查看者下为 null（U-08 修复：空值守卫）
+            var modifiedCountEl = document.getElementById('modified-count');
+            if (modifiedCountEl) {
+                modifiedCountEl.classList.remove('hidden');
+                modifiedCountEl.textContent = '修改项: ' + modifiedCount;
+                modifiedCountEl.className = 'badge badge-yellow';
+            }
+        } else {
+            footerStatus.textContent = '✅ 全部已保存';
+            footerStatus.classList.add('text-success');
+            footerStatus.classList.remove('text-warning');
+            footerModified.classList.add('hidden');
+            var mcEl = document.getElementById('modified-count');
+            if (mcEl) mcEl.classList.add('hidden');
+        }
+
+        var times = Object.keys(lastSaveTimes).map(function(k) { return lastSaveTimes[k]; }).filter(Boolean);
+        if (times.length > 0) {
+            var latest = times.sort().reverse()[0];
+            footerLastSave.textContent = '🕐 最近保存: ' + latest;
+            footerLastSave.classList.remove('hidden');
+        } else {
+            footerLastSave.classList.add('hidden');
+        }
+    }
+
+    /* ── 密码可见性切换 ─────────────────────────── */
+    function togglePasswordVisibility(fieldId) {
+        var el = document.getElementById(fieldId);
+        if (!el) return;
+        el.type = (el.type === 'password') ? 'text' : 'password';
+    }
+
+    /* ── GitHub Token 测试 ──────────────────────── */
+    function testGitHubToken() {
+        var btn = document.querySelector('[data-action="test-github-token"]');
+        var statusEl = document.getElementById('github-token-status');
+        var rateEl = document.getElementById('github-rate-limit');
+        if (!btn || !statusEl) return;
+
+        var tokenInput = document.getElementById('cfg-GitHub-api_token');
+        var token = tokenInput ? tokenInput.value.trim() : '';
+
+        LSM.setBtnLoading(btn, true, '⏳ 测试中…');
+        statusEl.textContent = '正在连接 GitHub API…';
+        statusEl.classList.add('text-muted');
+        rateEl.classList.add('hidden');
+
+        LSM.ensureCsrfToken()
+            .then(function(csrfToken) {
+                return fetch('/api/github/test-token', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-Token': csrfToken
+                    },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({ token: token })
+                });
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(result) {
+                if (result.valid) {
+                    statusEl.innerHTML = '<span class="text-success">✅ ' + esc(result.message) + '</span>';
+                } else {
+                    statusEl.innerHTML = '<span class="text-error">❌ ' + esc(result.message) + '</span>';
+                }
+
+                // 速率限制条：.progress-bar/.progress-fill + 语义色
+                var rl = result.rate_limit || {};
+                if (rl.limit > 0) {
+                    var resetStr = '未知';
+                    if (rl.reset > 0) {
+                        resetStr = new Date(rl.reset * 1000).toLocaleTimeString('zh-CN', { hour12: false });
+                    }
+                    var pct = rl.limit > 0 ? Math.round(rl.remaining / rl.limit * 100) : 0;
+                    var barColor = pct > 50 ? 'progress-completed' : (pct > 20 ? 'progress-running' : 'progress-fill-error');
+                    rateEl.innerHTML =
+                        '<div class="info-box-title">📊 当前速率限制</div>' +
+                        '<div class="flex-between mb-12">' +
+                        '<div class="progress-bar" style="flex:1;margin:0 8px"><div class="progress-fill ' + barColor + '" style="width:' + pct + '%"></div></div>' +
+                        '<span style="white-space:nowrap"><b>' + rl.remaining + '</b> / ' + rl.limit + ' 次</span>' +
+                        '</div>' +
+                        '<div class="text-muted">重置时间: ' + esc(resetStr) + '</div>';
+                    rateEl.classList.remove('hidden');
+                }
+            })
+            .catch(function(e) {
+                statusEl.innerHTML = '<span class="text-error">❌ 网络错误: ' + esc((e && e.message) ? e.message : '请重试') + '</span>';
+            })
+            .finally(function() {
+                setTimeout(function() {
+                    LSM.setBtnLoading(btn, false);
+                    btn.textContent = '🔌 测试 Token';
+                }, 1500);
+            });
+    }
+
+    /* ══════════════════════════════════════════════
+       分类字典管理（CategoryDict Tab）
+       ══════════════════════════════════════════════ */
+    var categoryDictData = { dimensions: [], raw: {} };
+
+    function loadCategoryDictTab() {
+        var container = document.getElementById('category-dict-content');
+        if (!container) return;
+        container.innerHTML = '<div class="loading">加载中...</div>';
+
+        fetch('/api/category-dictionary', { credentials: 'same-origin' })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                categoryDictData = data;
+                renderCategoryDict();
+            })
+            .catch(function(e) {
+                container.innerHTML = '<div class="alert alert-error">加载分类字典失败: ' +
+                    esc((e && e.message) ? e.message : '网络错误') + '</div>';
+            });
+    }
+
+    function renderCategoryDict() {
+        var container = document.getElementById('category-dict-content');
+        var dims = categoryDictData.dimensions || [];
+        if (dims.length === 0) {
+            container.innerHTML = '<p class="empty-state">暂无分类字典数据</p>';
+            return;
+        }
+
+        var html = '';
+        dims.forEach(function(dim) {
+            html += '<div class="dict-dim-section">';
+            html += '<div class="dict-dim-header">';
+            html += '<h4>' + esc(dim.label) + ' <code>' + esc(dim.key) + '</code></h4>';
+            html += window.IS_ADMIN
+                ? '<button class="btn btn-sm btn-outline" data-action="dict-add" data-dim="' + esc(dim.key) + '">+ 添加选项</button>'
+                : '';
+            html += '</div>';
+
+            var opts = dim.options || [];
+            if (opts.length === 0) {
+                html += '<p class="text-sm text-muted">暂无选项</p>';
+            } else {
+                html += '<div class="badge-list" id="dict-options-' + esc(dim.key) + '">';
+                opts.forEach(function(opt, j) {
+                    html += '<span class="dict-tag" id="dict-tag-' + esc(dim.key) + '-' + j + '">';
+                    html += esc(opt.label || opt.value);
+                    html += window.IS_ADMIN
+                        ? '<button class="dict-tag-remove" data-action="dict-delete" data-dim="' + esc(dim.key) + '" data-value="' + esc(opt.value) + '" title="删除" aria-label="删除">×</button>'
+                        : '';
+                    html += '</span>';
+                });
+                html += '</div>';
+            }
+
+            html += '</div>';
+        });
+
+        container.innerHTML = html;
+    }
+
+    // 添加选项：原两步 prompt 合并为单个 Modal 双输入（值 + 显示名称）
+    function addDictOption(dimKey) {
+        var valueInput = document.createElement('input');
+        valueInput.type = 'text';
+        valueInput.className = 'form-input';
+        valueInput.placeholder = '选项值（如 news）';
+
+        var labelInput = document.createElement('input');
+        labelInput.type = 'text';
+        labelInput.className = 'form-input';
+        labelInput.placeholder = '留空则与值相同';
+
+        var field = document.createElement('div');
+        field.className = 'prompt-field';
+        var labelValue = document.createElement('label');
+        labelValue.className = 'prompt-label';
+        labelValue.textContent = '值（dimension: ' + dimKey + '）';
+        var labelName = document.createElement('label');
+        labelName.className = 'prompt-label';
+        labelName.textContent = '显示名称';
+        field.appendChild(labelValue);
+        field.appendChild(valueInput);
+        field.appendChild(labelName);
+        field.appendChild(labelInput);
+
+        LSM.showModal({
+            title: '添加分类选项 — ' + dimKey,
+            content: field,
+            width: '420px',
+            buttons: [
+                { text: '取消', action: 'cancel', type: 'outline' },
+                { text: '添加', action: 'confirm', type: 'primary', onClick: function() {
+                    var value = valueInput.value.trim();
+                    if (!value) {
+                        LSM.showToast('请输入选项值', 'warning');
+                        return false;   // 阻止关闭
+                    }
+                    var label = labelInput.value.trim() || value;
+                    submitDictOption(dimKey, value, label);
+                } }
+            ]
+        });
+        setTimeout(function() { valueInput.focus(); }, 0);
+    }
+
+    function submitDictOption(dimKey, value, label) {
+        LSM.ensureCsrfToken()
+            .then(function(csrfToken) {
+                return fetch('/api/category-dictionary/' + dimKey, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-Token': csrfToken
+                    },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({ value: value, label: label, sort_order: 99 })
+                });
+            })
+            .then(function(r) {
+                return r.json().then(function(d) { return { ok: r.ok, data: d }; });
+            })
+            .then(function(res) {
+                if (!res.ok) {
+                    LSM.showToast(res.data.detail || '添加失败', 'error');
+                    return;
+                }
+                LSM.showToast(res.data.message || '选项已添加', 'success');
+                loadCategoryDictTab();
+            })
+            .catch(function(e) {
+                LSM.showToast('添加失败: ' + ((e && e.message) ? e.message : '网络错误'), 'error');
+            });
+    }
+
+    function deleteDictOption(dimKey, value) {
+        LSM.confirm('确认删除 "' + value + '" (维度: ' + dimKey + ')？', '确认删除').then(function(confirmed) {
+            if (!confirmed) return;
+            LSM.ensureCsrfToken()
+                .then(function(csrfToken) {
+                    return fetch('/api/category-dictionary/' + dimKey + '/' + encodeURIComponent(value), {
+                        method: 'DELETE',
+                        headers: { 'X-CSRF-Token': csrfToken },
+                        credentials: 'same-origin'
+                    });
+                })
+                .then(function(r) {
+                    return r.json().then(function(d) { return { ok: r.ok, data: d }; });
+                })
+                .then(function(res) {
+                    if (!res.ok) {
+                        LSM.showToast(res.data.detail || '删除失败', 'error');
+                        return;
+                    }
+                    LSM.showToast(res.data.message || '已删除', 'success');
+                    loadCategoryDictTab();
+                })
+                .catch(function(e) {
+                    LSM.showToast('删除失败: ' + ((e && e.message) ? e.message : '网络错误'), 'error');
+                });
+        });
+    }
+
+    /* ── 事件委托：字段 + 按钮 ───────────────────── */
+    function bindContainerEvents() {
+        var container = document.getElementById('config-content');
+        if (!container) return;
+
+        container.addEventListener('input', function(e) {
+            if (e.target.dataset && e.target.dataset.section) onFieldInput(e.target);
+        });
+        container.addEventListener('change', function(e) {
+            if (e.target.dataset && e.target.dataset.section) onFieldChange(e.target);
+        });
+        container.addEventListener('click', function(e) {
+            var btn = e.target.closest('button[data-action]');
+            if (!btn) return;
+            var action = btn.dataset.action;
+            if (action === 'save-section') {
+                saveSection(btn.dataset.section);
+            } else if (action === 'toggle-pwd') {
+                togglePasswordVisibility(btn.dataset.target);
+            } else if (action === 'test-github-token') {
+                testGitHubToken();
+            } else if (action === 'dict-add') {
+                addDictOption(btn.dataset.dim);
+            } else if (action === 'dict-delete') {
+                deleteDictOption(btn.dataset.dim, btn.dataset.value);
+            }
+        });
+    }
+
+    /* ── 初始化 ─────────────────────────────────── */
+    document.addEventListener('DOMContentLoaded', function() {
+        // Tab 切换（带未保存守卫）
+        document.querySelectorAll('#config-tabs .tab-btn').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var tabKey = btn.dataset.tab;
+                if (tabKey && tabKey !== activeTab) guardThenActivateTab(tabKey);
+            });
+        });
+
+        // 工具栏（管理员按钮由 Jinja 门控渲染）
+        var btnReload = document.getElementById('btn-reload-config');
+        if (btnReload) btnReload.addEventListener('click', reloadConfig);
+        var btnResetAll = document.getElementById('btn-reset-all');
+        if (btnResetAll) btnResetAll.addEventListener('click', resetAllConfig);
+        var btnSaveAll = document.getElementById('btn-save-all');
+        if (btnSaveAll) btnSaveAll.addEventListener('click', saveAllConfig);
+
+        // Ctrl+S / Cmd+S 全量保存
+        document.addEventListener('keydown', function(e) {
+            if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
+                e.preventDefault();
+                saveAllConfig();
+            }
+        });
+
+        // 未保存守卫：关页/刷新
+        window.addEventListener('beforeunload', function(e) {
+            if (hasUnsavedChanges()) {
+                e.preventDefault();
+                e.returnValue = '';
+            }
+        });
+
+        bindContainerEvents();
+        loadConfig();
+    });
+})();

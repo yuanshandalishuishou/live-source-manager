@@ -98,6 +98,9 @@ window.LSM = (function() {
 
     /* ── Modal 对话框（唯一 Modal） ───────────────────── */
 
+    // 已打开模态栈（后进先出）；closeTopModal 供页面脚本在异步成功后关闭顶层模态
+    var modalStack = [];
+
     // options: { title, content(HTML 字符串或 DOM 节点), buttons, width, onClose }
     //   buttons: [{ text, action, type: primary/danger/outline, onClick(close), closeOnClick }]
     // 返回 { overlay, modal, close }
@@ -167,9 +170,14 @@ window.LSM = (function() {
         document.body.appendChild(overlay);
 
         var closed = false;
+        var handle = { overlay: overlay, modal: modal, close: close };
+        modalStack.push(handle);
+
         function close() {
             if (closed) return;
             closed = true;
+            var idx = modalStack.indexOf(handle);
+            if (idx >= 0) modalStack.splice(idx, 1);
             document.removeEventListener('keydown', onKeydown);
             if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
             // 关闭时还原焦点
@@ -198,7 +206,13 @@ window.LSM = (function() {
             modal.focus();
         }
 
-        return { overlay: overlay, modal: modal, close: close };
+        return handle;
+    }
+
+    // 关闭栈顶模态（页面脚本在异步操作成功后调用；无打开模态时静默无操作）
+    function closeTopModal() {
+        var handle = modalStack[modalStack.length - 1];
+        if (handle) handle.close();
     }
 
     /* ── 确认框（替代全部原生 confirm） ───────────────── */
@@ -637,6 +651,7 @@ window.LSM = (function() {
     return {
         showToast:       showToast,
         showModal:       showModal,
+        closeTopModal:   closeTopModal,
         confirm:         confirm,
         prompt:          prompt,
         promptChoice:    promptChoice,
