@@ -22,6 +22,8 @@ if not exist "%VENV_PY%" (
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
 
 cd /d "%PROJECT_DIR%"
-echo [%date% %time%] [LiveSource] 启动 Web 服务 (uvicorn 0.0.0.0:23456) >> "%LOG%"
-"%VENV_PY%" -m uvicorn web.webapp:app --host 0.0.0.0 --port 23456 >> "%LOG%" 2>&1
+REM Web 端口可通过环境变量 WEB_PORT 覆盖（默认 23456，与 Docker/HTTPServer.manager_port 口径一致）
+if not defined WEB_PORT set WEB_PORT=23456
+echo [%date% %time%] [LiveSource] 启动 Web 服务 (uvicorn 0.0.0.0:%WEB_PORT%) >> "%LOG%"
+"%VENV_PY%" -m uvicorn web.webapp:app --host 0.0.0.0 --port %WEB_PORT% >> "%LOG%" 2>&1
 echo [%date% %time%] [LiveSource] Web 服务进程退出 (exit=%errorlevel%) >> "%LOG%"

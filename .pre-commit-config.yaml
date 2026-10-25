@@ -1,43 +1,58 @@
-# pre-commit 配置 — 使用本地安装的工具（避免网络依赖）
-# tools invoked via managed venv python absolute path (no project .venv / PATH dependency)
+# pre-commit 配置 — 可移植版（D-07）
+# 所有钩子改为 language: python + additional_dependencies：由 pre-commit 创建
+# 隔离环境并安装对应版本工具，不依赖任何机器的绝对路径 / 系统 Python。
+# 工具版本与 pyproject.toml [project.optional-dependencies].dev 对齐（ruff 锁定
+# 已验证版本，避免钩子自动格式化与本地 CI 结果不一致）。
+#
+# 安装：pip install pre-commit && pre-commit install
+# 手动全量：pre-commit run --all-files
 
 repos:
-  # 基础钩子（本地 Python 实现）
   - repo: local
     hooks:
+      # 基础钩子（隔离环境内 Python 实现）
       - id: check-yaml
         name: check-yaml
-        entry: C:/Users/Administrator/.workbuddy/binaries/python/envs/default/Scripts/python.exe -c "import yaml,sys; yaml.safe_load(open(sys.argv[1]))"
-        language: system
+        entry: python -c "import yaml, sys; [yaml.safe_load(open(f, encoding='utf-8')) for f in sys.argv[1:]]"
+        language: python
+        additional_dependencies: [pyyaml]
         files: \.(yaml|yml)$
         pass_filenames: true
 
       - id: check-large-files
         name: check-large-files
-        entry: C:/Users/Administrator/.workbuddy/binaries/python/envs/default/Scripts/python.exe -c "import os,sys; f=sys.argv[1]; exit(0 if os.path.getsize(f)<500000 else 1)"
-        language: system
+        entry: python -c "import os, sys; exit(0 if all(os.path.getsize(f) < 500000 for f in sys.argv[1:]) else 1)"
+        language: python
+        # docs/archive/ 为历史 wiki 归档（V_1.0 旧 README 等），体积超限属预期，豁免
+        exclude: ^docs/archive/
         pass_filenames: true
 
       # Ruff — lint + autofix
       - id: ruff
         name: ruff check
-        entry: C:/Users/Administrator/.workbuddy/binaries/python/envs/default/Scripts/python.exe -m ruff check --fix --exit-non-zero-on-fix
-        language: system
+        entry: ruff check --fix --exit-non-zero-on-fix
+        language: python
+        additional_dependencies: [ruff==0.17.2]
         types: [python]
         files: ^(app|web|tests)/
 
       # Ruff — format
       - id: ruff-format
         name: ruff format
-        entry: C:/Users/Administrator/.workbuddy/binaries/python/envs/default/Scripts/python.exe -m ruff format
-        language: system
+        entry: ruff format
+        language: python
+        additional_dependencies: [ruff==0.17.2]
         types: [python]
         files: ^(app|web|tests)/
 
       # mypy — 类型检查（仅核心模块）
       - id: mypy
         name: mypy
-        entry: C:/Users/Administrator/.workbuddy/binaries/python/envs/default/Scripts/python.exe -m mypy --config-file=pyproject.toml --no-incremental
-        language: system
+        entry: mypy --config-file=pyproject.toml --no-incremental
+        language: python
+        additional_dependencies:
+          - mypy==2.4.0
+          - types-requests
+          - types-PyYAML
         types: [python]
         files: ^app/(exceptions|utils|logger)\.py$

@@ -1,9 +1,13 @@
 # =============================================================
-# GitHub Actions — 自动构建并推送 Docker 镜像到 GHCR
+# GitHub Actions — 测试 + 自动构建推送 Docker 镜像到 GHCR
 # =============================================================
 # 触发：
 #   - push 到 master 分支（每次推送代码都会重新构建镜像）
 #   - 手动触发（workflow_dispatch）
+#
+# Job 划分（D-07）：
+#   test           — 先跑全量 pytest，绿了才允许构建（境外 Runner 用 PyPI 官方源）
+#   build-and-push — needs: test；多架构构建 amd64+arm64 并推送到 GHCR
 #
 # 镜像产物：
 #   ghcr.io/yuanshandalishuishou/live-source-manager:latest
@@ -38,7 +42,30 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  # ── Job 1: 测试门禁（构建前必须全绿）────────────────────
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install dev dependencies (PyPI official source)
+        # requirements-dev.txt 不含任何国内镜像源，境外 Runner 直连 PyPI 即可
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run test suite
+        run: PYTHONPATH=. pytest tests/ -q
+
+  # ── Job 2: 多架构构建并推送（needs: test）───────────────
   build-and-push:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -94,8 +121,9 @@ jobs:
         with:
           context: .
           file: ./Dockerfile
-          # ffmpeg 静态构建为 linux64(amd64)；固定 amd64 避免架构不匹配
-          platforms: linux/amd64
+          # 多架构：Dockerfile 用 apt 装 ffmpeg，bookworm 对 amd64/arm64 均有包，
+          # 零改动支持双架构（armv7 不构建，见 docs/BACKLOG.md）
+          platforms: linux/amd64,linux/arm64
           push: true
           build-args: |
             BASE_IMAGE=python:3.13-slim-bookworm
