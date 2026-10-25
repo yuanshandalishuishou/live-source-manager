@@ -65,3 +65,12 @@ def test_epg_open_subscribe_epg_schema_exposed():
 def test_epg_open_subscribe_epg_default_value_seeded():
     """EPG.open_subscribe_epg 必须进入 _DEFAULT_VALUES 种子且默认 True。"""
     assert Config._DEFAULT_VALUES.get('EPG.open_subscribe_epg') == 'True'
+
+
+def test_default_values_seed_key_count():
+    """A-13: _DEFAULT_VALUES 播种键数 = 90（V_1.1 新增 EPG.open_subscribe_epg 后）。
+
+    键数变化必须是显式的：新增配置键需同步本断言、SECTION_SCHEMA 与 CONFIG.md，
+    防止默认值集合悄悄漂移导致首启播种与文档不一致。
+    """
+    assert len(Config._DEFAULT_VALUES) == 90

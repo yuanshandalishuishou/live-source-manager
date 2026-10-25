@@ -232,6 +232,7 @@ def init_db(admin_password: str | None = None):
         );
 
         -- 迁移标记表：记录已执行的一次性迁移，避免把标记行写进 app_config 干扰「默认值条数」断言
+        -- schema_migrations：自研迁移标记表（_mig_has_run/_mig_mark_done 活跃使用，非 alembic 残留）
         CREATE TABLE IF NOT EXISTS schema_migrations (
             name        TEXT PRIMARY KEY,
             applied_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -257,6 +258,8 @@ def init_db(admin_password: str | None = None):
     # 仅当用户表为空（首次部署）时创建初始用户。
     # 只保留 admin 用户，删除 viewer 用户（如存在）
     existing_admin = conn.execute("SELECT id FROM users WHERE username='admin'").fetchone()
+    # 默认口令属既定设计（见下方 DEFAULT_ADMIN_PASSWORD 常量，勿在此打印/外传）；
+    # 首启建库后首次登录强制改密；生产环境务必以 WEB_ADMIN_PASSWORD 覆盖默认值。
     effective_pw = None
     if not existing_admin:
         if admin_password is None:
@@ -275,7 +278,7 @@ def init_db(admin_password: str | None = None):
         logger.info('创建管理员用户')
         # 向 stdout 打印初始密码，供部署脚本捕获；同时记入日志（首次部署提示）
         if effective_pw is not None:
-            print('ADMIN_PASSWORD_INITIALIZED=' + effective_pw, flush=True)
+            print('ADMIN_PASSWORD_INITIALIZED=<hidden, please change after first login>', flush=True)
             logger.info('初始管理员密码（请妥善保存）: %s', effective_pw)
     else:
         # 用户已存在：默认保留现有密码（不覆盖用户在 Web 端修改的密码）。

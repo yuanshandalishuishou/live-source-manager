@@ -45,6 +45,12 @@ docker run -d \
 | `12345` | `12345` | Nginx 文件服务（对外分发 `live.m3u`） |
 | `23456` | `23456` | Web 管理后台 |
 
+> **关于 12345 的软冲突（预期行为）**：应用内置的文件发布服务（`HTTPServer.fileshare_port`，默认 12345）
+> 与 Nginx 监听同一端口。`start_docker.sh` 先启动 Nginx 并等待就绪，Web 后启；内置服务绑定失败时
+> 仅在日志记一条 warning 并跳过，文件发布由 Nginx 承担（两者服务同一 `www/output` 目录）。
+> 若 Nginx 安装失败，内置服务自动兜底——属设计内的降级链，不影响使用。
+> 如需彻底禁用内置服务，可在配置中心将 `HTTPServer.enabled` 置为 False。
+
 ### 数据卷说明（不挂载则重启丢数据）
 
 | 容器路径 | 作用 | 必挂 |
@@ -84,16 +90,21 @@ docker build --build-arg BASE_IMAGE=python:3.13-slim-bookworm -t lsm:latest .
 
 ---
 
-## 四、首次启动后获取管理员密码
+## 四、默认账号与口令
 
-- 若启动时**未设置** `WEB_ADMIN_PASSWORD`，则使用**默认初始密码 `Admin@123`**（与 Go 版一致，满足 GB/T 39786‑2021 复杂度），账号固定为 `admin`，首次登录会强制要求修改密码。该默认密码也会打印到日志（仅首次建库时出现）：
+- **首启仅自动创建 `admin` 一个账号**；只读账号请在登录后于「用户管理」页手动创建。
+- 若启动时**未设置** `WEB_ADMIN_PASSWORD`，则使用**默认初始密码 `<DEFAULT_ADMIN_PW>`**（既定设计，满足 GB/T 39786‑2021 复杂度），账号固定为 `admin`，**首次登录会强制要求修改密码**。
+- 首启建库时日志会打印一行脱敏标记（**不显示口令本体**，S-01/D-10 加固）：
 
   ```bash
   docker logs live-source-manager | grep ADMIN_PASSWORD_INITIALIZED
+  # 输出：ADMIN_PASSWORD_INITIALIZED=<hidden, please change after first login>
   ```
-  > 若已挂载旧库（`/data` 中已有 `web.db`），不会重复打印，直接用 `admin / Admin@123` 登录即可。
 
-- 若已设置 `WEB_ADMIN_PASSWORD`，则使用该密码登录（账号 `admin`）。
+  > 若已挂载旧库（`/data` 中已有 `web.db`），不会重复打印，直接用 `admin / <DEFAULT_ADMIN_PW>` 登录即可。
+
+- 若已设置 `WEB_ADMIN_PASSWORD`，则使用该密码登录（账号仍为 `admin`）。
+- **生产务必**：显式设置 `WEB_ADMIN_PASSWORD`（≥8 位、含字母+数字）与固定的 `CONFIG_ENCRYPT_KEY`（见第六节）。
 
 ### 健康检查
 
@@ -115,6 +126,10 @@ curl -I http://localhost:12345/    # 文件服务：返回 200
 docker pull ghcr.io/yuanshandalishuishou/live-source-manager:latest
 # 然后执行「第二节」的 docker run 命令（把镜像名换成上面的地址）
 ```
+
+> **多架构**：`ghcr.io/yuanshandalishuishou/live-source-manager:latest` 为多架构镜像，
+> 同时支持 `linux/amd64` 与 `linux/arm64`（Docker 会按宿主架构自动选择，无需特殊参数）。
+> armv7（`linux/arm/v7`）暂不构建，见 `docs/BACKLOG.md`。
 
 > 若 pull 报 `denied`，说明镜像尚未构建完成或包可见性为 private。
 > 前往 https://github.com/yuanshandalishuishou/live-source-manager/actions 查看构建状态；
@@ -140,7 +155,7 @@ docker logout ghcr.io
 
 ## 六、⚠️ 两个关键安全 / 稳定注意事项
 
-1. **`WEB_ADMIN_PASSWORD`**：不设置则使用默认初始密码 `Admin@123`（首次登录强制改密，日志可见 `ADMIN_PASSWORD_INITIALIZED=Admin@123`）。建议显式设一个 ≥8 位、含字母+数字的强密码以便复现。
+1. **`WEB_ADMIN_PASSWORD`**：不设置则使用默认初始密码 `<DEFAULT_ADMIN_PW>`（首次登录强制改密；日志仅打印脱敏标记 `ADMIN_PASSWORD_INITIALIZED=<hidden...>`，不显示口令本体）。建议显式设一个 ≥8 位、含字母+数字的强密码以便复现。遗留别名 `LSM_ADMIN_PW` 等价可用，推荐使用 `WEB_ADMIN_PASSWORD`。
 2. **`CONFIG_ENCRYPT_KEY`**：不设置则每次启动随机生成 → 重启后**无法解密之前加密过的配置**。稳定部署必须固定一个 Fernet 密钥。生成方式：
 
    ```bash
@@ -149,18 +164,27 @@ docker logout ghcr.io
 
    > 该密钥属于敏感信息，请用 `-e` 或 Docker Secret 传入，**不要写进镜像或提交到仓库**。
 
+3. **HTTPS 与 cookie**：Web 后台（23456）默认以 HTTP 提供服务。若通过 HTTPS 反向代理对外暴露，
+   请在代理层统一启用 TLS 与 HSTS，并确保登录会话 cookie 带 `Secure` 属性（仅在 HTTPS 下传输），
+   避免会话 cookie 经明文网络泄露。
+
+4. **代理作用范围**：`Network.*` 代理配置**仅作用于源文件下载与 EPG 抓取**；
+   流测试走 ffprobe 直连探测（与播放器实际拉流行径一致），不经代理。
+   请勿为「让流测试走代理」而配置代理——那不会生效，且会拖慢源采集。
+
 ---
 
 ## 七、环境变量一览
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
-| `WEB_ADMIN_PASSWORD` | 空（自动生成） | 管理员密码 |
+| `WEB_ADMIN_PASSWORD` | 空（用默认初始密码） | 管理员密码；生产务必显式设置 |
+| `LSM_ADMIN_PW` | 空 | 遗留别名，等价 `WEB_ADMIN_PASSWORD`（推荐使用后者） |
 | `CONFIG_ENCRYPT_KEY` | 空（自动生成） | 配置加密密钥（务必固定） |
 | `NGINX_PORT` | `12345` | Nginx 文件服务端口 |
 | `WEB_PORT` | `23456` | Web 管理端口 |
 | `TEST_TIMEOUT` | `30` | 流测试超时（秒） |
-| `CONCURRENT_THREADS` | `10` | 并发线程数 |
+| `CONCURRENT_THREADS` | `50` | 并发线程数（对齐 `Testing.concurrent_threads` 默认值） |
 | `WEB_DATA_DIR` | `/data` | SQLite 数据库目录（指向持久卷） |
 | `PROJECT_DIR` | `/app` | 应用根目录 |
 | `OUTPUT_FILENAME` | `live.m3u` | 输出文件名 |
@@ -203,6 +227,16 @@ curl -sI http://localhost:12345/epg.xml.gz
 Web 后台 `http://localhost:23456/epg`（节目单网格视图）与 `/epg/sources`（源管理）可手动刷新、生成、增删源。
 
 > 提示：`epg.xml.gz` 属运行期产物，必须挂载 `-v ./output:/www/output` 才能在容器重建后保留。
+
+### web_base_url 多网卡 / Docker 提示（D-12）
+
+`#EXTM3U` 头里的 `url-tvg` 地址由 `EPG.web_base_url` 决定（留空则自动探测 `http://<host>:<发布端口>`）：
+
+- **多网卡主机**：自动探测可能命中内网网卡 IP，导致外网播放器拉不到 EPG。请显式设置
+  `EPG.web_base_url` 为播放器可达的地址（如 `http://公网IP:12345` 或域名）。
+- **Docker 端口映射**：容器内探测到的是容器 IP，宿主外不可达。若 `-p` 映射了非 12345 的宿主机端口，
+  或经反向代理/域名访问，必须显式设置 `EPG.web_base_url` 为对外地址。
+- 订阅源（m3u 文件头 `url-tvg`/`x-tvg-url`）中的 EPG 地址会被自动提取注册（`EPG.open_subscribe_epg`，默认开启），无需手工添加。
 
 ---
 

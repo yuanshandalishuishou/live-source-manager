@@ -71,6 +71,7 @@ www/output/
 # 依旧在仓库里）。tools/ 内是 Windows/Linux 宿主用的 ffmpeg 二进制，
 # 镜像里的 ffmpeg 由 Dockerfile 的 apt-get install 提供，无需带入。
 *.md
+docs/
 tests/
 deploy/
 tools/
@@ -78,5 +79,7 @@ tools/
 node_modules/
 docker-compose.yml
 docker-compose*.yml
+# 开发/测试依赖声明（镜像只装 requirements.txt 运行链）
+requirements-dev.txt
 # 本机 safe-delete 守卫暂留的临时诊断文件（绝不可进镜像）
 _rm_result.txt

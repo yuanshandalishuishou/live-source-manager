@@ -146,11 +146,11 @@ class TestFirstInitTablesAndUser:
     def test_admin_password_auto_generated(self, first_init_db, capsys):
         _run_first_init()
         captured = capsys.readouterr().out
-        match = re.search(r'^ADMIN_PASSWORD_INITIALIZED=(\S+)$', captured, re.MULTILINE)
-        assert match, '首启未通过 stdout 输出 ADMIN_PASSWORD_INITIALIZED='
-        pw = match.group(1)
-        assert pw == 'Admin@123', f'默认初始密码应为 Admin@123，实为: {pw}'
-        assert _password_complexity_ok(pw), f'默认初始密码复杂度不足: {pw}'
+        # S-01/D-10: 首启口令打印已脱敏——stdout 只允许出现脱敏标记，禁止口令本体
+        assert 'ADMIN_PASSWORD_INITIALIZED=<hidden' in captured
+        assert '<hidden, please change after first login>' in captured
+        # 脱敏后默认口令字面值不得出现在任何输出中（常量引用，非字面值）
+        assert models.DEFAULT_ADMIN_PASSWORD not in captured
 
 
 @pytest.mark.integration
