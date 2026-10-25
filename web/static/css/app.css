@@ -1,30 +1,50 @@
 /* ── Live Source Manager Web UI ──────────────────── */
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
+/* ── 设计令牌（唯一事实源，UI 优化增量设计 §1.1） ── */
 :root {
-  --primary: #2563eb;
-  --primary-dark: #1d4ed8;
-  --primary-subtle: #dbeafe;
-  --success: #16a34a;
-  --warning: #d97706;
-  --error: #dc2626;
-  --bg: #f1f5f9;
-  --bg-subtle: #f8fafc;
-  --card-bg: #ffffff;
-  --input-bg: #ffffff;
-  --sidebar-bg: #1e293b;
-  --sidebar-text: #94a3b8;
-  --sidebar-active: #3b82f6;
-  --text: #1e293b;
-  --text-light: #64748b;
+  /* ── 色彩·品牌与语义（保留现行名，D2） ── */
+  --primary: #2563eb;  --primary-dark: #1d4ed8;  --primary-subtle: #dbeafe;
+  --success: #16a34a;  --success-subtle: #dcfce7;
+  --warning: #d97706;  --warning-subtle: #fef3c7;
+  --error:   #dc2626;  --error-subtle:   #fee2e2;
+  --info:    #0369a1;  --info-subtle:    #e0f2fe;
+  /* ── 色彩·中性（slate 系） ── */
+  --text: #1e293b;  --text-strong: #0f172a;  --text-light: #64748b;
   --text-tertiary: #94a3b8;
-  --border: #e2e8f0;
-  --radius: 8px;
-  --shadow: 0 1px 3px rgba(0,0,0,.1);
+  --bg: #f1f5f9;  --card-bg: #ffffff;  --bg-subtle: #f8fafc;
+  --input-bg: #ffffff;
+  --border: #e2e8f0;  --border-strong: #cbd5e1;
+  --sidebar-bg: #1e293b;  --sidebar-text: #94a3b8;  --sidebar-hover: #334155;
+  /* ── 字体（中文优化栈，U-10） ── */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+               'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
+  --font-mono: 'Cascadia Code', Consolas, 'Courier New', monospace;
+  /* ── 字号阶梯 ── */
+  --text-xs: 11px; --text-sm: 12px; --text-md: 13px; --text-base: 14px;
+  --text-lg: 16px; --text-xl: 18px; --text-2xl: 24px;
+  /* ── 间距阶梯（4px 基） ── */
+  --space-1: 4px;  --space-2: 8px;  --space-3: 12px; --space-4: 16px;
+  --space-5: 20px; --space-6: 24px; --space-8: 32px;
+  /* ── 圆角（4 档，淘汰即兴值） ── */
+  --radius-sm: 6px; --radius-md: 8px; --radius-lg: 12px; --radius-full: 999px;
+  /* ── 阴影（三级） ── */
+  --shadow-sm: 0 1px 2px rgba(15,23,42,.06);
+  --shadow-md: 0 4px 12px rgba(15,23,42,.08);
+  --shadow-lg: 0 12px 32px rgba(15,23,42,.12);
+  /* ── 动效（150–250ms 主区间，U-10） ── */
+  --duration-fast: 120ms; --duration-base: 200ms; --duration-slow: 320ms;
+  --ease-emphasized: cubic-bezier(0.16, 1, 0.3, 1);
+  /* ── 布局基线 ── */
+  --sidebar-w: 240px; --sidebar-w-collapsed: 64px; --topbar-h: 64px; --content-max: 1440px;
+  /* ── 遗留别名（存量引用兼容，等价于新刻度） ── */
+  --radius: var(--radius-md);
+  --shadow: var(--shadow-sm);
+  --sidebar-active: #3b82f6;
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: var(--font-sans);
   background: var(--bg);
   color: var(--text);
   line-height: 1.6;
@@ -34,11 +54,11 @@ body {
 .app-layout { display: flex; min-height: 100vh; }
 
 .sidebar {
-  width: 240px; background: var(--sidebar-bg); color: var(--sidebar-text);
+  width: var(--sidebar-w); background: var(--sidebar-bg); color: var(--sidebar-text);
   display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh;
-  transition: width .2s;
+  transition: width var(--duration-base);
 }
-.sidebar.collapsed { width: 60px; }
+.sidebar.collapsed { width: var(--sidebar-w-collapsed); }
 .sidebar.collapsed .sidebar-header h2 { font-size: 14px; }
 .sidebar.collapsed .sidebar-subtitle,
 .sidebar.collapsed .user-info,
@@ -247,9 +267,6 @@ tr.status-disabled { opacity: .55; }
 .form-section { margin-bottom: 24px; }
 .form-section-title { font-size: 13px; font-weight: 600; color: var(--text-light); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 12px; padding-bottom: 4px; border-bottom: 1px solid var(--border); }
 
-/* ── 侧边栏快捷键区域（底部） ──────────────────── */
-.sidebar-shortcuts { padding: 8px 16px; font-size: 11px; color: var(--sidebar-text); border-top: 1px solid #334155; }
-
 /* ══════════════════════════════════════════════════════════════
    未定义引用清零（设计文档 §1.2 — T01 批）
    补定义: 按钮变体 / 统计卡 / 状态栅格 / 快速操作 / htmx 指示器等
@@ -323,3 +340,107 @@ tr.status-disabled { opacity: .55; }
 
 /* ── 禁用态表单控件（查看者只读） ─────────────── */
 .form-input:disabled, .form-select:disabled { background: var(--bg-subtle); color: var(--text-light); cursor: not-allowed; }
+
+/* ══════════════════════════════════════════════════════════════
+   组件库 v3（T02 令牌化）— 与 lsm-components.js 的 JS 组件一一对应
+   ══════════════════════════════════════════════════════════════ */
+
+/* ── Toast ─────────────────────────────────────── */
+.toast-container { position: fixed; top: 16px; right: 16px; z-index: 9999; display: flex; flex-direction: column; gap: var(--space-2); max-width: 400px; }
+.toast { display: flex; align-items: center; gap: var(--space-2); padding: 12px 16px; border-radius: var(--radius-md); font-size: var(--text-base); box-shadow: var(--shadow-md); border: 1px solid transparent; word-break: break-word; animation: slideIn var(--duration-base) var(--ease-emphasized); }
+.toast-leaving { opacity: 0; transition: opacity var(--duration-base); }
+.toast-success { background: var(--success-subtle); color: #166534; border-color: #bbf7d0; }
+.toast-error { background: var(--error-subtle); color: #991b1b; border-color: #fecaca; }
+.toast-warning { background: var(--warning-subtle); color: #92400e; border-color: #fde68a; }
+.toast-info { background: var(--primary-subtle); color: #1e40af; border-color: #bfdbfe; }
+.toast-icon { flex-shrink: 0; }
+.toast-msg { flex: 1; }
+.toast-close { background: none; border: none; cursor: pointer; font-size: var(--text-lg); line-height: 1; color: inherit; opacity: .6; padding: 2px 4px; flex-shrink: 0; }
+.toast-close:hover { opacity: 1; }
+
+/* ── Modal（LSM.showModal 动态模态） ───────────── */
+.modal-overlay { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; background: rgba(15,23,42,.5); animation: fadeIn var(--duration-fast) ease; padding: var(--space-4); }
+.modal-box { background: var(--card-bg); border-radius: var(--radius-lg); width: 480px; max-width: 90vw; max-height: 85vh; overflow-y: auto; box-shadow: var(--shadow-lg); padding: var(--space-6); }
+.modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-5); }
+.modal-title { font-size: var(--text-lg); font-weight: 600; }
+.modal-close { background: none; border: none; cursor: pointer; font-size: 22px; line-height: 1; color: var(--text-light); padding: 4px; border-radius: var(--radius-sm); }
+.modal-close:hover { color: var(--text); background: var(--bg-subtle); }
+.modal-body { font-size: var(--text-base); }
+.modal-text { font-size: var(--text-base); color: var(--text); line-height: 1.7; }
+.modal-footer { display: flex; gap: var(--space-2); justify-content: flex-end; margin-top: var(--space-5); padding-top: var(--space-4); border-top: 1px solid var(--border); }
+
+/* ── Prompt / PromptChoice / PromptPassword ────── */
+.prompt-field { display: flex; flex-direction: column; gap: var(--space-2); }
+.prompt-label { font-size: var(--text-base); font-weight: 500; color: var(--text); }
+.prompt-choice { display: flex; flex-direction: column; gap: var(--space-2); }
+.prompt-choice-item { display: grid; grid-template-columns: auto 1fr; align-items: center; column-gap: var(--space-2); padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); cursor: pointer; transition: border-color var(--duration-fast); }
+.prompt-choice-item:hover { border-color: var(--primary); }
+.prompt-choice-item input[type="radio"] { accent-color: var(--primary); }
+.prompt-choice-text { font-size: var(--text-base); }
+.prompt-choice-desc { grid-column: 2; font-size: var(--text-sm); color: var(--text-light); margin-top: 2px; }
+.pwd-field { display: flex; flex-direction: column; gap: var(--space-2); }
+.pwd-input-wrap { display: flex; gap: var(--space-2); align-items: center; }
+.pwd-input-wrap .form-input { flex: 1; }
+.pwd-toggle { flex-shrink: 0; }
+.pwd-strength { display: flex; flex-direction: column; gap: var(--space-1); }
+.pwd-strength-fill { height: 6px; width: 0; border-radius: var(--radius-full); background: var(--border); transition: width var(--duration-base), background var(--duration-base); }
+.pwd-strength-weak { background: var(--error); }
+.pwd-strength-mid { background: var(--warning); }
+.pwd-strength-strong { background: var(--success); }
+.pwd-strength-text { font-size: var(--text-sm); color: var(--text-light); }
+
+/* ── 空状态（增强：图标 + 行动按钮） ─────────────── */
+.empty-state-icon { font-size: 32px; margin-bottom: var(--space-2); }
+.empty-state-text { font-size: var(--text-base); color: var(--text-light); }
+.empty-state .btn { margin-top: var(--space-4); }
+
+/* ── 分页（增强：上/下页 + 省略 + 总数） ─────────── */
+.pagination { display: flex; justify-content: center; align-items: center; gap: var(--space-3); padding: var(--space-4) 0; flex-wrap: wrap; }
+.pagination-info { font-size: var(--text-sm); color: var(--text-light); }
+.pagination-pages { display: flex; gap: var(--space-1); flex-wrap: wrap; }
+.pagination-btn { padding: 6px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--card-bg); cursor: pointer; font-size: var(--text-base); color: var(--text); transition: background var(--duration-fast), border-color var(--duration-fast); }
+.pagination-btn:hover:not(:disabled) { background: var(--bg); border-color: var(--border-strong); }
+.pagination-btn.active { background: var(--primary); border-color: var(--primary); color: #fff; }
+.pagination-btn:disabled { opacity: .5; cursor: not-allowed; }
+.pagination-ellipsis { padding: 6px 4px; color: var(--text-light); }
+
+/* ── 复制按钮（URL 列等） ───────────────────────── */
+.copy-btn { background: none; border: none; cursor: pointer; padding: 2px 6px; font-size: var(--text-sm); color: var(--text-light); border-radius: var(--radius-sm); }
+.copy-btn:hover { color: var(--primary); background: var(--primary-subtle); }
+
+/* ── 信息框（config 说明栏等，取代 --bg-secondary 行内） ── */
+.info-box { background: var(--bg-subtle); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 12px 16px; margin-bottom: var(--space-5); font-size: var(--text-md); line-height: 1.7; }
+
+/* ── 日志行级别着色 ────────────────────────────── */
+.log-viewer .log-line.log-error { color: #fca5a5; }
+.log-viewer .log-line.log-warn { color: #fcd34d; }
+.log-viewer .log-line.log-debug { color: #9ca3af; }
+
+/* ── 表单校验错误态 ────────────────────────────── */
+.form-error { font-size: var(--text-sm); color: var(--error); margin-top: var(--space-1); }
+.form-input.has-error, .form-select.has-error { border-color: var(--error); box-shadow: 0 0 0 3px rgba(220,38,38,.15); }
+
+/* ── 徽标列表容器（关键词等多徽标场景） ─────────── */
+.badge-list { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+
+/* ── 登录/改密卡片（auth 页，T03 起启用） ───────── */
+.auth-card { background: var(--card-bg); border-radius: var(--radius-lg); box-shadow: var(--shadow-md); padding: var(--space-8); width: 100%; max-width: 400px; }
+
+/* ── 加密密钥提示横幅（app.js 胶水，样式类化） ──── */
+.encrypt-banner { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); background: var(--warning-subtle); border: 1px solid #fde68a; border-radius: var(--radius-md); padding: 12px 16px; margin-bottom: var(--space-4); font-size: var(--text-base); color: #92400e; }
+.encrypt-banner-text { display: flex; align-items: center; gap: var(--space-2); flex: 1; }
+.encrypt-banner-icon { font-size: 20px; }
+.encrypt-banner-text a { color: var(--primary); text-decoration: underline; }
+.encrypt-banner-close { background: none; border: none; cursor: pointer; font-size: var(--text-lg); color: #92400e; padding: 4px; flex-shrink: 0; line-height: 1; }
+
+/* ── 响应式补充（640/1024，768 既有） ───────────── */
+@media (max-width: 1024px) {
+  .card-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+  .status-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+}
+@media (max-width: 640px) {
+  .quick-actions .btn { flex: 1; }
+  .modal-box { width: 100%; }
+  .pagination { flex-direction: column; }
+  .pwd-input-wrap { flex-direction: column; align-items: stretch; }
+}

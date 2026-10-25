@@ -7,8 +7,8 @@
     <script>window.__csrf_token = "{{ csrf_token|safe if csrf_token is defined else '' }}";</script>
     <script>window.IS_ADMIN = {{ 'true' if user and user.role == 'admin' else 'false' }};</script>
     <script src="/static/vendor/htmx.min.js"></script>
-    <script src="/static/js/app.js"></script>
     <script src="/static/js/lsm-components.js"></script>
+    <script src="/static/js/app.js"></script>
     <link rel="stylesheet" href="/static/css/app.css">
     {% block head %}{% endblock %}
 </head>
