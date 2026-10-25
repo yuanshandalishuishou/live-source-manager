@@ -72,9 +72,12 @@ body {
 .user-name { display: block; color: #fff; font-size: 14px; }
 .user-role { font-size: 12px; }
 .nav-list { list-style: none; flex: 1; padding: 8px; }
-.nav-item { display: block; padding: 10px 12px; border-radius: 6px; color: var(--sidebar-text); text-decoration: none; font-size: 14px; margin-bottom: 2px; transition: .15s; }
+.nav-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 6px; color: var(--sidebar-text); text-decoration: none; font-size: 14px; margin-bottom: 2px; transition: .15s; }
 .nav-item:hover { background: #334155; color: #fff; }
 .nav-item.active { background: var(--primary); color: #fff; }
+.nav-item .icon { width: 18px; height: 18px; flex-shrink: 0; }
+.sidebar-footer { padding: 12px 16px; border-top: 1px solid #334155; display: flex; flex-direction: column; gap: 8px; }
+.sidebar-version { font-size: var(--text-xs); color: var(--sidebar-text); opacity: .7; text-align: center; }
 
 .main-content { flex: 1; display: flex; flex-direction: column; overflow-x: hidden; }
 .top-bar { display: flex; align-items: center; gap: 12px; padding: 16px 24px; background: var(--card-bg); border-bottom: 1px solid var(--border); }
@@ -118,7 +121,9 @@ body {
 .btn-outline { background: transparent; border-color: var(--border); color: var(--text); }
 .btn-outline:hover { background: var(--bg); }
 .btn-sm { padding: 4px 10px; font-size: 13px; }
-.btn-icon { background: none; border: none; cursor: pointer; font-size: 18px; padding: 4px; color: var(--text); }
+.btn-icon { background: none; border: none; cursor: pointer; font-size: 18px; padding: 4px; color: var(--text); display: inline-flex; align-items: center; justify-content: center; }
+.btn .icon { width: 16px; height: 16px; }
+.btn-icon .icon { width: 20px; height: 20px; }
 
 /* Toolbar */
 .toolbar { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; gap: 12px; flex-wrap: wrap; }
@@ -339,6 +344,25 @@ tr.status-disabled { opacity: .55; }
 /* ── 实时测试状态文字 ────────────────────────── */
 .test-status { font-size: var(--text-md, 13px); color: var(--text); }
 .test-details { font-size: var(--text-md, 13px); color: var(--text-light); }
+/* 状态色调（livetest.js badgeToneMap 联动） */
+.test-status-running { color: var(--primary); }
+.test-status-success { color: var(--success); }
+.test-status-warning { color: var(--warning); }
+.test-status-error { color: var(--error); }
+.test-status-paused { color: var(--warning); }
+.test-status-cancelled { color: var(--text-light); }
+.test-status-completed { color: var(--success); }
+.test-status-idle { color: var(--text-tertiary); }
+.test-status-muted { color: var(--text-tertiary); }
+
+/* ── SVG 线性图标（LSM.icon / _icons.html 宏，替代 emoji） ── */
+.icon {
+    width: 1em; height: 1em;
+    display: inline-block; flex-shrink: 0;
+    vertical-align: -0.125em;
+    fill: none; stroke: currentColor;
+    stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+}
 
 /* ── 工具类 ──────────────────────────────────── */
 .text-muted { color: var(--text-tertiary); }
@@ -403,6 +427,7 @@ tr.status-disabled { opacity: .55; }
 .toast-warning { background: var(--warning-subtle); color: #92400e; border-color: #fde68a; }
 .toast-info { background: var(--primary-subtle); color: #1e40af; border-color: #bfdbfe; }
 .toast-icon { flex-shrink: 0; }
+.toast-icon .icon { width: 18px; height: 18px; }
 .toast-msg { flex: 1; }
 .toast-close { background: none; border: none; cursor: pointer; font-size: var(--text-lg); line-height: 1; color: inherit; opacity: .6; padding: 2px 4px; flex-shrink: 0; }
 .toast-close:hover { opacity: 1; }
@@ -441,7 +466,8 @@ tr.status-disabled { opacity: .55; }
 .pwd-capslock { color: var(--warning); }
 
 /* ── 空状态（增强：图标 + 行动按钮） ─────────────── */
-.empty-state-icon { font-size: 32px; margin-bottom: var(--space-2); }
+.empty-state-icon { font-size: 32px; margin-bottom: var(--space-2); color: var(--text-tertiary); }
+.empty-state-icon .icon { width: 40px; height: 40px; }
 .empty-state-text { font-size: var(--text-base); color: var(--text-light); }
 .empty-state .btn { margin-top: var(--space-4); }
 

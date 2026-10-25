@@ -40,10 +40,56 @@ window.LSM = (function() {
             .replace(/\r/g, '\\r');
     }
 
+    /* ── SVG 图标（统一线性图标，替代 emoji，跨平台一致） ──
+       仅内部受信任的固定 path，不接收外部输入；样式见 app.css .icon。
+       注意：与 web/templates/_icons.html 的服务端宏保持同名同步。 */
+    var ICONS = {
+        dashboard: '<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>',
+        sources: '<path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"/><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"/><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"/><path d="M19.1 4.9C23 8.8 23 15.2 19.1 19.1"/>',
+        config: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82.33l.06.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
+        rules: '<path d="M12 2H2v10l9.29 9.29a1 1 0 0 0 1.41 0l8.59-8.59a1 1 0 0 0 0-1.41L12 2z"/><circle cx="7" cy="7" r="1.2"/>',
+        test: '<path d="M9 3h6M10 3v6L4.5 18a2 2 0 0 0 1.8 3h11.4a2 2 0 0 0 1.8-3L14 9V3"/><path d="M7 15h10"/>',
+        epg: '<rect x="2" y="7" width="20" height="14" rx="2"/><path d="m17 2-5 5-5-5"/>',
+        globe: '<circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>',
+        logs: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8M16 17H8"/>',
+        users: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+        logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/>',
+        menu: '<path d="M3 6h18M3 12h18M3 18h18"/>',
+        copy: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+        success: '<circle cx="12" cy="12" r="10"/><path d="m8.5 12.5 2.5 2.5 5-5"/>',
+        error: '<circle cx="12" cy="12" r="10"/><path d="m15 9-6 6M9 9l6 6"/>',
+        warning: '<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/>',
+        info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>',
+        search: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>',
+        refresh: '<path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/>',
+        play: '<polygon points="6 3 20 12 6 21 6 3"/>',
+        pause: '<rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/>',
+        stop: '<rect x="5" y="5" width="14" height="14" rx="2"/>',
+        plus: '<path d="M12 5v14M5 12h14"/>',
+        edit: '<path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>',
+        trash: '<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
+        clock: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
+        zap: '<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>',
+        wrench: '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>',
+        chart: '<path d="M3 3v18h18"/><path d="M7 15v3M12 10v8M17 5v13"/>',
+        send: '<path d="m22 2-7 20-4-9-9-4 20-7z"/>',
+        code: '<polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>',
+        sparkles: '<path d="M12 3l1.9 5.8L20 10l-6.1 1.2L12 17l-1.9-5.8L4 10l6.1-1.2L12 3z"/><path d="M19 15l.9 2.6L22.5 18.5l-2.6.9L19 22l-.9-2.6-2.6-.9 2.6-.9L19 15z"/>',
+        eye: '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>',
+        lock: '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+        download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/>'
+    };
+
+    // 渲染内联 SVG 图标；未知名称返回空串（调用方应使用上方受信任名称）
+    function icon(name) {
+        return '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' +
+            (ICONS[name] || '') + '</svg>';
+    }
+
     /* ── Toast 通知（唯一 Toast） ────────────────────── */
 
     var TOAST_ICONS = {
-        success: '✅', error: '❌', warning: '⚠️', info: 'ℹ️'
+        success: 'success', error: 'error', warning: 'warning', info: 'info'
     };
 
     function showToast(message, type, duration) {
@@ -63,9 +109,9 @@ window.LSM = (function() {
         var toast = document.createElement('div');
         toast.className = 'toast toast-' + type;
 
-        var icon = document.createElement('span');
-        icon.className = 'toast-icon';
-        icon.textContent = TOAST_ICONS[type];
+        var iconEl = document.createElement('span');
+        iconEl.className = 'toast-icon';
+        iconEl.innerHTML = icon(TOAST_ICONS[type]);
 
         var text = document.createElement('span');
         text.className = 'toast-msg';
@@ -77,7 +123,7 @@ window.LSM = (function() {
         closeBtn.setAttribute('aria-label', '关闭提示');
         closeBtn.textContent = '×';
 
-        toast.appendChild(icon);
+        toast.appendChild(iconEl);
         toast.appendChild(text);
         toast.appendChild(closeBtn);
 
@@ -473,10 +519,12 @@ window.LSM = (function() {
         var box = document.createElement('div');
         box.className = 'empty-state';
         if (options.icon) {
-            var icon = document.createElement('div');
-            icon.className = 'empty-state-icon';
-            icon.textContent = options.icon;
-            box.appendChild(icon);
+            var iconBox = document.createElement('div');
+            iconBox.className = 'empty-state-icon';
+            // 已知图标名渲染 SVG；其余按纯文本兜底（向后兼容）
+            if (ICONS[options.icon]) iconBox.innerHTML = icon(options.icon);
+            else iconBox.textContent = options.icon;
+            box.appendChild(iconBox);
         }
         var text = document.createElement('div');
         text.className = 'empty-state-text';
@@ -663,6 +711,7 @@ window.LSM = (function() {
         setBtnLoading:   setBtnLoading,
         escapeHtml:      escapeHtml,
         escapeJs:        escapeJs,
+        icon:            icon,
         formatDate:      formatDate,
         ensureCsrfToken: ensureCsrfToken,
         isAdmin:         isAdmin

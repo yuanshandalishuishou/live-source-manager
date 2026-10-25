@@ -102,31 +102,34 @@
 
         var status = testData.status || 'idle';
         var statusLabel;
+        var badgeToneMap = { running: 'running', paused: 'warning', cancelled: 'muted', completed: (total === 0 ? 'warning' : 'success'), error: 'error', idle: 'muted' };
         if (status === 'running') {
             if (completed !== _lastCompleted) {
                 _lastCompleted = completed;
                 _lastMoveTime = Date.now();
             } else if (Date.now() - _lastMoveTime > 45000) {
-                statusLabel = '⏳ 测试进行中... (' + completed + '/' + total + ') ⚠️ 进度长时间无变化，测试可能已停滞，可尝试「取消」后重新测试';
+                statusLabel = '测试进行中... (' + completed + '/' + total + ') · 进度长时间无变化，测试可能已停滞，可尝试「取消」后重新测试';
             } else if (completed === 0) {
-                statusLabel = '⏳ 正在连接首批源（单源测试可能耗时数秒~数十秒）...';
+                statusLabel = '正在连接首批源（单源测试可能耗时数秒~数十秒）...';
             } else {
-                statusLabel = '⏳ 测试进行中... (' + completed + '/' + total + ')';
+                statusLabel = '测试进行中... (' + completed + '/' + total + ')';
             }
         } else if (status === 'paused') {
-            statusLabel = '⏸ 测试已暂停（完成 ' + completed + '/' + total + '）';
+            statusLabel = '测试已暂停（完成 ' + completed + '/' + total + '）';
         } else if (status === 'cancelled') {
-            statusLabel = '⏹ 测试已取消（完成 ' + completed + '/' + total + '）';
+            statusLabel = '测试已取消（完成 ' + completed + '/' + total + '）';
         } else if (status === 'completed') {
             statusLabel = (total === 0)
-                ? '⚠️ 上次测试完成，但 0 个源被测试（请先在「源管理」添加源）'
-                : '✅ 测试已完成';
+                ? '上次测试完成，但 0 个源被测试（请先在「源管理」添加源）'
+                : '测试已完成';
         } else if (status === 'error') {
-            statusLabel = '❌ 测试出错: ' + (testData.message || '');
+            statusLabel = '测试出错: ' + (testData.message || '');
         } else {
             statusLabel = '等待测试...';
         }
         statusText.textContent = statusLabel;
+        // 状态色调：随 STATUS_BADGES 语义色联动（running/warning/success/error/muted）
+        statusText.className = 'test-status test-status-' + (badgeToneMap[status] || 'muted');
 
         // 状态徽标：中文 + 语义色
         var badge = STATUS_BADGES[status] || STATUS_BADGES['idle'];
@@ -310,7 +313,7 @@
             var fileSel = document.getElementById('test-file-select');
             var fileId = fileSel ? fileSel.value : '';
             if (!fileId) {
-                document.getElementById('test-status-text').textContent = '⚠️ 请先在下拉中选择一个源文件';
+                document.getElementById('test-status-text').textContent = '请先在下拉中选择一个源文件';
                 return;
             }
             payload = { file_id: fileId };
@@ -326,7 +329,7 @@
             payload.engine = engineVal;
         }
 
-        document.getElementById('test-status-text').textContent = '⏳ 正在触发测试...';
+        document.getElementById('test-status-text').textContent = '正在触发测试...';
         document.getElementById('progress-fill').style.width = '0%';
 
         LSM.ensureCsrfToken().then(function(csrfToken) {
@@ -345,7 +348,7 @@
                 if (data.status === 'triggered') {
                     if (!data.total || data.total === 0) {
                         document.getElementById('test-status-text').textContent =
-                            '⚠️ 暂无可测试的源（当前 0 个）：请先在「源管理」添加本地源文件或订阅在线源，再点击「立即测试」。';
+                            '暂无可测试的源（当前 0 个）：请先在「源管理」添加本地源文件或订阅在线源，再点击「立即测试」。';
                         document.getElementById('progress-fill').style.width = '0%';
                         updateControlButtons('idle');
                         return;
@@ -356,24 +359,24 @@
                         ? '（已自动去重 ' + data.dedup_removed + ' 个重复地址，原始 ' + (data.total_before_dedup || '?') + ' 个）'
                         : '';
                     document.getElementById('test-status-text').textContent =
-                        '✅ 测试已触发，正在测试 ' + label + ' 内的 ' + total + ' 个源' + dedupNote + '...';
+                        '测试已触发，正在测试 ' + label + ' 内的 ' + total + ' 个源' + dedupNote + '...';
                     startPolling();
                     pollTestStatus();
                     updateControlButtons('running');
                 } else if (data.status === 'running') {
                     document.getElementById('test-status-text').textContent =
-                        '⏳ ' + (data.message || '测试已在进行中');
+                        (data.message || '测试已在进行中');
                     startPolling();
                     pollTestStatus();
                     updateControlButtons('running');
                 } else {
                     document.getElementById('test-status-text').textContent =
-                        '⚠️ 触发返回: ' + (data.detail || JSON.stringify(data));
+                        '触发返回: ' + (data.detail || JSON.stringify(data));
                 }
             })
             .catch(function(err) {
                 document.getElementById('test-status-text').textContent =
-                    '❌ 触发失败: ' + ((err && err.message) ? err.message : '网络错误');
+                    '触发失败: ' + ((err && err.message) ? err.message : '网络错误');
             });
     }
 
@@ -399,7 +402,7 @@
     function generatePlaylist() {
         var btn = document.getElementById('btn-generate');
         var statusEl = document.getElementById('test-status-text');
-        LSM.setBtnLoading(btn, true, '⏳ 生成中…');
+        LSM.setBtnLoading(btn, true, '生成中…');
         LSM.ensureCsrfToken().then(function(csrfToken) {
             return fetch('/api/test/generate-playlist', {
                 method: 'POST',
@@ -412,16 +415,16 @@
                 var d = res.data;
                 if (res.ok && d.status === 'ok') {
                     var files = (d.files || []).join('、');
-                    var msg = '✅ 已基于测试结果生成播放列表：有效 ' + (d.valid || 0) + ' 个'
+                    var msg = '已基于测试结果生成播放列表：有效 ' + (d.valid || 0) + ' 个'
                         + (d.qualified ? ('，高级 ' + d.qualified + ' 个') : '')
                         + '。文件：' + (files || '(无)');
                     if (statusEl) statusEl.textContent = msg;
                 } else {
-                    if (statusEl) statusEl.textContent = '⚠️ 生成失败：' + (d.detail || d.reason || JSON.stringify(d));
+                    if (statusEl) statusEl.textContent = '生成失败：' + (d.detail || d.reason || JSON.stringify(d));
                 }
             })
             .catch(function(err) {
-                if (statusEl) statusEl.textContent = '❌ 生成请求失败: ' + ((err && err.message) ? err.message : '网络错误');
+                if (statusEl) statusEl.textContent = '生成请求失败: ' + ((err && err.message) ? err.message : '网络错误');
             })
             .finally(function() {
                 LSM.setBtnLoading(btn, false);
@@ -439,13 +442,13 @@
             .then(function(r) { return r.json(); })
             .then(function(data) {
                 if (data.status === 'error') {
-                    document.getElementById('test-status-text').textContent = '⚠️ ' + (data.detail || '操作失败');
+                    document.getElementById('test-status-text').textContent = (data.detail || '操作失败');
                 }
                 pollTestStatus();
             })
             .catch(function(err) {
                 document.getElementById('test-status-text').textContent =
-                    '❌ 操作失败: ' + ((err && err.message) ? err.message : '网络错误');
+                    '操作失败: ' + ((err && err.message) ? err.message : '网络错误');
             });
     }
 

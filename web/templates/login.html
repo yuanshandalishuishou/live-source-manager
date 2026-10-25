@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}登录 - 直播源管理器{% endblock %}
 {% block page_title %}登录{% endblock %}
 {% block body_class %}auth-page{% endblock %}
@@ -24,7 +25,7 @@
                 <input type="password" id="password" name="password" class="form-input" required>
                 <button type="button" class="btn btn-sm btn-outline pwd-toggle" id="password-toggle" aria-label="显示密码">显示</button>
             </div>
-            <small class="form-help pwd-capslock" id="password-capslock" style="display:none">⚠️ 大写锁定已开启（CapsLock）</small>
+            <small class="form-help pwd-capslock" id="password-capslock" style="display:none">{{ icon('warning') }}大写锁定已开启（CapsLock）</small>
         </div>
         <div id="login-error" class="alert alert-error" style="display:none"></div>
         <button type="submit" class="btn btn-primary btn-block" id="login-btn">

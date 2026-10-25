@@ -266,7 +266,7 @@
             sort_order: sortOrder
         };
 
-        resultEl.innerHTML = '<div class="text-muted text-sm">⏳ 保存中...</div>';
+        resultEl.innerHTML = '<div class="text-muted text-sm">保存中...</div>';
 
         LSM.ensureCsrfToken().then(function(csrfToken) {
             return fetch(url, {
@@ -381,7 +381,7 @@
 
         var resultEl = document.getElementById('test-result');
         resultEl.classList.remove('hidden');
-        resultEl.innerHTML = '<div class="text-muted">⏳ 测试中...</div>';
+        resultEl.innerHTML = '<div class="text-muted">测试中...</div>';
 
         LSM.ensureCsrfToken().then(function(csrfToken) {
             return fetch('/api/rules/test-classification', {
@@ -400,7 +400,7 @@
                     quality: '画质', media_type: '媒体类型', genre: '类型'
                 };
                 var html = '<div class="card test-result-card">';
-                html += '<div class="card-header"><h3>📊 分类测试结果</h3></div>';
+                html += '<div class="card-header"><h3>' + LSM.icon('chart') + ' 分类测试结果</h3></div>';
                 html += '<div class="card-body">';
                 html += '<p><strong>频道名称：</strong>' + LSM.escapeHtml(channelName) + '</p>';
 
@@ -492,7 +492,7 @@
                     html += '<tr>';
                     html += '<td>' + excl.id + '</td>';
                     html += '<td><span class="badge badge-blue">' + LSM.escapeHtml(excl.province_keyword) + '</span></td>';
-                    html += '<td><span class="badge badge-yellow">🚫 ' + LSM.escapeHtml(excl.excluded_keyword) + '</span></td>';
+                    html += '<td><span class="badge badge-yellow">' + LSM.escapeHtml(excl.excluded_keyword) + '</span></td>';
                     html += '<td>' + (excl.note ? LSM.escapeHtml(excl.note) : '-') + '</td>';
                     html += '<td>' + (window.IS_ADMIN ?
                         '<button class="btn btn-sm btn-outline" data-action="delete-exclusion" data-exclusion-id="' + excl.id + '">删除</button>' : '') + '</td>';

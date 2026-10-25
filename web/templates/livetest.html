@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}实时测试 - 直播源管理器{% endblock %}
 {% block page_title %}实时测试{% endblock %}
 
@@ -56,19 +57,19 @@
         <div class="toolbar-right">
             {% if user and user.role == 'admin' %}
             <button class="btn btn-primary btn-sm" id="btn-start">
-                ▶ 立即测试
+                {{ icon('play') }}立即测试
             </button>
             <button class="btn btn-warning btn-sm hidden" id="btn-pause">
-                ⏸ 暂停测试
+                {{ icon('pause') }}暂停测试
             </button>
             <button class="btn btn-primary btn-sm hidden" id="btn-resume">
-                ▶ 继续测试
+                {{ icon('play') }}继续测试
             </button>
             <button class="btn btn-danger btn-sm hidden" id="btn-cancel">
-                ⏹ 取消测试
+                {{ icon('stop') }}取消测试
             </button>
             <button class="btn btn-success btn-sm hidden" id="btn-generate">
-                🎬 基于测试结果生成播放列表
+                {{ icon('sparkles') }}基于测试结果生成播放列表
             </button>
             {% endif %}
         </div>

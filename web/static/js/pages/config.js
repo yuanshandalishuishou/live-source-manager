@@ -19,17 +19,17 @@
 
     // Tab → 字段映射（一个 Tab 可渲染多个后端配置段，见 Network）
     var TAB_SECTIONS = {
-        Testing:  { section: 'Testing',  icon: '🧪', label: '测试' },
-        Output:   { section: 'Output',   icon: '📤', label: '输出' },
-        Network:  { sections: ['Network', 'HTTPServer'],  icon: '🌐', label: '网络' },
-        GitHub:   { section: 'GitHub',   icon: '🐙', label: 'GitHub' },
-        Filter:   { section: 'Filter',   icon: '🔍', label: '筛选' },
+        Testing:  { section: 'Testing',  label: '测试' },
+        Output:   { section: 'Output',   label: '输出' },
+        Network:  { sections: ['Network', 'HTTPServer'],  label: '网络' },
+        GitHub:   { section: 'GitHub',   label: 'GitHub' },
+        Filter:   { section: 'Filter',   label: '筛选' },
     };
 
     // 各配置段在卡片上的展示标题（一个 Tab 渲染多个段时区分用）
     var SECTION_TITLES = {
-        'Network': '🌐 网络与代理',
-        'HTTPServer': '📡 文件发布服务',
+        'Network': '网络与代理',
+        'HTTPServer': '文件发布服务',
     };
 
     // 密码字段白名单（用于 `<input type="password">`）
@@ -61,7 +61,7 @@
         var statusIndicator = document.getElementById('status-indicator');
 
         try {
-            statusIndicator.textContent = '⏳ 加载中…';
+            statusIndicator.textContent = '加载中…';
             statusIndicator.className = 'badge badge-yellow';
 
             Promise.all([
@@ -91,17 +91,17 @@
                     renderAllTabs();
                     activateTab(activeTab);
                     updateFooter();
-                    statusIndicator.textContent = '✅ 已加载';
+                    statusIndicator.textContent = '已加载';
                     statusIndicator.className = 'badge badge-green';
                 })
                 .catch(function(e) {
-                    loadingEl.textContent = '❌ 加载配置失败: ' + ((e && e.message) ? e.message : '网络错误');
-                    statusIndicator.textContent = '❌ 加载失败';
+                    loadingEl.textContent = '加载配置失败: ' + ((e && e.message) ? e.message : '网络错误');
+                    statusIndicator.textContent = '加载失败';
                     statusIndicator.className = 'badge badge-red';
                 });
         } catch (e) {
-            loadingEl.textContent = '❌ 加载配置失败: ' + e.message;
-            statusIndicator.textContent = '❌ 加载失败';
+            loadingEl.textContent = '加载配置失败: ' + e.message;
+            statusIndicator.textContent = '加载失败';
             statusIndicator.className = 'badge badge-red';
         }
     }
@@ -118,12 +118,12 @@
                 var fields = configData[section];
                 if (!fields) {
                     html += '<div class="tab-content" id="tab-panel-' + section + '" data-tab="' + tabKey + '">';
-                    html += '<div class="empty-state">⚠️ 未找到配置段: ' + esc(section) + '</div>';
+                    html += '<div class="empty-state">' + LSM.icon('warning') + ' 未找到配置段: ' + esc(section) + '</div>';
                     html += '</div>';
                     return;
                 }
 
-                var cardTitle = SECTION_TITLES[section] || (info.icon + ' ' + info.label);
+                var cardTitle = SECTION_TITLES[section] || info.label;
                 html += '<div class="tab-content" id="tab-panel-' + section + '" data-tab="' + tabKey + '">';
                 html += '<div class="card config-section">';
                 html += '<div class="card-header"><h3>' + esc(cardTitle) + '</h3></div>';
@@ -132,7 +132,7 @@
                 // ── GitHub Tab 特殊信息栏 ──
                 if (section === 'GitHub') {
                     html += '<div class="info-box">' +
-                        '<div class="info-box-title">🐙 GitHub API Token 说明</div>' +
+                        '<div class="info-box-title">' + LSM.icon('code') + ' GitHub API Token 说明</div>' +
                         '<div class="text-muted">未配置 Token 时 GitHub API 限流为 <b>60次/时</b>，配置后提升至 <b>5000次/时</b>。Token 无需任何权限，仅用于提升配额。</div>' +
                         '<div class="text-muted">获取方式：<a href="https://github.com/settings/tokens/new" target="_blank">GitHub → Settings → Developer settings → Personal access tokens → Generate new token</a>，不勾选任何权限直接生成即可。</div>' +
                         '</div>';
@@ -166,7 +166,7 @@
                     } else if (ftype === 'str' && PASSWORD_KEYS.some(function(pk) { return key.toLowerCase().indexOf(pk) >= 0; })) {
                         html += '<input type="password" id="' + fieldId + '" ' + dataAttrs +
                             'class="form-input" value="' + esc(String(value || '')) + '">';
-                        html += '<button type="button" class="btn btn-sm btn-outline mt-4" data-action="toggle-pwd" data-target="' + fieldId + '">👁 显示/隐藏</button>';
+                        html += '<button type="button" class="btn btn-sm btn-outline mt-4" data-action="toggle-pwd" data-target="' + fieldId + '">' + LSM.icon('eye') + ' 显示/隐藏</button>';
                     } else if (ftype === 'int') {
                         var intChoices = (meta && Array.isArray(meta[4])) ? meta[4] : null;
                         if (intChoices) {
@@ -199,7 +199,7 @@
                 if (section === 'GitHub') {
                     html += '<div class="divider-top">';
                     html += '<div class="flex-between mb-12">';
-                    html += '<button type="button" class="btn btn-outline btn-sm" data-action="test-github-token">🔌 测试 Token</button>';
+                    html += '<button type="button" class="btn btn-outline btn-sm" data-action="test-github-token">' + LSM.icon('zap') + ' 测试 Token</button>';
                     html += '<span id="github-token-status" class="text-sm text-muted"></span>';
                     html += '</div>';
                     html += '<div id="github-rate-limit" class="info-box hidden text-sm mt-8"></div>';
@@ -209,9 +209,9 @@
                 // ── 网络(HTTPServer) Tab 重启提示 ──
                 if (section === 'HTTPServer') {
                     html += '<div class="info-box">' +
-                        '<div class="info-box-title">🌐 文件发布服务说明</div>' +
+                        '<div class="info-box-title">' + LSM.icon('globe') + ' 文件发布服务说明</div>' +
                         '<div class="text-muted">本段配置 <b>文件共享端口</b>（默认 12345）与文档根目录，用于对外发布生成的 M3U/TXT 播放列表。</div>' +
-                        '<div class="text-muted">⚠️ <b>修改「文件共享端口 / 监听地址」后需重启 Web 服务才能生效</b>（端口在启动时绑定）。「文档根目录」修改后同样需重启以重新挂载。</div>' +
+                        '<div class="text-muted">' + LSM.icon('warning') + ' <b>修改「文件共享端口 / 监听地址」后需重启 Web 服务才能生效</b>（端口在启动时绑定）。「文档根目录」修改后同样需重启以重新挂载。</div>' +
                         '</div>';
                 }
 
@@ -219,7 +219,7 @@
                 html += '<div class="form-actions">';
                 html += '<span class="section-save-status text-sm" id="ss-' + section + '"></span>';
                 html += window.IS_ADMIN
-                    ? '<button class="btn btn-primary btn-sm" data-action="save-section" data-section="' + section + '" id="btn-save-' + section + '">💾 保存</button>'
+                    ? '<button class="btn btn-primary btn-sm" data-action="save-section" data-section="' + section + '" id="btn-save-' + section + '">' + LSM.icon('success') + ' 保存</button>'
                     : '';
                 html += '</div>';
 
@@ -232,7 +232,7 @@
         // ── 分类字典 Tab ───────────────────────────
         html += '<div class="tab-content" id="tab-panel-CategoryDict" data-tab="CategoryDict">';
         html += '<div class="card config-section">';
-        html += '<div class="card-header"><h3>🏷️ 频道分类数据字典</h3></div>';
+        html += '<div class="card-header"><h3>' + LSM.icon('rules') + ' 频道分类数据字典</h3></div>';
         html += '<div class="card-body">';
         html += '<p class="text-sm text-muted mb-12">定义各维度的可选项，用于频道列表中的分类选择。修改后影响输出 M3U 的分类标记。</p>';
         html += '<div id="category-dict-content"><div class="loading">加载中...</div></div>';
@@ -322,7 +322,7 @@
             if (errorMsg) {
                 el.classList.add('has-error');
                 if (valEl) {
-                    valEl.textContent = '❌ ' + errorMsg;
+                    valEl.textContent = errorMsg;
                     valEl.className = 'field-validation form-error';
                 }
                 validationErrors[section + '.' + key] = errorMsg;
@@ -410,12 +410,12 @@
             return k.indexOf(section + '.') === 0;
         });
         if (hasErrors) {
-            statusEl.innerHTML = '<span class="text-error">❌ 请先修正字段错误</span>';
+            statusEl.innerHTML = '<span class="text-error">' + LSM.icon('error') + ' 请先修正字段错误</span>';
             return;
         }
 
-        statusEl.innerHTML = '<span class="text-muted">⏳ 保存中…</span>';
-        LSM.setBtnLoading(btnEl, true, '⏳ 保存中…');
+        statusEl.innerHTML = '<span class="text-muted">保存中…</span>';
+        LSM.setBtnLoading(btnEl, true, '保存中…');
 
         var data = collectSectionData(section);
         LSM.ensureCsrfToken()
@@ -435,20 +435,20 @@
             })
             .then(function(res) {
                 if (!res.ok) {
-                    statusEl.innerHTML = '<span class="text-error">❌ ' + esc(res.data.detail || '保存失败') + '</span>';
-                    LSM.showToast('❌ ' + (res.data.detail || '保存失败'), 'error');
+                    statusEl.innerHTML = '<span class="text-error">' + LSM.icon('error') + ' ' + esc(res.data.detail || '保存失败') + '</span>';
+                    LSM.showToast( (res.data.detail || '保存失败'), 'error');
                     return;
                 }
-                statusEl.innerHTML = '<span class="text-success">✅ ' + esc(res.data.message || '配置已保存') + '</span>';
+                statusEl.innerHTML = '<span class="text-success">' + LSM.icon('success') + ' ' + esc(res.data.message || '配置已保存') + '</span>';
                 originalSnapshots[section] = Object.assign({}, data);
                 modifiedSections[section] = false;
                 lastSaveTimes[section] = new Date().toLocaleTimeString('zh-CN', { hour12: false });
                 updateFooter();
-                LSM.showToast('✅ ' + (res.data.message || '配置已保存'), 'success');
+                LSM.showToast( (res.data.message || '配置已保存'), 'success');
             })
             .catch(function(e) {
-                statusEl.innerHTML = '<span class="text-error">❌ 网络错误: ' + esc((e && e.message) ? e.message : '请重试') + '</span>';
-                LSM.showToast('❌ 保存失败: ' + ((e && e.message) ? e.message : '网络错误'), 'error');
+                statusEl.innerHTML = '<span class="text-error">' + LSM.icon('error') + ' 网络错误: ' + esc((e && e.message) ? e.message : '请重试') + '</span>';
+                LSM.showToast('保存失败: ' + ((e && e.message) ? e.message : '网络错误'), 'error');
             })
             .finally(function() {
                 LSM.setBtnLoading(btnEl, false);
@@ -476,13 +476,13 @@
 
         Promise.all(checks).then(function() {
             if (Object.keys(validationErrors).length > 0) {
-                LSM.showToast('❌ 存在校验错误，请修正后重试', 'error');
+                LSM.showToast('存在校验错误，请修正后重试', 'error');
                 return;
             }
 
-            statusIndicator.textContent = '⏳ 全量保存中…';
+            statusIndicator.textContent = '全量保存中…';
             statusIndicator.className = 'badge badge-yellow';
-            LSM.setBtnLoading(saveBtn, true, '⏳ 保存中…');
+            LSM.setBtnLoading(saveBtn, true, '保存中…');
 
             var payload = {};
             Object.keys(configData).forEach(function(section) {
@@ -506,12 +506,12 @@
                 })
                 .then(function(res) {
                     if (!res.ok) {
-                        statusIndicator.textContent = '❌ ' + (res.data.detail || '保存失败');
+                        statusIndicator.textContent =  (res.data.detail || '保存失败');
                         statusIndicator.className = 'badge badge-red';
-                        LSM.showToast('❌ ' + (res.data.detail || '保存失败'), 'error');
+                        LSM.showToast( (res.data.detail || '保存失败'), 'error');
                         return;
                     }
-                    statusIndicator.textContent = '✅ ' + (res.data.message || '全部配置已保存');
+                    statusIndicator.textContent =  (res.data.message || '全部配置已保存');
                     statusIndicator.className = 'badge badge-green';
                     Object.keys(configData).forEach(function(section) {
                         if (section === 'DEFAULT') return;
@@ -526,15 +526,15 @@
                         lastSaveTimes[section] = timeStr;
                     });
                     updateFooter();
-                    LSM.showToast('✅ ' + (res.data.message || '全部配置已保存'), 'success');
+                    LSM.showToast( (res.data.message || '全部配置已保存'), 'success');
                 });
         })
             .catch(function(e) {
                 if (statusIndicator) {
-                    statusIndicator.textContent = '❌ 网络错误: ' + ((e && e.message) ? e.message : '请重试');
+                    statusIndicator.textContent = '网络错误: ' + ((e && e.message) ? e.message : '请重试');
                     statusIndicator.className = 'badge badge-red';
                 }
-                LSM.showToast('❌ 保存失败: ' + ((e && e.message) ? e.message : '网络错误'), 'error');
+                LSM.showToast('保存失败: ' + ((e && e.message) ? e.message : '网络错误'), 'error');
             })
             .finally(function() {
                 LSM.setBtnLoading(saveBtn, false);
@@ -565,14 +565,14 @@
                 markSectionDirty(section);
             });
             updateFooter();
-            LSM.showToast('↺ 已重置为默认值（尚未保存）', 'info');
+            LSM.showToast('已重置为默认值（尚未保存）', 'info');
         });
     }
 
     /* ── 重新加载配置（从服务端） ───────────────── */
     function reloadConfig() {
         var statusIndicator = document.getElementById('status-indicator');
-        statusIndicator.textContent = '⏳ 重新加载中…';
+        statusIndicator.textContent = '重新加载中…';
         statusIndicator.className = 'badge badge-yellow';
 
         LSM.ensureCsrfToken()
@@ -588,18 +588,18 @@
             })
             .then(function(res) {
                 if (!res.ok) {
-                    statusIndicator.textContent = '❌ ' + (res.data.detail || '重新加载失败');
+                    statusIndicator.textContent =  (res.data.detail || '重新加载失败');
                     statusIndicator.className = 'badge badge-red';
-                    LSM.showToast('❌ ' + (res.data.detail || '重新加载失败'), 'error');
+                    LSM.showToast( (res.data.detail || '重新加载失败'), 'error');
                     return;
                 }
-                LSM.showToast('🔄 配置已从服务端重新加载', 'success');
+                LSM.showToast('配置已从服务端重新加载', 'success');
                 loadConfig();
             })
             .catch(function(e) {
-                statusIndicator.textContent = '❌ 网络错误: ' + ((e && e.message) ? e.message : '请重试');
+                statusIndicator.textContent = '网络错误: ' + ((e && e.message) ? e.message : '请重试');
                 statusIndicator.className = 'badge badge-red';
-                LSM.showToast('❌ 重新加载失败: ' + ((e && e.message) ? e.message : '网络错误'), 'error');
+                LSM.showToast('重新加载失败: ' + ((e && e.message) ? e.message : '网络错误'), 'error');
             });
     }
 
@@ -618,7 +618,7 @@
             var sections = Object.keys(modifiedSections).filter(function(s) {
                 return s !== 'DEFAULT' && modifiedSections[s];
             });
-            footerStatus.textContent = '✏️ 存在未保存的修改';
+            footerStatus.textContent = '存在未保存的修改';
             footerStatus.classList.add('text-warning');
             footerStatus.classList.remove('text-success');
             footerModified.textContent = '修改项: ' + modifiedCount + ' 段 (' + sections.join(', ') + ')';
@@ -631,7 +631,7 @@
                 modifiedCountEl.className = 'badge badge-yellow';
             }
         } else {
-            footerStatus.textContent = '✅ 全部已保存';
+            footerStatus.textContent = '全部已保存';
             footerStatus.classList.add('text-success');
             footerStatus.classList.remove('text-warning');
             footerModified.classList.add('hidden');
@@ -642,7 +642,7 @@
         var times = Object.keys(lastSaveTimes).map(function(k) { return lastSaveTimes[k]; }).filter(Boolean);
         if (times.length > 0) {
             var latest = times.sort().reverse()[0];
-            footerLastSave.textContent = '🕐 最近保存: ' + latest;
+            footerLastSave.textContent = '最近保存: ' + latest;
             footerLastSave.classList.remove('hidden');
         } else {
             footerLastSave.classList.add('hidden');
@@ -666,7 +666,7 @@
         var tokenInput = document.getElementById('cfg-GitHub-api_token');
         var token = tokenInput ? tokenInput.value.trim() : '';
 
-        LSM.setBtnLoading(btn, true, '⏳ 测试中…');
+        LSM.setBtnLoading(btn, true, '测试中…');
         statusEl.textContent = '正在连接 GitHub API…';
         statusEl.classList.add('text-muted');
         rateEl.classList.add('hidden');
@@ -686,9 +686,9 @@
             .then(function(r) { return r.json(); })
             .then(function(result) {
                 if (result.valid) {
-                    statusEl.innerHTML = '<span class="text-success">✅ ' + esc(result.message) + '</span>';
+                    statusEl.innerHTML = '<span class="text-success">' + LSM.icon('success') + ' ' + esc(result.message) + '</span>';
                 } else {
-                    statusEl.innerHTML = '<span class="text-error">❌ ' + esc(result.message) + '</span>';
+                    statusEl.innerHTML = '<span class="text-error">' + LSM.icon('error') + ' ' + esc(result.message) + '</span>';
                 }
 
                 // 速率限制条：.progress-bar/.progress-fill + 语义色
@@ -701,7 +701,7 @@
                     var pct = rl.limit > 0 ? Math.round(rl.remaining / rl.limit * 100) : 0;
                     var barColor = pct > 50 ? 'progress-completed' : (pct > 20 ? 'progress-running' : 'progress-fill-error');
                     rateEl.innerHTML =
-                        '<div class="info-box-title">📊 当前速率限制</div>' +
+                        '<div class="info-box-title">' + LSM.icon('chart') + ' 当前速率限制</div>' +
                         '<div class="flex-between mb-12">' +
                         '<div class="progress-bar" style="flex:1;margin:0 8px"><div class="progress-fill ' + barColor + '" style="width:' + pct + '%"></div></div>' +
                         '<span style="white-space:nowrap"><b>' + rl.remaining + '</b> / ' + rl.limit + ' 次</span>' +
@@ -711,12 +711,12 @@
                 }
             })
             .catch(function(e) {
-                statusEl.innerHTML = '<span class="text-error">❌ 网络错误: ' + esc((e && e.message) ? e.message : '请重试') + '</span>';
+                statusEl.innerHTML = '<span class="text-error">' + LSM.icon('error') + ' 网络错误: ' + esc((e && e.message) ? e.message : '请重试') + '</span>';
             })
             .finally(function() {
                 setTimeout(function() {
                     LSM.setBtnLoading(btn, false);
-                    btn.textContent = '🔌 测试 Token';
+                    btn.textContent = '测试 Token';
                 }, 1500);
             });
     }

@@ -115,7 +115,7 @@
                 var users = data.users || [];
                 if (users.length === 0) {
                     LSM.showEmptyState(document.getElementById('users-list'), {
-                        icon: '👥', text: '暂无用户'
+                        icon: 'users', text: '暂无用户'
                     });
                     return;
                 }

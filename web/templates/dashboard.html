@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}仪表盘 - 直播源管理器{% endblock %}
 {% block page_title %}仪表盘{% endblock %}
 
@@ -11,7 +12,7 @@
 
     <!-- 频道分组统计（Top10 进度条） -->
     <div class="card mt-20">
-        <div class="card-header"><h3>📊 频道分组统计</h3></div>
+        <div class="card-header"><h3>{{ icon('chart') }}频道分组统计</h3></div>
         <div class="card-body" id="channel-stats">
             <div class="loading">加载中...</div>
         </div>
@@ -19,7 +20,7 @@
 
     <!-- 系统运行状态 -->
     <div class="card mt-20">
-        <div class="card-header"><h3>🔧 系统运行状态</h3></div>
+        <div class="card-header"><h3>{{ icon('wrench') }}系统运行状态</h3></div>
         <div class="card-body" id="system-status">
             <div class="loading">加载中...</div>
         </div>
@@ -27,11 +28,11 @@
 
     <!-- 快速操作 -->
     <div class="card mt-20">
-        <div class="card-header"><h3>⚡ 快速操作</h3></div>
+        <div class="card-header"><h3>{{ icon('zap') }}快速操作</h3></div>
         <div class="card-body quick-actions">
-            <a href="/sources" class="btn btn-outline">📡 查看源列表</a>
-            <a href="/config" class="btn btn-outline">⚙️ 修改配置</a>
-            <a href="/test" class="btn btn-outline">🧪 测试源</a>
+            <a href="/sources" class="btn btn-outline">{{ icon('sources') }}查看源列表</a>
+            <a href="/config" class="btn btn-outline">{{ icon('config') }}修改配置</a>
+            <a href="/test" class="btn btn-outline">{{ icon('test') }}测试源</a>
         </div>
     </div>
 </div>

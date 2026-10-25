@@ -48,7 +48,7 @@
                 channels = channels.slice(0, 10);
                 if (channels.length === 0) {
                     LSM.showEmptyState(document.getElementById('channel-stats'), {
-                        icon: '📊', text: '暂无频道数据'
+                        icon: 'chart', text: '暂无频道数据'
                     });
                     return;
                 }
@@ -89,7 +89,7 @@
                 if (test.last_run) {
                     var testStatus = test.status === 'running' ? '运行中' : (test.status === 'completed' ? '已完成' : '空闲');
                     html += '<div class="test-section">';
-                    html += '<div class="form-section-title">🧪 最近测试</div>';
+                    html += '<div class="form-section-title">' + LSM.icon('test') + ' 最近测试</div>';
                     html += '<div class="status-grid">';
                     html += '<div class="status-item"><span class="label">状态</span><span>' + testStatus + '</span></div>';
                     var passed = test.passed || 0;

@@ -58,7 +58,7 @@
     inner.innerHTML = '';
     var channels = data.channels || [];
     if (!channels.length) {
-      showEmpty('暂无节目单数据。请前往「🛰️ EPG 源」添加并抓取 EPG 源。');
+      showEmpty('暂无节目单数据。请前往「EPG 源」添加并抓取 EPG 源。');
       return;
     }
     var hw = hourWidth();

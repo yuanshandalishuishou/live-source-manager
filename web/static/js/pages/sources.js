@@ -143,7 +143,7 @@
             html += '<td>' + esc(f.name || '') + '</td>';
             html += '<td><span class="' + typeClass + '">' + typeLabel + '</span></td>';
             html += '<td class="url-cell" title="' + esc(f.url_or_path || '') + '">' + esc(addrDisplay) +
-                '<button type="button" class="copy-btn" data-copy="' + esc(f.url_or_path || '') + '" aria-label="复制地址" title="复制地址">📋</button></td>';
+                '<button type="button" class="copy-btn" data-copy="' + esc(f.url_or_path || '') + '" aria-label="复制地址" title="复制地址">' + LSM.icon('copy') + '</button></td>';
             html += '<td><span class="' + statusClass + '">' + statusLabel + '</span></td>';
             html += '<td class="text-center">' + chCount + '</td>';
             html += '<td>' + uaBadge + '</td>';
@@ -329,7 +329,7 @@
                 html += '<tr id="ch-row-' + chIdx + '">';
                 html += '<td>' + esc(chName) + '</td>';
                 html += '<td class="url-cell" title="' + esc(ch.url || '') + '">' + esc(truncateText(ch.url || '', 60)) +
-                    '<button type="button" class="copy-btn" data-copy="' + esc(ch.url || '') + '" aria-label="复制地址" title="复制地址">📋</button></td>';
+                    '<button type="button" class="copy-btn" data-copy="' + esc(ch.url || '') + '" aria-label="复制地址" title="复制地址">' + LSM.icon('copy') + '</button></td>';
                 html += '<td>' + esc(ch.group || '-') + '</td>';
                 html += '<td><span class="category-badge ' + catClass + '" data-action="edit-category" data-ch-idx="' + chIdx + '" title="点击修改分类">' + esc(catDisplay) + '</span></td>';
                 html += '<td><span class="category-badge ' + uaClass + '" data-action="edit-channel-ua" data-ch-idx="' + chIdx + '" title="点击配置 UA">' + esc(uaDisplay) + '</span></td>';
@@ -745,7 +745,7 @@
         var note = document.createElement('div');
         note.className = 'form-help';
         if (isOverride) {
-            note.textContent = '⚠ 当前为频道级覆盖';
+            note.textContent = '当前为频道级覆盖';
             note.classList.add('text-warning');
         } else if (ch.user_agent) {
             note.textContent = '当前 UA 来自文件级或源文件内置，设置后将覆盖为频道级';

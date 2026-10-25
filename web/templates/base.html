@@ -1,3 +1,4 @@
+{% from "_icons.html" import icon %}
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -30,20 +31,21 @@
                 </div>
             </div>
             <ul class="nav-list">
-                <li><a href="/" class="nav-item {% if request.url.path == '/' %}active{% endif %}" title="仪表盘"><span>📊 仪表盘</span></a></li>
-                <li><a href="/sources" class="nav-item {% if request.url.path == '/sources' %}active{% endif %}" title="源管理"><span>📡 源管理</span></a></li>
-                <li><a href="/config" class="nav-item {% if request.url.path == '/config' %}active{% endif %}" title="配置中心"><span>⚙️ 配置中心</span></a></li>
-                <li><a href="/rules" class="nav-item {% if request.url.path == '/rules' %}active{% endif %}" title="分类规则"><span>🏷️ 分类规则</span></a></li>
-                <li><a href="/test" class="nav-item {% if request.url.path == '/test' %}active{% endif %}" title="实时测试"><span>🧪 实时测试</span></a></li>
-                <li><a href="/epg" class="nav-item {% if request.url.path == '/epg' %}active{% endif %}" title="EPG 节目单"><span>📺 EPG 节目单</span></a></li>
-                <li><a href="/epg/sources" class="nav-item {% if request.url.path == '/epg/sources' %}active{% endif %}" title="EPG 源"><span>🛰️ EPG 源</span></a></li>
-                <li><a href="/logs" class="nav-item {% if request.url.path == '/logs' %}active{% endif %}" title="日志查看"><span>📋 日志查看</span></a></li>
+                <li><a href="/" class="nav-item {% if request.url.path == '/' %}active{% endif %}" title="仪表盘">{{ icon('dashboard') }}<span>仪表盘</span></a></li>
+                <li><a href="/sources" class="nav-item {% if request.url.path == '/sources' %}active{% endif %}" title="源管理">{{ icon('sources') }}<span>源管理</span></a></li>
+                <li><a href="/config" class="nav-item {% if request.url.path == '/config' %}active{% endif %}" title="配置中心">{{ icon('config') }}<span>配置中心</span></a></li>
+                <li><a href="/rules" class="nav-item {% if request.url.path == '/rules' %}active{% endif %}" title="分类规则">{{ icon('rules') }}<span>分类规则</span></a></li>
+                <li><a href="/test" class="nav-item {% if request.url.path == '/test' %}active{% endif %}" title="实时测试">{{ icon('test') }}<span>实时测试</span></a></li>
+                <li><a href="/epg" class="nav-item {% if request.url.path == '/epg' %}active{% endif %}" title="EPG 节目单">{{ icon('epg') }}<span>EPG 节目单</span></a></li>
+                <li><a href="/epg/sources" class="nav-item {% if request.url.path == '/epg/sources' %}active{% endif %}" title="EPG 源">{{ icon('globe') }}<span>EPG 源</span></a></li>
+                <li><a href="/logs" class="nav-item {% if request.url.path == '/logs' %}active{% endif %}" title="日志查看">{{ icon('logs') }}<span>日志查看</span></a></li>
                 {% if user.role == 'admin' %}
-                <li><a href="/users" class="nav-item {% if request.url.path == '/users' %}active{% endif %}" title="用户管理"><span>👥 用户管理</span></a></li>
+                <li><a href="/users" class="nav-item {% if request.url.path == '/users' %}active{% endif %}" title="用户管理">{{ icon('users') }}<span>用户管理</span></a></li>
                 {% endif %}
             </ul>
             <div class="sidebar-footer">
-                <button class="btn btn-sm btn-outline" hx-post="/api/auth/logout" hx-target="body" hx-push-url="/login">退出登录</button>
+                <button class="btn btn-sm btn-outline" hx-post="/api/auth/logout" hx-target="body" hx-push-url="/login">{{ icon('logout') }}退出登录</button>
+                <div class="sidebar-version">v{{ asset_v }}</div>
             </div>
             {% endif %}
         </nav>
@@ -51,7 +53,7 @@
         <!-- 主内容区 -->
         <main class="main-content" id="main-content">
             <div class="top-bar">
-                <button class="btn btn-icon sidebar-toggle" aria-label="切换侧边栏" onclick="document.getElementById('sidebar').classList.toggle('collapsed')">☰</button>
+                <button class="btn btn-icon sidebar-toggle" aria-label="切换侧边栏" onclick="document.getElementById('sidebar').classList.toggle('collapsed')">{{ icon('menu') }}</button>
                 <h1 class="page-title">{% block page_title %}仪表盘{% endblock %}</h1>
             </div>
             <div class="content-body">

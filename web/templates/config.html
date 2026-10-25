@@ -1,6 +1,7 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}配置中心 - 直播源管理器{% endblock %}
-{% block page_title %}⚙️ 统一配置管理{% endblock %}
+{% block page_title %}统一配置管理{% endblock %}
 
 {% block content %}
 <div class="config-page" id="config-app">
@@ -13,9 +14,9 @@
             <span id="modified-count" class="badge badge-gray hidden">修改项: 0</span>
         </div>
         <div class="toolbar-right">
-            <button class="btn btn-outline btn-sm" id="btn-reload-config">🔄 重新加载</button>
-            <button class="btn btn-outline btn-sm" id="btn-reset-all">↺ 重置</button>
-            <button class="btn btn-primary btn-sm" id="btn-save-all">💾 保存全部</button>
+            <button class="btn btn-outline btn-sm" id="btn-reload-config">{{ icon('refresh') }}重新加载</button>
+            <button class="btn btn-outline btn-sm" id="btn-reset-all">{{ icon('refresh') }}重置</button>
+            <button class="btn btn-primary btn-sm" id="btn-save-all">{{ icon('success') }}保存全部</button>
         </div>
     </div>
     {% endif %}
@@ -32,22 +33,22 @@
     <div id="config-tabs-wrapper" class="hidden">
         <div class="tabs" id="config-tabs" role="tablist">
             <button class="tab-btn active" data-tab="Testing" role="tab" aria-selected="true">
-                <span class="tab-icon">🧪</span>测试
+                <span class="tab-icon">{{ icon('test') }}</span>测试
             </button>
             <button class="tab-btn" data-tab="Output" role="tab" aria-selected="false">
-                <span class="tab-icon">📤</span>输出
+                <span class="tab-icon">{{ icon('send') }}</span>输出
             </button>
             <button class="tab-btn" data-tab="Network" role="tab" aria-selected="false">
-                <span class="tab-icon">🌐</span>网络
+                <span class="tab-icon">{{ icon('globe') }}</span>网络
             </button>
             <button class="tab-btn" data-tab="GitHub" role="tab" aria-selected="false">
-                <span class="tab-icon">🐙</span>GitHub
+                <span class="tab-icon">{{ icon('code') }}</span>GitHub
             </button>
             <button class="tab-btn" data-tab="Filter" role="tab" aria-selected="false">
-                <span class="tab-icon">🔍</span>筛选
+                <span class="tab-icon">{{ icon('search') }}</span>筛选
             </button>
             <button class="tab-btn" data-tab="CategoryDict" role="tab" aria-selected="false">
-                <span class="tab-icon">🏷️</span>分类字典
+                <span class="tab-icon">{{ icon('rules') }}</span>分类字典
             </button>
         </div>
 

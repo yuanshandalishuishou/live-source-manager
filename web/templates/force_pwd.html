@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}首次登录请修改密码 - 直播源管理器{% endblock %}
 {% block page_title %}设置新密码{% endblock %}
 {% block body_class %}auth-page{% endblock %}
@@ -20,7 +21,7 @@
                 <input type="password" id="current-password" class="form-input" required autocomplete="current-password">
                 <button type="button" class="btn btn-sm btn-outline pwd-toggle" id="current-password-toggle" aria-label="显示密码">显示</button>
             </div>
-            <small class="form-help pwd-capslock" id="current-password-capslock" style="display:none">⚠️ 大写锁定已开启（CapsLock）</small>
+            <small class="form-help pwd-capslock" id="current-password-capslock" style="display:none">{{ icon('warning') }}大写锁定已开启（CapsLock）</small>
         </div>
         <div class="form-group">
             <label for="new-password">新密码</label>
@@ -32,7 +33,7 @@
                 <div class="pwd-strength-fill" id="pwd-strength-fill"></div>
                 <span class="pwd-strength-text" id="pwd-strength-text"></span>
             </div>
-            <small class="form-help pwd-capslock" id="new-password-capslock" style="display:none">⚠️ 大写锁定已开启（CapsLock）</small>
+            <small class="form-help pwd-capslock" id="new-password-capslock" style="display:none">{{ icon('warning') }}大写锁定已开启（CapsLock）</small>
             <small class="form-help">长度至少8位，且包含大写字母、小写字母、数字、特殊符号中的至少三类</small>
         </div>
         <div class="form-group">
@@ -41,7 +42,7 @@
                 <input type="password" id="confirm-password" class="form-input" required autocomplete="new-password">
                 <button type="button" class="btn btn-sm btn-outline pwd-toggle" id="confirm-password-toggle" aria-label="显示密码">显示</button>
             </div>
-            <small class="form-help pwd-capslock" id="confirm-password-capslock" style="display:none">⚠️ 大写锁定已开启（CapsLock）</small>
+            <small class="form-help pwd-capslock" id="confirm-password-capslock" style="display:none">{{ icon('warning') }}大写锁定已开启（CapsLock）</small>
         </div>
         <div id="pwd-error" class="alert alert-error" style="display:none"></div>
         <button type="submit" class="btn btn-primary btn-block" id="pwd-btn">提交</button>

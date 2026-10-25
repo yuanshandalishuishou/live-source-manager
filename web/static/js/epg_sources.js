@@ -55,7 +55,7 @@
   function setStatus(msg, err) {
     var el = document.getElementById('epgStatus');
     if (!el) return;
-    el.textContent = (err ? '⚠️ ' : '') + msg;
+    el.textContent = msg;
   }
 
   /* ── 徽标（.badge 语义色家族，见 app.css） ────────────────── */

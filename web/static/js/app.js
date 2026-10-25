@@ -102,7 +102,7 @@
         banner.className = 'encrypt-banner';
         banner.innerHTML =
             '<div class="encrypt-banner-text">' +
-                '<span class="encrypt-banner-icon" aria-hidden="true">🔐</span>' +
+                '<span class="encrypt-banner-icon" aria-hidden="true">' + LSM.icon('lock') + '</span>' +
                 '<span>系统使用<strong>自动生成的加密密钥</strong>，建议设置自定义环境变量 ' +
                 '<code>CONFIG_ENCRYPT_KEY</code> 以增强安全性。' +
                 '<a href="/config">前往配置页</a></span>' +

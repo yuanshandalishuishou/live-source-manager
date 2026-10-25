@@ -59,7 +59,7 @@ function renderAuditLogs(data) {
 
     if (!data.logs || data.logs.length === 0) {
         if (container) {
-            LSM.showEmptyState(container, { icon: '🔍', text: '暂无审计日志' });
+            LSM.showEmptyState(container, { icon: 'search', text: '暂无审计日志' });
         }
         if (paginationEl) paginationEl.innerHTML = '';
         return;
