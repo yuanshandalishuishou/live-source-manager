@@ -1,19 +1,11 @@
 {% extends "base.html" %}
 {% block title %}登录 - 直播源管理器{% endblock %}
 {% block page_title %}登录{% endblock %}
-
-{% block head %}
-<style>
-.app-layout { display: block; }
-.sidebar { display: none; }
-.main-content { margin-left: 0; max-width: 400px; margin: 60px auto; }
-.top-bar { display: none; }
-</style>
-{% endblock %}
+{% block body_class %}auth-page{% endblock %}
 
 {% block content %}
-<div class="login-card">
-    <div class="login-header">
+<div class="auth-card">
+    <div class="auth-header">
         <h2>直播源管理器</h2>
         <p>Live Source Manager — Web 管理</p>
     </div>
@@ -28,7 +20,11 @@
         </div>
         <div class="form-group">
             <label for="password">密码</label>
-            <input type="password" id="password" name="password" class="form-input" required>
+            <div class="pwd-input-wrap">
+                <input type="password" id="password" name="password" class="form-input" required>
+                <button type="button" class="btn btn-sm btn-outline pwd-toggle" id="password-toggle" aria-label="显示密码">显示</button>
+            </div>
+            <small class="form-help pwd-capslock" id="password-capslock" style="display:none">⚠️ 大写锁定已开启（CapsLock）</small>
         </div>
         <div id="login-error" class="alert alert-error" style="display:none"></div>
         <button type="submit" class="btn btn-primary btn-block" id="login-btn">
@@ -37,32 +33,8 @@
         </button>
     </form>
 </div>
+{% endblock %}
 
-<script>
-document.querySelector('.login-form')?.addEventListener('htmx:responseError', function(evt) {
-    const errDiv = document.getElementById('login-error');
-    errDiv.style.display = 'block';
-    try {
-        const data = JSON.parse(evt.detail.xhr.responseText);
-        errDiv.textContent = data.detail || '登录失败';
-    } catch {
-        errDiv.textContent = '登录失败';
-    }
-});
-document.querySelector('.login-form')?.addEventListener('htmx:afterRequest', function(evt) {
-    if (!evt.detail.successful) return;
-    // 首次登录/默认密码强制改密：跳转到改密页，而不是直接进入控制台（S2修复）
-    var raw = '';
-    try {
-        raw = JSON.parse(evt.detail.xhr.responseText || '{}');
-    } catch (e) {
-        raw = {};
-    }
-    if (raw && raw.force_change_password) {
-        window.location.href = '/force-password-change';
-        return;
-    }
-    window.location.href = '/';
-});
-</script>
+{% block scripts %}
+<script src="/static/js/pages/auth.js"></script>
 {% endblock %}

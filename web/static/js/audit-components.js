@@ -1,6 +1,13 @@
 /* ================================================================
- * audit-components.js — 审计日志共享组件
- * 被 audit.html 和 logs.html 共同引用
+ * audit-components.js — 审计日志共享组件（logs.html 审计 tab）
+ *
+ * T03 变更：
+ *   - 徽标由未定义的 status-audit-* 改 .badge + actionColors 映射
+ *     （G-4：passed→green / failed→red / testing→yellow / 其他→gray）
+ *   - escapeHtml 收敛至 LSM.escapeHtml（§5.4 台账），删本地实现
+ *   - 分页统一 LSM.renderPagination（U-20），删手写上下页两套
+ *   - 空态统一 LSM.showEmptyState
+ * 依赖（由 logs.js 以全局契约提供）：currentPage / pageSize / loadAuditLogs
  * ================================================================ */
 
 // ── 审计日志操作类型中文标签映射 ────────────────
@@ -14,7 +21,7 @@ var actionLabels = {
     'password_change': '修改密码',
 };
 
-// ── 审计日志操作类型颜色映射（预留，可选使用） ──
+// ── 审计日志操作类型颜色映射（语义色 → 徽标色） ──
 var actionColors = {
     'login': 'passed', 'logout': 'disabled', 'config_update': 'testing',
     'config_section_update': 'testing', 'config_reload': 'testing',
@@ -24,6 +31,17 @@ var actionColors = {
     'test_trigger': 'testing', 'encrypt_key_update': 'testing',
     'password_change': 'testing',
 };
+
+// 语义色名 → .badge-* 徽标变体
+var ACTION_BADGE_VARIANTS = {
+    'passed': 'green', 'failed': 'red', 'testing': 'yellow', 'disabled': 'gray'
+};
+
+// ── 操作类型 → 徽标 class（G-4） ────────────────
+function actionBadgeClass(action) {
+    var semantic = actionColors[action] || 'disabled';
+    return 'badge badge-' + (ACTION_BADGE_VARIANTS[semantic] || 'gray');
+}
 
 // ── 格式化时间戳 ────────────────────────────────
 function formatTimestamp(ts) {
@@ -41,14 +59,13 @@ function renderAuditLogs(data) {
 
     if (!data.logs || data.logs.length === 0) {
         if (container) {
-            container.innerHTML =
-                '<div class="empty-state" style="text-align:center;padding:40px;color:var(--text-light)">暂无审计日志</div>';
+            LSM.showEmptyState(container, { icon: '🔍', text: '暂无审计日志' });
         }
         if (paginationEl) paginationEl.innerHTML = '';
         return;
     }
 
-    var html = '<table><thead><tr>' +
+    var html = '<table class="data-table"><thead><tr>' +
         '<th>时间</th><th>用户</th><th>操作类型</th><th>操作对象</th><th>详情</th><th>IP</th>' +
         '</tr></thead><tbody>';
 
@@ -57,44 +74,27 @@ function renderAuditLogs(data) {
         var detail = l.detail || '';
         if (detail.length > 80) detail = detail.substring(0, 80) + '…';
         html += '<tr>' +
-            '<td style="font-size:12px;white-space:nowrap">' + formatTimestamp(l.created_at) + '</td>' +
-            '<td>' + escapeHtml(l.username) + '</td>' +
-            '<td><span class="status-badge status-audit-' + l.action + '">' + actionLabel + '</span></td>' +
-            '<td>' + escapeHtml(l.target || '-') + '</td>' +
-            '<td style="font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + escapeHtml(detail) + '">' + escapeHtml(detail) + '</td>' +
-            '<td style="font-size:12px;color:var(--text-light)">' + escapeHtml(l.ip_address || '-') + '</td>' +
+            '<td class="text-sm">' + LSM.escapeHtml(formatTimestamp(l.created_at)) + '</td>' +
+            '<td>' + LSM.escapeHtml(l.username) + '</td>' +
+            '<td><span class="' + actionBadgeClass(l.action) + '">' + LSM.escapeHtml(actionLabel) + '</span></td>' +
+            '<td>' + LSM.escapeHtml(l.target || '-') + '</td>' +
+            '<td class="text-sm detail-cell" title="' + LSM.escapeHtml(detail) + '">' + LSM.escapeHtml(detail) + '</td>' +
+            '<td class="text-sm text-muted">' + LSM.escapeHtml(l.ip_address || '-') + '</td>' +
             '</tr>';
     });
     html += '</tbody></table>';
     if (container) container.innerHTML = html;
 
-    // 分页
+    // 分页：统一 LSM.renderPagination（U-20）
     if (paginationEl) {
-        var totalPages = Math.ceil(data.total / pageSize);
-        paginationEl.innerHTML = '';
-        if (totalPages > 1) {
-            var phtml = '';
-            if (currentPage > 1) {
-                phtml += '<button class="btn btn-sm btn-outline" onclick="loadAuditLogs(' + (currentPage - 1) + ')">上一页</button>';
+        var totalPages = Math.max(1, Math.ceil((data.total || 0) / pageSize));
+        LSM.renderPagination(paginationEl, {
+            page: currentPage || 1,
+            totalPages: totalPages,
+            total: data.total || 0,
+            onChange: function(page) {
+                if (typeof window.loadAuditLogs === 'function') window.loadAuditLogs(page);
             }
-            for (var i = 1; i <= totalPages && i <= 10; i++) {
-                phtml += '<button class="btn btn-sm ' + (i === currentPage ? 'btn-primary' : 'btn-outline') + '" onclick="loadAuditLogs(' + i + ')">' + i + '</button>';
-            }
-            if (currentPage < totalPages) {
-                phtml += '<button class="btn btn-sm btn-outline" onclick="loadAuditLogs(' + (currentPage + 1) + ')">下一页</button>';
-            }
-            paginationEl.innerHTML = phtml;
-        }
+        });
     }
-}
-
-// ── escapeHtml 辅助函数 ─────────────────────────
-function escapeHtml(str) {
-    if (str == null) return '';
-    return String(str)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
 }

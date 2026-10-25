@@ -12,7 +12,7 @@
     <link rel="stylesheet" href="/static/css/app.css">
     {% block head %}{% endblock %}
 </head>
-<body>
+<body class="{% block body_class %}{% endblock %}">
     <a class="skip-link" href="#main-content">跳到主内容</a>
     <div class="app-layout">
         <!-- 侧边栏 -->

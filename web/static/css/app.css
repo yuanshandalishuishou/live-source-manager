@@ -130,11 +130,13 @@ body {
 .alert-error { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
 .alert-info { background: #dbeafe; color: #1e40af; border: 1px solid #bfdbfe; }
 
-/* Login */
-.login-card { background: var(--card-bg); border-radius: var(--radius); box-shadow: var(--shadow); padding: 40px; }
-.login-header { text-align: center; margin-bottom: 32px; }
-.login-header h2 { font-size: 24px; margin-bottom: 4px; }
-.login-header p { color: var(--text-light); font-size: 14px; }
+/* Login（auth 页布局取代原两份内联 layout style，见 .auth-page） */
+.auth-page .app-layout { display: block; }
+.auth-page .sidebar, .auth-page .top-bar { display: none; }
+.auth-page .main-content { margin: 60px auto; max-width: 440px; }
+.auth-header { text-align: center; margin-bottom: var(--space-8); }
+.auth-header h2 { font-size: var(--text-2xl); margin-bottom: var(--space-1); }
+.auth-header p { color: var(--text-light); font-size: var(--text-base); }
 
 /* Loading */
 .loading { text-align: center; padding: 40px; color: var(--text-light); }
@@ -152,8 +154,9 @@ body {
 .pagination button.active { background: var(--primary); color: #fff; }
 .pagination span { font-size: 13px; color: var(--text-light); padding: 6px 4px; }
 
-/* Modal */
-.modal { display: flex; align-items: center; justify-content: center; position: fixed; inset: 0; z-index: 1000; }
+/* Modal（静态模态默认隐藏，.is-open 类驱动显隐；LSM.showModal 用 .modal-overlay） */
+.modal { display: none; align-items: center; justify-content: center; position: fixed; inset: 0; z-index: 1000; }
+.modal.is-open { display: flex; }
 .modal-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,.5); }
 .modal-content { position: relative; background: var(--card-bg); border-radius: var(--radius); padding: 24px; min-width: 400px; max-width: 90vw; box-shadow: 0 20px 60px rgba(0,0,0,.3); }
 .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
@@ -312,9 +315,15 @@ tr.status-disabled { opacity: .55; }
 .stat-value { font-size: var(--text-2xl, 24px); font-weight: 700; color: var(--text); line-height: 1.2; }
 .stat-label { font-size: var(--text-sm, 12px); color: var(--text-tertiary); margin-top: 4px; }
 .stat-rate { font-size: var(--text-lg, 16px); font-weight: 600; }
+/* 有效率语义色条：≥60% success / 30–60% warning / <30% error */
+.card.stat-rate-success { border-top: 3px solid var(--success); }
+.card.stat-rate-warning { border-top: 3px solid var(--warning); }
+.card.stat-rate-error { border-top: 3px solid var(--error); }
 /* 频道统计行（Top10 进度条由 .progress-bar 承载） */
 .stat-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
 .stat-row:last-child { border-bottom: none; }
+.stat-row .channel-bar { flex: 1; max-width: 320px; margin: 0 var(--space-3); }
+.stat-row .channel-count { color: var(--text-light); font-size: var(--text-sm); white-space: nowrap; }
 
 /* ── 系统状态栅格 ────────────────────────────── */
 .status-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
@@ -333,6 +342,11 @@ tr.status-disabled { opacity: .55; }
 
 /* ── 工具类 ──────────────────────────────────── */
 .text-muted { color: var(--text-tertiary); }
+.text-sm { font-size: var(--text-sm); }
+.text-md { font-size: var(--text-md); }
+.w-80 { width: 80px; }
+.mt-20 { margin-top: 20px; }
+.label-inline { display: inline-flex; align-items: center; gap: 6px; font-size: var(--text-base); cursor: pointer; }
 .row-active { background: var(--primary-subtle); }
 
 /* ── 警告提示条（force_pwd 等场景） ───────────── */
@@ -388,6 +402,8 @@ tr.status-disabled { opacity: .55; }
 .pwd-strength-mid { background: var(--warning); }
 .pwd-strength-strong { background: var(--success); }
 .pwd-strength-text { font-size: var(--text-sm); color: var(--text-light); }
+/* CapsLock 提示（auth 页，覆写 .form-help 弱化色为警示色） */
+.pwd-capslock { color: var(--warning); }
 
 /* ── 空状态（增强：图标 + 行动按钮） ─────────────── */
 .empty-state-icon { font-size: 32px; margin-bottom: var(--space-2); }
@@ -407,6 +423,8 @@ tr.status-disabled { opacity: .55; }
 /* ── 复制按钮（URL 列等） ───────────────────────── */
 .copy-btn { background: none; border: none; cursor: pointer; padding: 2px 6px; font-size: var(--text-sm); color: var(--text-light); border-radius: var(--radius-sm); }
 .copy-btn:hover { color: var(--primary); background: var(--primary-subtle); }
+/* 详情单元格截断（审计日志详情列） */
+.detail-cell { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ── 信息框（config 说明栏等，取代 --bg-secondary 行内） ── */
 .info-box { background: var(--bg-subtle); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 12px 16px; margin-bottom: var(--space-5); font-size: var(--text-md); line-height: 1.7; }
