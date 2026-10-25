@@ -1,7 +1,10 @@
 #!/bin/bash
-# 直播源管理工具 - Linux (Debian/Ubuntu) 安装脚本
-# 版本: 2.0 (调用 start.sh 的检测和安装函数)
-# 功能: 一次性系统级安装（Python、Nginx、虚拟环境、依赖包、数据库初始化、systemd 服务）
+# 直播源管理工具 - Linux (Debian/Ubuntu) 裸机部署脚本
+# 版本: 2.1 (复用 start_docker.sh 的 setup_environment 完成环境安装编排)
+# 功能: ① 调用 start_docker.sh 的 setup_environment 安装 Python/Nginx/venv/依赖/ffmpeg；
+#       ② 配置 Nginx 站点与端口渲染、初始化 SQLite 数据库、修复运行时目录权限；
+#       ③ 生成并启用 systemd 服务（开机自启）。安装编排的单一事实来源是 start_docker.sh，
+#       本脚本自身不含包安装/venv 创建逻辑。
 # 使用: sudo bash setup_linux.sh
 
 set -e
