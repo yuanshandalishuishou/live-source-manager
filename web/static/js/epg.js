@@ -1,43 +1,12 @@
 /* ══════════════════════════════════════════════════════════════
-   EPG 节目单网格 — 交互逻辑（premium：磁性 hover / 当前时刻竖线 / 主题切换）
+   EPG 节目单网格 — 交互逻辑（T05：删主题切换，全站浅色单主题；
+   CSRF 调用时读取修 F13；转义收敛 LSM.escapeHtml）
+   保留：网格渲染算法、时间轴几何、LIVE 徽标、now-line、hover tip。
    ══════════════════════════════════════════════════════════════ */
 (function () {
   'use strict';
 
-  var csrf = window.__csrf_token || '';
   var state = { hours: 12, keyword: '', data: null, timer: null };
-
-  // ── 主题 ────────────────────────────────────
-  function resolveSystem() {
-    return window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches
-      ? 'light'
-      : 'dark';
-  }
-  function applyTheme(t) {
-    if (t === 'system') t = resolveSystem();
-    document.documentElement.setAttribute('data-epg-theme', t);
-  }
-  function initTheme() {
-    var saved = localStorage.getItem('epg-theme') || 'system';
-    applyTheme(saved);
-    var btn = document.getElementById('epgThemeBtn');
-    if (btn) {
-      btn.textContent = '🌗 ' + ({ system: '跟随系统', light: '浅色', dark: '深色' }[saved] || '跟随系统');
-      btn.addEventListener('click', function () {
-        var order = ['system', 'light', 'dark'];
-        var cur = localStorage.getItem('epg-theme') || 'system';
-        var next = order[(order.indexOf(cur) + 1) % order.length];
-        localStorage.setItem('epg-theme', next);
-        applyTheme(next);
-        btn.textContent = '🌗 ' + ({ system: '跟随系统', light: '浅色', dark: '深色' }[next]);
-      });
-    }
-    if (window.matchMedia) {
-      window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', function () {
-        if ((localStorage.getItem('epg-theme') || 'system') === 'system') applyTheme('system');
-      });
-    }
-  }
 
   function hourWidth() {
     var v = getComputedStyle(document.documentElement).getPropertyValue('--epg-hour-w');
@@ -55,14 +24,16 @@
   async function loadGrid() {
     showLoading(true);
     try {
+      // CSRF 调用时读取（F13：禁 IIFE 加载时捕获，登录后会拿到旧值）
+      var csrf = await LSM.ensureCsrfToken();
       var url = '/api/epg/grid?hours=' + state.hours + '&keyword=' + encodeURIComponent(state.keyword);
-      var resp = await fetch(url, { headers: { 'X-CSRF-Token': csrf } });
+      var resp = await fetch(url, { headers: { 'X-CSRF-Token': csrf }, credentials: 'same-origin' });
       var data = await resp.json();
       state.data = data;
       render(data);
       updateStatus(data);
     } catch (e) {
-      showEmpty('加载失败：' + e.message);
+      showEmpty('加载失败：' + ((e && e.message) ? e.message : '网络错误'));
     } finally {
       showLoading(false);
     }
@@ -70,11 +41,14 @@
 
   function showLoading(on) {
     var el = document.getElementById('epgLoading');
-    if (el) el.style.display = on ? 'block' : 'none';
+    if (el) el.classList.toggle('hidden', !on);
   }
   function showEmpty(msg) {
     var el = document.getElementById('epgEmpty');
-    if (el) { el.textContent = msg; el.style.display = 'block'; }
+    if (el) {
+      el.textContent = msg;
+      el.classList.remove('hidden');
+    }
   }
 
   // ── 渲染 ────────────────────────────────────
@@ -153,7 +127,6 @@
       track.className = 'epg-track';
       track.style.width = trackW + 'px';
 
-      var nowProg = null;
       (ch.programmes || []).forEach(function (p) {
         var s = new Date(p.start).getTime();
         var e = new Date(p.stop).getTime();
@@ -166,7 +139,6 @@
         block.className = 'epg-prog';
         if (s <= nowMs && nowMs < e) {
           block.classList.add('is-now');
-          nowProg = p;
           var badge = document.createElement('span');
           badge.className = 'p-now-badge';
           badge.textContent = 'LIVE';
@@ -208,11 +180,11 @@
   function showTip(ev, ch, p) {
     var t = ensureTip();
     t.innerHTML =
-      '<h4>' + escapeHtml(p.title || '未知节目') + '</h4>' +
-      '<div class="muted">' + escapeHtml(ch.name) + '</div>' +
-      '<div>' + fmtTime(p.start) + ' – ' + fmtTime(p.stop) + '</div>' +
-      (p.category ? '<div class="muted">类型：' + escapeHtml(p.category) + '</div>' : '') +
-      (p.desc ? '<div style="margin-top:6px">' + escapeHtml(p.desc) + '</div>' : '');
+      '<h4>' + LSM.escapeHtml(p.title || '未知节目') + '</h4>' +
+      '<div class="muted">' + LSM.escapeHtml(ch.name) + '</div>' +
+      '<div>' + LSM.escapeHtml(fmtTime(p.start)) + ' – ' + LSM.escapeHtml(fmtTime(p.stop)) + '</div>' +
+      (p.category ? '<div class="muted">类型：' + LSM.escapeHtml(p.category) + '</div>' : '') +
+      (p.desc ? '<div style="margin-top:6px">' + LSM.escapeHtml(p.desc) + '</div>' : '');
     t.classList.add('show');
     moveTip(ev);
   }
@@ -224,11 +196,6 @@
     tip.style.top = y + 'px';
   }
   function hideTip() { if (tip) tip.classList.remove('show'); }
-  function escapeHtml(s) {
-    return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
-      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
-    });
-  }
 
   function updateStatus(data) {
     var el = document.getElementById('epgStatus');
@@ -269,7 +236,6 @@
   }
 
   document.addEventListener('DOMContentLoaded', function () {
-    initTheme();
     bind();
     loadGrid();
     state.timer = setInterval(tickNow, 60000);

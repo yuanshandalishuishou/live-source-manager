@@ -8,7 +8,6 @@ from web.core import (
     _render,
     get_current_user,
     get_session,
-    get_source_by_id,
     require_admin,
 )
 
@@ -39,19 +38,6 @@ async def root_page(request: Request):
 async def sources_page(request: Request, current_user: dict = Depends(get_current_user)):
     """源管理页"""
     return _render(request, 'sources.html')
-
-
-@router.get('/sources/add', response_class=HTMLResponse)
-async def source_add_page(request: Request, current_user: dict = Depends(get_current_user)):
-    """添加源页面"""
-    return _render(request, 'source_form.html', source=None)
-
-
-@router.get('/sources/{source_id}/edit', response_class=HTMLResponse)
-async def source_edit_page(request: Request, source_id: str, current_user: dict = Depends(get_current_user)):
-    """编辑源页面"""
-    source = get_source_by_id(source_id)
-    return _render(request, 'source_form.html', source=source, source_id=source_id)
 
 
 @router.get('/config', response_class=HTMLResponse)
