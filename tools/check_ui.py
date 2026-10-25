@@ -89,18 +89,20 @@ def iter_template_files(root: str) -> list[str]:
 
 
 def iter_css_files(root: str) -> list[str]:
-    """返回全部 CSS 文件路径（含 static/css 子目录）。"""
+    """返回全部 CSS 文件路径（含 static/css 子目录，排除 build_ui.py 的 .min 产物）。"""
     return sorted(
         os.path.relpath(p, root)
         for p in glob.glob(os.path.join(root, CSS_GLOB), recursive=True)
+        if not p.endswith('.min.css')
     )
 
 
 def iter_js_files(root: str) -> list[str]:
-    """返回全部第一方 JS 文件路径（T05 起纳入扫描，不含 vendor/）。"""
+    """返回全部第一方 JS 文件路径（T05 起纳入扫描，不含 vendor/ 与 .min 产物）。"""
     return sorted(
         os.path.relpath(p, root)
         for p in glob.glob(os.path.join(root, JS_GLOB), recursive=True)
+        if not p.endswith('.min.js')
     )
 
 

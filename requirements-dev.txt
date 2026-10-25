@@ -5,3 +5,6 @@
 pytest>=8.0
 pytest-asyncio>=1.0
 httpx2>=2.16.0
+# UI 静态资源压缩管线（tools/build_ui.py，含测试新鲜度校验）
+rjsmin>=1.2.0
+rcssmin>=1.1.0

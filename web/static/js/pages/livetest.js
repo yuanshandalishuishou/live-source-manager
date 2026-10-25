@@ -277,7 +277,7 @@
     }
 
     function startPolling() {
-        if (testPollTimer) return;
+        if (testPollTimer || document.hidden) return;
         testPollTimer = setInterval(pollTestStatus, 1200);
     }
 
@@ -287,6 +287,17 @@
             testPollTimer = null;
         }
     }
+
+    /* 页面隐藏时暂停 1.2s 轮询（资源占用优化）；
+       恢复可见且测试仍在运行时，立即补一次状态并续轮。 */
+    document.addEventListener('visibilitychange', function () {
+        if (document.hidden) {
+            stopPolling();
+        } else if (testData && testData.status === 'running') {
+            pollTestStatus();
+            startPolling();
+        }
+    });
 
     /* ── 控制操作 ───────────────────────────────── */
     function triggerTest() {

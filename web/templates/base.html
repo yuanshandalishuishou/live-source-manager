@@ -6,10 +6,10 @@
     <title>{% block title %}直播源管理器{% endblock %}</title>
     <script>window.__csrf_token = "{{ csrf_token|safe if csrf_token is defined else '' }}";</script>
     <script>window.IS_ADMIN = {{ 'true' if user and user.role == 'admin' else 'false' }};</script>
-    <script src="/static/vendor/htmx.min.js"></script>
-    <script src="/static/js/lsm-components.js"></script>
-    <script src="/static/js/app.js"></script>
-    <link rel="stylesheet" href="/static/css/app.css">
+    <script src="/static/vendor/htmx.min.js?v={{ asset_v }}" defer></script>
+    <script src="/static/js/lsm-components.min.js?v={{ asset_v }}" defer></script>
+    <script src="/static/js/app.min.js?v={{ asset_v }}" defer></script>
+    <link rel="stylesheet" href="/static/css/app.min.css?v={{ asset_v }}">
     {% block head %}{% endblock %}
 </head>
 <body class="{% block body_class %}{% endblock %}">

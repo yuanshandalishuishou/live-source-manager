@@ -37,6 +37,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.middleware.gzip import GZipMiddleware
 
 from . import models
 
@@ -1312,6 +1313,21 @@ templates.env.auto_reload = _APP_ENV == 'development'
 app.mount('/static', StaticFiles(directory=os.path.join(WEB_DIR, 'static')), name='static')
 
 
+# ── 性能：静态资源缓存 + 全站 gzip 压缩（第二轮 UI 优化） ──
+# 模板中的静态 URL 统一携带 ?v=__version__（见 _render 的 asset_v），
+# 版本升级即换 URL，因此静态资源可安全缓存 1 天；HTML/接口不受影响。
+@app.middleware('http')
+async def static_cache_middleware(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith('/static/') and response.status_code == 200:
+        response.headers.setdefault('Cache-Control', 'public, max-age=86400')
+    return response
+
+
+# gzip 最后注册 = 中间件栈最外层，静态文件与 JSON 接口 ≥1KB 均压缩。
+app.add_middleware(GZipMiddleware, minimum_size=1024)
+
+
 # ═══════════════════════════════════════════════════
 # 页面渲染辅助
 # ═══════════════════════════════════════════════════
@@ -1347,6 +1363,7 @@ def _render(request: Request, template: str, **kwargs):
             'request': request,
             'user': user,
             'csrf_token': csrf_token,
+            'asset_v': __version__,
             **kwargs,
         },
     )

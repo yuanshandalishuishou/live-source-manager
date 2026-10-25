@@ -3,7 +3,7 @@
 {% block page_title %}实时测试{% endblock %}
 
 {% block head %}
-<link rel="stylesheet" href="/static/css/pages/livetest.css">
+<link rel="stylesheet" href="/static/css/pages/livetest.min.css?v={{ asset_v }}">
 {% endblock %}
 
 {% block content %}
@@ -100,5 +100,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/js/pages/livetest.js"></script>
+<script src="/static/js/pages/livetest.min.js?v={{ asset_v }}" defer></script>
 {% endblock %}
