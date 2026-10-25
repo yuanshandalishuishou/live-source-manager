@@ -4,16 +4,20 @@
 :root {
   --primary: #2563eb;
   --primary-dark: #1d4ed8;
+  --primary-subtle: #dbeafe;
   --success: #16a34a;
   --warning: #d97706;
   --error: #dc2626;
   --bg: #f1f5f9;
+  --bg-subtle: #f8fafc;
   --card-bg: #ffffff;
+  --input-bg: #ffffff;
   --sidebar-bg: #1e293b;
   --sidebar-text: #94a3b8;
   --sidebar-active: #3b82f6;
   --text: #1e293b;
   --text-light: #64748b;
+  --text-tertiary: #94a3b8;
   --border: #e2e8f0;
   --radius: 8px;
   --shadow: 0 1px 3px rgba(0,0,0,.1);
@@ -245,3 +249,77 @@ tr.status-disabled { opacity: .55; }
 
 /* ── 侧边栏快捷键区域（底部） ──────────────────── */
 .sidebar-shortcuts { padding: 8px 16px; font-size: 11px; color: var(--sidebar-text); border-top: 1px solid #334155; }
+
+/* ══════════════════════════════════════════════════════════════
+   未定义引用清零（设计文档 §1.2 — T01 批）
+   补定义: 按钮变体 / 统计卡 / 状态栅格 / 快速操作 / htmx 指示器等
+   ══════════════════════════════════════════════════════════════ */
+
+/* ── 全局焦点态与动效保护 ────────────────────── */
+:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
+
+/* ── 缺失 keyframes 补定义（F11：模态动画静默失效） ── */
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+/* ── 跳转主内容链接（可访问性） ────────────────── */
+.skip-link { position: absolute; left: -9999px; top: 0; z-index: 2000; padding: 8px 16px; background: var(--primary); color: #fff; border-radius: 0 0 var(--radius) 0; font-size: 14px; }
+.skip-link:focus { left: 0; }
+
+/* ── 按钮变体补定义（livetest/users/LSM.confirm 场景） ── */
+.btn-danger { background: var(--error); color: #fff; }
+.btn-danger:hover { background: #b91c1c; }
+.btn-warning { background: var(--warning); color: #fff; }
+.btn-warning:hover { background: #b45309; }
+.btn-success { background: var(--success); color: #fff; }
+.btn-success:hover { background: #15803d; }
+.btn-ghost { background: transparent; color: var(--text-light); }
+.btn-ghost:hover { background: var(--bg); color: var(--text); }
+.btn-block { width: 100%; justify-content: center; }
+/* 按钮 loading 态（统一 LSM.setBtnLoading 与手写版） */
+.btn-loading { position: relative; pointer-events: none; opacity: .7; }
+.btn-loading::after { content: ''; display: inline-block; width: 14px; height: 14px; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; animation: spin .6s linear infinite; }
+
+/* ── htmx 指示器（htmx 不内置指示器 CSS，F11：登录 spinner 常显） ── */
+.htmx-indicator { display: none; }
+.htmx-request .htmx-indicator,
+.htmx-request.htmx-indicator { display: inline-block; }
+
+/* ── 仪表盘统计卡家族 ────────────────────────── */
+.stat-card { background: var(--card-bg); border-radius: var(--radius); box-shadow: var(--shadow); padding: 20px; border-top: 3px solid var(--border); }
+.card.stat-valid { border-top: 3px solid var(--success); }
+.card.stat-invalid { border-top: 3px solid var(--error); }
+.card.stat-rate { border-top: 3px solid var(--primary); }
+.stat-value { font-size: var(--text-2xl, 24px); font-weight: 700; color: var(--text); line-height: 1.2; }
+.stat-label { font-size: var(--text-sm, 12px); color: var(--text-tertiary); margin-top: 4px; }
+.stat-rate { font-size: var(--text-lg, 16px); font-weight: 600; }
+/* 频道统计行（Top10 进度条由 .progress-bar 承载） */
+.stat-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+.stat-row:last-child { border-bottom: none; }
+
+/* ── 系统状态栅格 ────────────────────────────── */
+.status-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
+.status-item { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 14px; background: var(--bg-subtle); border: 1px solid var(--border); border-radius: var(--radius); font-size: 14px; }
+.status-item .label { color: var(--text-light); font-size: var(--text-sm, 12px); }
+
+/* ── 快速操作按钮组 ───────────────────────────── */
+.quick-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* ── 分区标题（仪表盘"最近测试"等） ────────────── */
+.test-section { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+
+/* ── 实时测试状态文字 ────────────────────────── */
+.test-status { font-size: var(--text-md, 13px); color: var(--text); }
+.test-details { font-size: var(--text-md, 13px); color: var(--text-light); }
+
+/* ── 工具类 ──────────────────────────────────── */
+.text-muted { color: var(--text-tertiary); }
+.row-active { background: var(--primary-subtle); }
+
+/* ── 警告提示条（force_pwd 等场景） ───────────── */
+.alert-warning { background: #fef3c7; color: #92400e; border: 1px solid #fde68a; }
+
+/* ── 禁用态表单控件（查看者只读） ─────────────── */
+.form-input:disabled, .form-select:disabled { background: var(--bg-subtle); color: var(--text-light); cursor: not-allowed; }

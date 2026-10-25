@@ -8,8 +8,8 @@
     {# ── 顶部工具栏 ── #}
     <div class="toolbar">
         <div class="toolbar-left">
-            <button class="btn btn-primary btn-sm" onclick="showAddRuleModal()">+ 新增规则</button>
             {% if user and user.role == 'admin' %}
+            <button class="btn btn-primary btn-sm" onclick="showAddRuleModal()">+ 新增规则</button>
             <button class="btn btn-outline btn-sm" onclick="reimportRules()">🔄 从YAML重新导入</button>
             <button class="btn btn-outline btn-sm" onclick="resetRulesToDefault()">♻️ 恢复默认规则</button>
             <button class="btn btn-outline btn-sm" onclick="resetCategoryDictionary()">♻️ 恢复默认字典</button>
@@ -62,6 +62,7 @@
 
         {# ── Tab 3: 排除映射 ── #}
         <div id="tab-exclusions" class="tab-content">
+            {% if user and user.role == 'admin' %}
             <div class="card" style="margin-bottom:16px">
                 <div class="card-header"><h3>新增排除映射</h3></div>
                 <div class="card-body">
@@ -84,6 +85,7 @@
                     </div>
                 </div>
             </div>
+            {% endif %}
             <div class="card">
                 <div class="card-header"><h3>排除映射列表</h3></div>
                 <div class="card-body" id="rules-exclusions-list">
@@ -193,7 +195,7 @@ function loadRules(ruleType, targetId) {
                 + '<th style="width:140px">操作</th>'
                 + '</tr></thead><tbody>';
 
-            data.rules.forEach(function(rule) {
+            data.rules.forEach(function(rule, ruleIdx) {
                 var keywords = [];
                 try {
                     keywords = JSON.parse(rule.keywords || '[]');
@@ -204,9 +206,14 @@ function loadRules(ruleType, targetId) {
                     return '<span class="badge badge-blue" style="margin:2px">' + LSM.escapeHtml(kw) + '</span>';
                 }).join('');
 
-                var activeChecked = rule.is_active ? 'checked' : '';
-                var activeLabel = rule.is_active ? '已启用' : '已禁用';
-                var activeClass = rule.is_active ? 'badge-green' : 'badge-gray';
+                // 行内写按钮仅对管理员渲染（查看者只读；后端另有 403 兜底）
+                var actionBtns = '';
+                if (window.IS_ADMIN) {
+                    actionBtns += '<button class="btn btn-sm btn-outline" onclick="showEditRuleModal(' + rule.id + ',\'' + ruleType + '\')">编辑</button> ';
+                    actionBtns += '<button class="btn btn-sm btn-outline" onclick="deleteRule(' + rule.id + ',\'' + escapeJs(rule.name) + '\',\'' + ruleType + '\')">删除</button> ';
+                    actionBtns += '<button class="btn btn-sm btn-outline" onclick="moveRule(' + rule.id + ',\'up\',\'' + ruleType + '\')"' + (ruleIdx === 0 ? ' disabled' : '') + '>↑</button>';
+                    actionBtns += '<button class="btn btn-sm btn-outline" onclick="moveRule(' + rule.id + ',\'down\',\'' + ruleType + '\')"' + (ruleIdx === data.rules.length - 1 ? ' disabled' : '') + '>↓</button>';
+                }
 
                 html += '<tr>';
                 html += '<td>' + (rule.sort_order || 0) + '</td>';
@@ -216,34 +223,34 @@ function loadRules(ruleType, targetId) {
                 html += '<td>';
                 html += '<div id="toggle-' + ruleType + '-' + rule.id + '" data-rule-id="' + rule.id + '" data-rule-type="' + ruleType + '" data-active="' + rule.is_active + '"></div>';
                 html += '</td>';
-                html += '<td class="actions" style="white-space:nowrap">';
-                html += '<button class="btn btn-sm btn-outline" onclick="showEditRuleModal(' + rule.id + ',\'' + ruleType + '\')">编辑</button> ';
-                html += '<button class="btn btn-sm btn-outline" onclick="deleteRule(' + rule.id + ',\'' + escapeJs(rule.name) + '\',\'' + ruleType + '\')">删除</button> ';
-                html += '<button class="btn btn-sm btn-outline" onclick="moveRule(' + rule.id + ',\'up\',\'' + ruleType + '\')">↑</button>';
-                html += '<button class="btn btn-sm btn-outline" onclick="moveRule(' + rule.id + ',\'down\',\'' + ruleType + '\')">↓</button>';
-                html += '</td>';
+                html += '<td class="actions" style="white-space:nowrap">' + actionBtns + '</td>';
                 html += '</tr>';
-                // 延迟初始化 toggle，确保 DOM 渲染完成
-                setTimeout(function() {
-                    var toggleContainer = document.getElementById('toggle-' + ruleType + '-' + rule.id);
-                    if (toggleContainer) {
-                        toggleContainer.innerHTML = '';
-                        var toggle = LSM.createToggle(rule.is_active, function(checked) {
-                            toggleRuleActive(rule.id, checked, ruleType);
-                        });
-                        toggleContainer.appendChild(toggle);
-                        var label = document.createElement('span');
-                        label.className = 'toggle-label';
-                        label.style.marginLeft = '4px';
-                        label.style.fontSize = '12px';
-                        label.textContent = checked ? '已启用' : '已禁用';
-                        toggleContainer.appendChild(label);
-                    }
-                }, 50);
             });
 
             html += '</tbody></table>';
             el.innerHTML = html;
+
+            // DOM 已就绪，同步初始化 toggle（U-06 修复：删除 setTimeout 50ms hack，
+            // 初始文本用 data-active 直接同步渲染，不再引用未定义变量 checked）
+            el.querySelectorAll('[data-rule-id]').forEach(function(container) {
+                var isActive = container.dataset.active === 'true';
+                container.innerHTML = '';
+                if (window.IS_ADMIN) {
+                    var toggle = LSM.createToggle(isActive, function(checked) {
+                        toggleRuleActive(parseInt(container.dataset.ruleId, 10), checked, container.dataset.ruleType);
+                    });
+                    container.appendChild(toggle);
+                    var label = document.createElement('span');
+                    label.className = 'toggle-label';
+                    label.style.marginLeft = '4px';
+                    label.style.fontSize = '12px';
+                    label.textContent = isActive ? '已启用' : '已禁用';
+                    container.appendChild(label);
+                } else {
+                    // 查看者只读：状态徽标替代可交互 toggle
+                    container.innerHTML = '<span class="badge ' + (isActive ? 'badge-green' : 'badge-gray') + '">' + (isActive ? '已启用' : '已禁用') + '</span>';
+                }
+            });
         })
         .catch(function(e) {
             el.innerHTML = '<div class="alert alert-error">加载失败: ' + e.message + '</div>';
@@ -438,15 +445,13 @@ function moveRule(ruleId, direction, ruleType) {
     var currentIndex = -1;
 
     rows.forEach(function(row, idx) {
+        // 从行内 data-rule-id 属性读取规则 ID（不再从按钮 onclick 正则提取）
+        var ruleIdEl = row.querySelector('[data-rule-id]');
+        var rid = ruleIdEl ? parseInt(ruleIdEl.dataset.ruleId, 10) : 0;
         // 从第一个 td 获取当前 sort_order
         var sortCell = row.querySelector('td:first-child');
         var sortVal = parseInt(sortCell ? sortCell.textContent.trim() : '0');
-        // 从操作按钮获取 rule id
-        var editBtn = row.querySelector('button[onclick*="showEditRuleModal(' + ruleId);
-        if (editBtn) currentIndex = idx;
-        var btnOnclick = row.querySelector('.actions').innerHTML;
-        var idMatch = btnOnclick.match(/showEditRuleModal\((\d+)/);
-        var rid = idMatch ? parseInt(idMatch[1]) : 0;
+        if (rid === ruleId) currentIndex = idx;
         orders.push({id: rid, sort_order: sortVal});
     });
 
@@ -652,7 +657,7 @@ function loadExclusions() {
                 html += '<td><span class="badge badge-blue">' + LSM.escapeHtml(excl.province_keyword) + '</span></td>';
                 html += '<td><span class="badge badge-yellow">🚫 ' + LSM.escapeHtml(excl.excluded_keyword) + '</span></td>';
                 html += '<td>' + (excl.note ? LSM.escapeHtml(excl.note) : '-') + '</td>';
-                html += '<td><button class="btn btn-sm btn-outline" onclick="deleteExclusion(' + excl.id + ')">删除</button></td>';
+                html += '<td>' + (window.IS_ADMIN ? '<button class="btn btn-sm btn-outline" onclick="deleteExclusion(' + excl.id + ')">删除</button>' : '') + '</td>';
                 html += '</tr>';
             });
 

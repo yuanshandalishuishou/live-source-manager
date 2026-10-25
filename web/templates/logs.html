@@ -114,15 +114,32 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 // ── 应用日志（修复：fetch JSON 后按行渲染为独立 div，避免 JSON 原文显示与换行问题） ──
+// 级别处理（T01 修复）：不再将 ALL 欺诈映射为 INFO，level=ALL 直传。
+// 后端 /api/logs 原生支持 level=ALL（system.py：level.upper() != 'ALL' 时才过滤）；
+// 若后端版本不支持（400/422），降级为不带 level 拉取 + 前端按级别集合过滤。
+function fetchLogLines(level, tail) {
+    return fetch('/api/logs?level=' + encodeURIComponent(level) + '&tail=' + tail)
+        .then(function(r) {
+            if (r.status === 400 || r.status === 422) {
+                return fetch('/api/logs?tail=' + tail)
+                    .then(function(r2) { return r2.json(); })
+                    .then(function(data) {
+                        var lines = data.logs || [];
+                        if (level === 'ALL') return lines;
+                        return lines.filter(function(line) {
+                            return line.toUpperCase().indexOf(level.toUpperCase()) !== -1;
+                        });
+                    });
+            }
+            return r.json().then(function(data) { return data.logs || []; });
+        });
+}
+
 function refreshLogs() {
     const level = document.getElementById('log-level').value;
     const tail = document.getElementById('log-tail').value;
-    const levelParam = level === 'ALL' ? 'INFO' : level;
-    const url = '/api/logs?level=' + levelParam + '&tail=' + tail;
-    fetch(url)
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-            var logLines = data.logs || [];
+    fetchLogLines(level, tail)
+        .then(function(logLines) {
             var html = logLines.map(function(line) {
                 return '<div class="log-line">' + escapeHtml(line) + '</div>';
             }).join('');
@@ -131,7 +148,7 @@ function refreshLogs() {
             if (countEl) countEl.textContent = '共 ' + logLines.length + ' 行';
         })
         .catch(function(e) {
-            document.getElementById('logs-content').innerHTML = '<div class="alert alert-error">加载失败: ' + e + '</div>';
+            document.getElementById('logs-content').innerHTML = '<div class="alert alert-error">加载失败: ' + (e && e.message ? e.message : '网络错误') + '</div>';
         });
 }
 

@@ -172,7 +172,7 @@ function renderAllTabs() {
 
         // ── GitHub Tab 特殊信息栏 ──
         if (section === 'GitHub') {
-            html += '<div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;padding:12px 16px;margin-bottom:20px;font-size:13px;line-height:1.7">';
+            html += '<div style="background:var(--bg-subtle);border:1px solid var(--border);border-radius:8px;padding:12px 16px;margin-bottom:20px;font-size:13px;line-height:1.7">';
             html += '<div style="font-weight:600;margin-bottom:6px">🐙 GitHub API Token 说明</div>';
             html += '<div style="color:var(--text-light)">未配置 Token 时 GitHub API 限流为 <b>60次/时</b>，配置后提升至 <b>5000次/时</b>。Token 无需任何权限，仅用于提升配额。</div>';
             html += '<div style="color:var(--text-light);margin-top:4px">获取方式：<a href="https://github.com/settings/tokens/new" target="_blank" style="color:var(--primary)">GitHub → Settings → Developer settings → Personal access tokens → Generate new token</a>，不勾选任何权限直接生成即可。</div>';
@@ -271,23 +271,23 @@ function renderAllTabs() {
             html += '<button type="button" class="btn btn-outline btn-sm" id="btn-test-github-token" onclick="testGitHubToken()">🔌 测试 Token</button>';
             html += '<span id="github-token-status" style="font-size:13px;color:var(--text-light)"></span>';
             html += '</div>';
-            html += '<div id="github-rate-limit" style="display:none;font-size:13px;background:var(--bg-secondary);border-radius:6px;padding:10px 14px;margin-top:8px"></div>';
+            html += '<div id="github-rate-limit" style="display:none;font-size:13px;background:var(--bg-subtle);border-radius:6px;padding:10px 14px;margin-top:8px"></div>';
             html += '</div>';
         }
 
         // ── 网络(HTTPServer) Tab 重启提示 ──
         if (section === 'HTTPServer') {
-            html += '<div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;padding:12px 16px;margin-bottom:20px;font-size:13px;line-height:1.7">';
+            html += '<div style="background:var(--bg-subtle);border:1px solid var(--border);border-radius:8px;padding:12px 16px;margin-bottom:20px;font-size:13px;line-height:1.7">';
             html += '<div style="font-weight:600;margin-bottom:6px">🌐 文件发布服务说明</div>';
             html += '<div style="color:var(--text-light)">本段配置 <b>文件共享端口</b>（默认 12345）与文档根目录，用于对外发布生成的 M3U/TXT 播放列表。</div>';
             html += '<div style="color:var(--text-light);margin-top:4px">⚠️ <b>修改「文件共享端口 / 监听地址」后需重启 Web 服务才能生效</b>（端口在启动时绑定）。「文档根目录」修改后同样需重启以重新挂载。</div>';
             html += '</div>';
         }
 
-        // 独立保存按钮
+        // 独立保存按钮（仅管理员渲染；查看者只读，后端另有 403 兜底）
         html += '<div class="form-actions">';
         html += '<span class="section-save-status" id="ss-' + section + '" style="font-size:13px;flex:1;align-self:center"></span>';
-        html += '<button class="btn btn-primary btn-sm" onclick="saveSection(\'' + section + '\')" id="btn-save-' + section + '">💾 保存</button>';
+        html += window.IS_ADMIN ? '<button class="btn btn-primary btn-sm" onclick="saveSection(\'' + section + '\')" id="btn-save-' + section + '">💾 保存</button>' : '';
         html += '</div>';
 
         html += '</div>'; // card-body
@@ -308,6 +308,13 @@ function renderAllTabs() {
     html += '</div>'; // tab-content
 
     container.innerHTML = html;
+
+    // 查看者只读：字段控件统一禁用（值可见不可改；后端另有 403 兜底）
+    if (!window.IS_ADMIN) {
+        container.querySelectorAll('input, textarea, select').forEach(function(el) {
+            el.disabled = true;
+        });
+    }
 }
 
 // ── Tab 切换 ────────────────────────────────────
@@ -667,14 +674,19 @@ function updateFooter() {
         footerStatus.style.color = 'var(--warning)';
         footerModified.textContent = '修改项: ' + modifiedCount + ' 段 (' + sections.join(', ') + ')';
         footerModified.style.display = 'inline';
-        document.getElementById('modified-count').style.display = 'inline';
-        document.getElementById('modified-count').textContent = '修改项: ' + modifiedCount;
-        document.getElementById('modified-count').className = 'badge badge-yellow';
+        // #modified-count 仅在管理员工具栏渲染，查看者下为 null（U-08 修复：空值守卫）
+        const modifiedCountEl = document.getElementById('modified-count');
+        if (modifiedCountEl) {
+            modifiedCountEl.style.display = 'inline';
+            modifiedCountEl.textContent = '修改项: ' + modifiedCount;
+            modifiedCountEl.className = 'badge badge-yellow';
+        }
     } else {
         footerStatus.textContent = '✅ 全部已保存';
         footerStatus.style.color = 'var(--success)';
         footerModified.style.display = 'none';
-        document.getElementById('modified-count').style.display = 'none';
+        const modifiedCountEl = document.getElementById('modified-count');
+        if (modifiedCountEl) modifiedCountEl.style.display = 'none';
     }
 
     // 最近保存时间
@@ -804,7 +816,7 @@ function renderCategoryDict() {
         html += '<div class="dict-dim-section" style="margin-bottom:20px;padding:16px;background:var(--card-bg,#f8fafc);border-radius:8px;border:1px solid var(--border,#e2e8f0)">';
         html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">';
         html += '<h4 style="margin:0;font-size:15px">' + escapeHtml(dim.label) + ' <code style="font-size:11px;color:var(--text-light)">' + escapeHtml(dim.key) + '</code></h4>';
-        html += '<button class="btn btn-sm btn-outline" onclick="addDictOption(\'' + dim.key + '\')">+ 添加选项</button>';
+        html += (window.IS_ADMIN ? '<button class="btn btn-sm btn-outline" onclick="addDictOption(\'' + dim.key + '\')">+ 添加选项</button>' : '');
         html += '</div>';
 
         var opts = dim.options || [];
@@ -816,7 +828,7 @@ function renderCategoryDict() {
                 var opt = opts[j];
                 html += '<span class="dict-tag" id="dict-tag-' + dim.key + '-' + j + '" style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;background:#e0f2fe;color:#0369a1;border-radius:12px;font-size:13px">';
                 html += escapeHtml(opt.label || opt.value);
-                html += '<button onclick="deleteDictOption(\'' + dim.key + '\',\'' + escapeHtmlAttr(opt.value) + '\')" style="background:none;border:none;cursor:pointer;padding:0;font-size:14px;color:#94a3b8;line-height:1" title="删除">×</button>';
+                html += (window.IS_ADMIN ? '<button onclick="deleteDictOption(\'' + dim.key + '\',\'' + escapeHtmlAttr(opt.value) + '\')" style="background:none;border:none;cursor:pointer;padding:0;font-size:14px;color:#94a3b8;line-height:1" title="删除">×</button>' : '');
                 html += '</span>';
             }
             html += '</div>';

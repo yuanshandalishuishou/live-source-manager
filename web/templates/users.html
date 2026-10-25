@@ -67,7 +67,7 @@
                 <input type="hidden" id="edit-user-id">
                 <div class="form-group">
                     <label>用户名</label>
-                    <input type="text" id="edit-username" class="form-input" disabled style="background:#f1f5f9">
+                    <input type="text" id="edit-username" class="form-input" disabled>
                 </div>
                 <div class="form-group">
                     <label for="edit-display-name">显示名称</label>
@@ -111,7 +111,7 @@ document.addEventListener('DOMContentLoaded', function() {
         try {
             const resp = await fetch('/api/users', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
+                headers: {'Content-Type': 'application/json', 'X-CSRF-Token': window.__csrf_token || ''},
                 body: JSON.stringify(data)
             });
             const respData = await resp.json();
@@ -142,7 +142,7 @@ document.addEventListener('DOMContentLoaded', function() {
         try {
             const resp = await fetch('/api/users/' + userId, {
                 method: 'PUT',
-                headers: {'Content-Type': 'application/json'},
+                headers: {'Content-Type': 'application/json', 'X-CSRF-Token': window.__csrf_token || ''},
                 body: JSON.stringify(data)
             });
             const respData = await resp.json();
@@ -190,7 +190,7 @@ function hideEditUserForm() {
 
 function deleteUser(userId, username) {
     if (!confirm('确定删除用户 "' + username + '" 吗？')) return;
-    fetch('/api/users/' + userId, {method: 'DELETE'})
+    fetch('/api/users/' + userId, {method: 'DELETE', headers: {'X-CSRF-Token': window.__csrf_token || ''}})
         .then(function(r) { return r.json(); })
         .then(function(data) {
             if (data.status === 'deleted') {
@@ -205,7 +205,7 @@ function deleteUser(userId, username) {
 function toggleUser(userId, username, currentStatus) {
     var action = currentStatus ? '禁用' : '启用';
     if (!confirm('确定' + action + '用户 "' + username + '" 吗？')) return;
-    fetch('/api/users/' + userId + '/toggle', {method: 'PATCH'})
+    fetch('/api/users/' + userId + '/toggle', {method: 'PATCH', headers: {'X-CSRF-Token': window.__csrf_token || ''}})
         .then(function(r) { return r.json(); })
         .then(function(data) {
             if (data.status === 'toggled') {
@@ -232,7 +232,7 @@ function loadUsers() {
             var html = '<table class="data-table"><thead><tr><th>用户名</th><th>角色</th><th>显示名称</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead><tbody>';
             for (var i = 0; i < users.length; i++) {
                 var u = users[i];
-                var statusCls = u.is_active ? 'badge badge-valid' : 'badge badge-invalid';
+                var statusCls = u.is_active ? 'badge badge-green' : 'badge badge-gray';
                 var statusText = u.is_active ? '正常' : '已禁用';
                 var roleText = u.role === 'admin' ? '管理员' : '查看者';
                 html += '<tr>';
